@@ -35,12 +35,21 @@ local COCKPIT = first_existing({
   HOME .. "/src/agentic-ide/.claude/worktrees/*/bin/cockpit-layout.sh", -- still on a branch
 })
 
--- A window that cannot find the script must still open. Falling back to a plain
+local LOGIN_SHELL = os.getenv("SHELL") or "/bin/zsh"
+
+-- Run the layout through a LOGIN shell rather than executing it directly.
+-- Launched from Finder or Spotlight, WezTerm inherits launchd's minimal PATH, so
+-- a directly-spawned script sees no Homebrew and reports every tool as missing.
+-- A login shell sources the usual profile files and gets the real PATH.
+--
+-- A window that cannot find the script must still open: falling back to a plain
 -- shell beats spawning a path that does not exist, which kills the pane -- and
 -- with it the whole window -- before anything can be read.
-local LAUNCH = COCKPIT and { COCKPIT, START_DIR }
-    or { os.getenv("SHELL") or "/bin/zsh", "-l" }
-if not COCKPIT then
+local LAUNCH = { LOGIN_SHELL, "-l" }
+if COCKPIT then
+  LAUNCH = { LOGIN_SHELL, "-l", "-c",
+             string.format("exec '%s' '%s'", COCKPIT, START_DIR) }
+else
   wezterm.log_error("cockpit: layout script not found; opening a plain shell")
 end
 

@@ -30,6 +30,18 @@ die() {
     exec "${SHELL:-/bin/zsh}" -l
 }
 
+# A GUI app launched from Finder or Spotlight inherits launchd's minimal PATH
+# (/usr/bin:/bin:/usr/sbin:/sbin) rather than a shell's, so Homebrew is missing
+# and every tool below looks uninstalled. The config launches this through a login
+# shell, which normally fixes it; this is the safety net for when it does not.
+for p in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+    case ":$PATH:" in
+        *":$p:"*) ;;
+        *) [ -d "$p" ] && PATH="$p:$PATH" ;;
+    esac
+done
+export PATH
+
 [ -n "${WEZTERM_PANE:-}" ] || die "not inside a WezTerm pane (WEZTERM_PANE unset)"
 command -v wezterm >/dev/null || die "wezterm cli not on PATH"
 command -v revdiff >/dev/null || die "revdiff not on PATH"

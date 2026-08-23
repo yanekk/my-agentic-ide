@@ -44,17 +44,27 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 const panes = JSON.parse(fs.readFileSync(PANES, "utf8"));
 
+/**
+ * Never throws. The mux can be briefly unreachable -- a window closing, a socket
+ * being replaced -- and this daemon has to outlive that. A dead cockpit that
+ * needs restarting is far worse than a dropped keystroke.
+ */
 function wez(args, stdin) {
-  return execFileSync("wezterm", ["cli", ...args], {
-    input: stdin, encoding: "utf8",
-  });
+  try {
+    return execFileSync("wezterm", ["cli", ...args], {
+      input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
+    });
+  } catch (e) {
+    log(`wezterm cli ${args[0]} failed: ${e.message.split("\n")[0]}`);
+    return null;
+  }
 }
 
 /** Write text to a pane exactly as typed. No newline is added. */
 function sendRaw(paneId, text, { paste = false } = {}) {
   const args = ["send-text", "--pane-id", String(paneId)];
   if (!paste) args.push("--no-paste");
-  wez(args, text);
+  return wez(args, text) !== null;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -343,3 +353,8 @@ reconcile();
 
 process.on("SIGINT", () => { stopWatchers(); process.exit(0); });
 process.on("SIGTERM", () => { stopWatchers(); process.exit(0); });
+
+// Stay alive. This runs unattended behind a terminal window; dying silently means
+// the panes simply stop following and nothing says why.
+process.on("uncaughtException", (e) => log(`uncaught: ${e.stack ?? e}`));
+process.on("unhandledRejection", (e) => log(`unhandled rejection: ${e?.stack ?? e}`));
