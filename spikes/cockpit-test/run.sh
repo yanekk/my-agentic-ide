@@ -143,6 +143,30 @@ check  "detach was processed"                    "exit abc12345" "$T/daemon.log"
 refute "no stray git errors in the log"          "fatal:" "$T/daemon.log"
 
 echo
+echo "== 3b. a SECOND flush injects too (atomic rename must not kill the watch) =="
+# revdiff flushes by writing a temp file and renaming it over the target, so the
+# path gets a new inode each time. Watching the file rather than its directory
+# fired once and then watched a deleted inode forever -- the second O did nothing.
+echo "test agent" > "$FLEETSTATE"          # re-attach
+sleep 2
+: > "$CALLS"
+printf '## a.txt:1 (+)\nfirst flush\n' > "$T/state/tmp.$$" \
+    && mv "$T/state/tmp.$$" "$T/state/review-abc12345.md"
+sleep 1.5
+check "first flush injected"                     "first flush" "$CALLS"
+
+: > "$CALLS"
+printf '## a.txt:1 (+)\nfirst flush\n## b.txt:2 (+)\nsecond flush\n' > "$T/state/tmp2.$$" \
+    && mv "$T/state/tmp2.$$" "$T/state/review-abc12345.md"
+sleep 1.5
+check "second flush injected after rename"       "second flush" "$CALLS"
+
+: > "$CALLS"
+touch "$T/state/review-abc12345.md"        # same content, new mtime = new gesture
+sleep 1.5
+check "re-flushing identical content injects"    "second flush" "$CALLS"
+
+echo
 echo "== 4. switch A→B with NO log line: the pane itself is the signal =="
 : > "$CALLS"
 echo "second agent" > "$FLEETSTATE"     # nothing appended to fleet.log
