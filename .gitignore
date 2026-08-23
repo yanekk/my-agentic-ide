@@ -1,0 +1,6 @@
+# Agent worktrees live inside the repo, so without this they show up as untracked
+# noise in every review -- `revdiff --untracked` lists .claude/worktrees/ as a
+# pending change whenever you review an agent working in the repo root.
+.claude/worktrees/
+
+.DS_Store

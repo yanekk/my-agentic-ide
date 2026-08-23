@@ -44,17 +44,76 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 const panes = JSON.parse(fs.readFileSync(PANES, "utf8"));
 
+const WEZ_DIR = path.join(os.homedir(), ".local", "share", "wezterm");
+const MUX_LINK = path.join(WEZ_DIR, "default-org.wezfurlong.wezterm");
+const REPAIR_COOLDOWN_MS = 5000;
+let lastRepair = 0;
+
+function wezRaw(args, stdin) {
+  return execFileSync("wezterm", ["cli", ...args], {
+    input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
+  });
+}
+
+/**
+ * Point the mux symlink back at a socket that is actually alive.
+ *
+ * `wezterm cli` reaches the GUI through default-org.wezfurlong.wezterm, a symlink
+ * to that instance's gui-sock-<pid>. When WezTerm is killed rather than quit --
+ * or restarts -- the symlink is left aimed at a dead socket and every cli call
+ * fails with "failed to connect". The layout script repairs this at startup, but
+ * a daemon that outlives a window restart needs to repair it mid-flight too;
+ * otherwise the panes silently stop following with nothing to say why.
+ *
+ * Candidates are tried newest first and confirmed by an actual cli call, so a
+ * leftover socket file cannot be mistaken for a live one.
+ */
+function repairMuxSocket() {
+  if (Date.now() - lastRepair < REPAIR_COOLDOWN_MS) return false;
+  lastRepair = Date.now();
+
+  let candidates;
+  try {
+    candidates = fs.readdirSync(WEZ_DIR)
+      .filter((f) => f.startsWith("gui-sock-"))
+      .map((f) => {
+        const full = path.join(WEZ_DIR, f);
+        return { full, mtime: fs.statSync(full).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return false;
+  }
+
+  for (const { full } of candidates) {
+    try {
+      fs.rmSync(MUX_LINK, { force: true });
+      fs.symlinkSync(full, MUX_LINK);
+      wezRaw(["list"]);                       // prove it before believing it
+      log(`repaired stale mux socket → ${path.basename(full)}`);
+      return true;
+    } catch {
+      /* dead socket too; try the next */
+    }
+  }
+  return false;
+}
+
 /**
  * Never throws. The mux can be briefly unreachable -- a window closing, a socket
  * being replaced -- and this daemon has to outlive that. A dead cockpit that
- * needs restarting is far worse than a dropped keystroke.
+ * needs restarting is far worse than a dropped keystroke. One failure triggers a
+ * symlink repair and a single retry.
  */
 function wez(args, stdin) {
   try {
-    return execFileSync("wezterm", ["cli", ...args], {
-      input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
-    });
+    return wezRaw(args, stdin);
   } catch (e) {
+    if (repairMuxSocket()) {
+      try {
+        return wezRaw(args, stdin);
+      } catch { /* fall through to the log below */ }
+    }
     log(`wezterm cli ${args[0]} failed: ${e.message.split("\n")[0]}`);
     return null;
   }
@@ -333,7 +392,14 @@ async function paneState() {
     );
     text = stdout;
   } catch {
-    return null;                                  // pane gone or mux busy
+    // This poll is the daemon's main heartbeat, so it is also where a stale mux
+    // socket shows up first. Repair and retry once rather than going quiet.
+    if (!repairMuxSocket()) return null;
+    try {
+      text = wezRaw(["get-text", "--pane-id", String(panes.fleet)]);
+    } catch {
+      return null;                                // pane really is gone
+    }
   }
   if (text.includes(LIST_MARKER)) return { mode: "list" };
   const m = text.match(HEADER);
