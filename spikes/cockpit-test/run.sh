@@ -14,34 +14,90 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 mkdir -p "$T/bin" "$T/state"
-CALLS="$T/calls.log"
-: > "$CALLS"
-
 # --- stub wezterm ----------------------------------------------------------
-# Records every call, and emulates `cli get-text` by rendering a fake fleet pane
-# from $T/fleetstate -- which is how the daemon now decides what is attached.
-FLEETSTATE="$T/fleetstate"
+# Records every call, and emulates enough of the mux to exercise the per-agent
+# terminals: `get-text` renders a fake fleet pane from $FLEETSTATE (which is how
+# the daemon decides what is attached), and `list`/`split-pane`/
+# `move-pane-to-new-tab`/`kill-pane` operate on a tiny pane table in $PANESTATE
+# (lines: "<pane-id> <tab-id>"). Pane ids are handed out in order, so the
+# assertions below can name them.
+export CALLS="$T/calls.log"
+export FLEETSTATE="$T/fleetstate"
+export PANESTATE="$T/panestate"
+export NEXTPANE="$T/nextpane"
+export NEXTTAB="$T/nexttab"
+: > "$CALLS"
 echo list > "$FLEETSTATE"
+printf '10 0\n20 0\n30 0\n' > "$PANESTATE"   # diff, fleet, repo shell
+echo 31 > "$NEXTPANE"
+echo 1  > "$NEXTTAB"
 
-cat > "$T/bin/wezterm" <<EOF
+cat > "$T/bin/wezterm" <<'STUB'
 #!/usr/bin/env bash
-if [ "\${2:-}" = "get-text" ]; then
-    s=\$(cat "$FLEETSTATE")
-    if [ "\$s" = "list" ]; then
-        printf '  enter to collapse\n❯ describe a task for a new session\n'
-    else
-        printf -- '──────────────────────────── %s ─\n❯ \n' "\$s"
-    fi
-    exit 0
-fi
+# invoked as: wezterm cli <subcommand> [args...]
+sub="${2:-}"
+
 {
   printf 'ARGV:'
-  for a in "\$@"; do printf ' %q' "\$a"; done
+  for a in "$@"; do printf ' %q' "$a"; done
   printf '\n'
-  if [ ! -t 0 ]; then printf 'STDIN:%s\n' "\$(cat | sed -e 's/\$/\\\\n/' | tr -d '\n')"; fi
+  # ONLY send-text carries stdin. Reading it for the others hangs: node's async
+  # execFile leaves the stdin pipe open, so `cat` would block until the daemon's
+  # 4s timeout on every poll -- which looks exactly like a dead mux.
+  if [ "$sub" = "send-text" ] && [ ! -t 0 ]; then printf 'STDIN:%s\n' "$(cat | sed -e 's/$/\\n/' | tr -d '\n')"; fi
   printf 'END\n'
 } >> "$CALLS"
-EOF
+
+flag() {                       # flag <name> <argv...> -> value
+  local want="$1"; shift
+  while [ $# -gt 0 ]; do
+    [ "$1" = "$want" ] && { printf '%s' "${2:-}"; return; }
+    shift
+  done
+}
+rewrite() { mv "$PANESTATE.tmp" "$PANESTATE"; }
+
+case "$sub" in
+  get-text)
+    s=$(cat "$FLEETSTATE")
+    if [ "$s" = "list" ]; then
+        printf '  enter to collapse\n❯ describe a task for a new session\n'
+    else
+        printf -- '──────────────────────────── %s ─\n❯ \n' "$s"
+    fi
+    ;;
+  list)
+    awk 'BEGIN{printf "["}
+         { printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"sh\",\"cwd\":\"file:///tmp\",\"is_active\":false}", (NR>1 ? "," : ""), $2, $1 }
+         END{printf "]\n"}' "$PANESTATE"
+    ;;
+  split-pane)
+    moved=$(flag --move-pane-id "$@")
+    if [ -n "$moved" ]; then                       # bring a parked pane back
+      awk -v p="$moved" '{ if ($1 == p) print $1, 0; else print }' "$PANESTATE" > "$PANESTATE.tmp"
+      rewrite
+      printf '%s\n' "$moved"
+    else
+      id=$(cat "$NEXTPANE"); echo $((id + 1)) > "$NEXTPANE"
+      printf '%s 0\n' "$id" >> "$PANESTATE"
+      printf '%s\n' "$id"
+    fi
+    ;;
+  move-pane-to-new-tab)                            # park
+    pane=$(flag --pane-id "$@")
+    tab=$(cat "$NEXTTAB"); echo $((tab + 1)) > "$NEXTTAB"
+    awk -v p="$pane" -v t="$tab" '{ if ($1 == p) print $1, t; else print }' "$PANESTATE" > "$PANESTATE.tmp"
+    rewrite
+    printf '%s\n' "$tab"
+    ;;
+  kill-pane)
+    pane=$(flag --pane-id "$@")
+    awk -v p="$pane" '$1 != p' "$PANESTATE" > "$PANESTATE.tmp"
+    rewrite
+    ;;
+esac
+exit 0
+STUB
 chmod +x "$T/bin/wezterm"
 export PATH="$T/bin:$PATH"
 
@@ -65,22 +121,31 @@ echo other > "$WT2/other.txt"
 git -C "$WT2" add -A; git -C "$WT2" commit -qm base2
 
 # --- stub `claude agents --json` -------------------------------------------
-cat > "$T/bin/claude" <<EOF
-#!/usr/bin/env bash
-[ "\$1" = "agents" ] && cat <<'JSON'
+# Read from a file rather than baked in, so the fleet can lose an agent partway
+# through and the terminal reaper can be observed.
+export AGENTS_JSON="$T/agents.json"
+cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$WT","kind":"background",
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
  {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
   "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
-EOF
+
+cat > "$T/bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+[ "$1" = "agents" ] && cat "$AGENTS_JSON"
+CLAUDE
 chmod +x "$T/bin/claude"
 
 # --- state -----------------------------------------------------------------
 echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$T/state/panes.json"
 : > "$T/state/fleet.log"
 
-COCKPIT_DIR="$T/state" node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
+# HOME is redirected so the daemon's stale-socket repair looks for wezterm
+# sockets under $T and finds none, rather than relinking the real one.
+mkdir -p "$T/home"
+HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS=700 \
+    node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
 DPID=$!
 trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
 sleep 1
@@ -111,8 +176,11 @@ check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
 check "revdiff invoked with --untracked"         "revdiff --untracked" "$CALLS"
 check "diff range is the merge-base commit"      "$MB" "$CALLS"
 check "annotations routed to a per-job file"     "review-abc12345.md" "$CALLS"
-check "shell pane retargeted too"                "--pane-id 30" "$CALLS"
 check "diff pane addressed"                      "--pane-id 10" "$CALLS"
+check "repo shell parked, not reused"            "move-pane-to-new-tab --pane-id 30" "$CALLS"
+check "a terminal opened in the agent worktree"  "--cwd $WT --" "$CALLS"
+check "opened terminal is pane 31"               "opened terminal pane 31" "$T/daemon.log"
+refute "repo shell was not cd'd into the worktree" "--pane-id 30 --no-paste" "$CALLS"
 
 echo
 echo "== 2. review flushed: typed into the fleet pane, unsent =="
@@ -176,6 +244,46 @@ check "followed to the second agent's worktree"  "cd \"$WT2\"" "$CALLS"
 check "resolved it by the name in the header"    "enter def67890" "$T/daemon.log"
 check "review file re-keyed to the new job"      "review-def67890.md" "$CALLS"
 refute "did not stay on the first worktree"      "cd \"$WT\" " "$CALLS"
+check "first agent's terminal parked, not killed" "move-pane-to-new-tab --pane-id 31" "$CALLS"
+check "second agent got its own terminal"        "--cwd $WT2 --" "$CALLS"
+refute "nothing was killed on a switch"          "kill-pane" "$CALLS"
+
+echo
+echo "== 5. switching BACK restores the same terminal (the whole point) =="
+# The pane is moved, never respawned: whatever was running in it is still
+# running, and its scrollback comes back with it.
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"
+sleep 3
+
+check "the original pane is moved back in"       "--move-pane-id 31" "$CALLS"
+check "daemon says restored, not opened"         "restored terminal pane 31" "$T/daemon.log"
+refute "no second shell spawned for that agent"  "--cwd $WT --" "$CALLS"
+check "second agent's terminal parked in turn"   "move-pane-to-new-tab --pane-id 32" "$CALLS"
+
+echo
+echo "== 6. back to the list: the repo shell returns, agents keep running =="
+: > "$CALLS"
+echo list > "$FLEETSTATE"
+sleep 3
+
+check "repo shell moved back into the slot"      "--move-pane-id 30" "$CALLS"
+refute "no agent terminal was killed on detach"  "kill-pane" "$CALLS"
+
+echo
+echo "== 7. an agent that leaves the fleet has its terminal reaped =="
+# Two consecutive misses are required, so one bad read cannot kill a shell.
+: > "$CALLS"
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$WT","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+sleep 3
+
+check "the vanished agent's pane was killed"     "kill-pane --pane-id 32" "$CALLS"
+check "reaping was logged with the job id"       "agent def67890 is gone" "$T/daemon.log"
+refute "the surviving agent kept its terminal"   "kill-pane --pane-id 31" "$CALLS"
+refute "the repo shell is never reaped"          "kill-pane --pane-id 30" "$CALLS"
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

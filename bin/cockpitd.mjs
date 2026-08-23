@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // cockpitd — follow the `claude agents` fleet view and keep the cockpit in sync.
 //
-// Watches for attach/detach in the fleet view, and on each attach retargets the
-// diff pane and the shell pane at that agent's worktree. When you flush review
-// annotations (`O` in revdiff), it types them into the agent's prompt box and
-// leaves them there UNSENT for you to edit and send.
+// Watches for attach/detach in the fleet view. On each attach it retargets the
+// diff pane at that agent's worktree and swaps the bottom-right slot to that
+// agent's OWN terminal -- every agent keeps a private shell that keeps running
+// while you are elsewhere, so switching away and back resumes it mid-flight
+// rather than starting over. When you flush review annotations (`O` in revdiff),
+// it types them into the agent's prompt box and leaves them there UNSENT for you
+// to edit and send.
 //
 // Every mechanism here is measured rather than assumed; see
 // docs/tool-selection-rev2.md and spikes/pty-inject/RESULTS.md.
@@ -140,6 +143,141 @@ async function runInPane(paneId, cmd) {
   await sleep(350);
   sendRaw(paneId, "\x15");          // ctrl-U: clear the line
   sendRaw(paneId, `${cmd}\n`);
+}
+
+// ---------------------------------------------------------------------------
+// Per-agent terminals
+//
+// The bottom-right slot shows ONE pane at a time, but every agent keeps its own
+// live shell. Switching agents moves the outgoing pane into a tab of its own and
+// moves the incoming one back into the slot. WezTerm never tears the PTY down,
+// so a `sleep 60` started before a switch has ~30s left when you come back 30s
+// later -- and scrollback, cwd, history and any running job come back with it.
+//
+// Measured on wezterm 20240203 against a headless mux server (so no window was
+// disturbed to find this out):
+//
+//   * a parked pane keeps running -- a 1/s counter accrued 21 ticks while its
+//     pane sat in a background tab, and kept climbing after it was moved back;
+//   * `split-pane --move-pane-id` returns the MOVED pane's id (not a new one)
+//     and restores the 50/50 bottom row;
+//   * `kill-pane` on a parked pane disposes of its now-empty tab as well;
+//   * a parked pane is resized to the full tab (80x24 in the probe) and back on
+//     return, so it gets two SIGWINCHes per switch. Line-oriented output does not
+//     care; a full-screen TUI reflows, which is why this is written down.
+//
+// Parked panes live in tabs of the cockpit window. `enable_tab_bar = false` in
+// wezterm/cockpit.lua keeps them off screen and un-clickable -- activating one
+// would fill the window with a bare shell and look like the cockpit had vanished.
+// ---------------------------------------------------------------------------
+
+/** Key for the shell shown while the fleet LIST is up: cwd = the cockpit repo. */
+const REPO_KEY = "__repo__";
+const LOGIN_SHELL = process.env.SHELL || "/bin/zsh";
+// Tests drive this down so two strikes take seconds rather than half a minute.
+const REAP_MS = Number(process.env.COCKPIT_REAP_MS) || 15000;
+// Two consecutive misses before killing. One failed `claude agents` read must
+// never be enough to take out a shell with someone's build running in it.
+const REAP_STRIKES = 2;
+
+/** key (job id, or REPO_KEY) -> pane id. Every entry is a live PTY. */
+const terminals = new Map([[REPO_KEY, panes.shell]]);
+let visibleKey = REPO_KEY;
+const reapStrikes = new Map();
+
+function paneTable() {
+  const out = wez(["list", "--format", "json"]);
+  if (out === null) return null;
+  try { return JSON.parse(out); } catch { return null; }
+}
+
+/** Keep panes.json honest: the visible shell pane id changes on every switch. */
+function publishShellPane(paneId) {
+  panes.shell = paneId;
+  try {
+    const tmp = `${PANES}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(panes)}\n`);
+    fs.renameSync(tmp, PANES);
+  } catch { /* the daemon's own copy is what matters; the file is for humans */ }
+}
+
+/**
+ * Put `key`'s terminal in the bottom-right slot, creating it at `cwd` the first
+ * time. Whatever was there is parked, not killed.
+ */
+async function showTerminal(key, cwd, label) {
+  const table = paneTable();
+  if (!table) return log("cannot read the pane list; leaving the terminal alone");
+
+  const live = new Set(table.map((p) => p.pane_id));
+  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+
+  // Panes die with their window, and this daemon outlives windows. Forget the
+  // ghosts before trying to move any of them.
+  for (const [k, id] of terminals) if (!live.has(id)) terminals.delete(k);
+
+  if (key === visibleKey && terminals.has(key)) return;
+
+  const outgoing = terminals.get(visibleKey);
+  if (outgoing !== undefined && visibleKey !== key) {
+    wez(["move-pane-to-new-tab", "--pane-id", String(outgoing)]);
+    // Titled purely so `wezterm cli list` is readable while debugging -- the tab
+    // bar is off.
+    wez(["set-tab-title", "--pane-id", String(outgoing),
+         visibleKey === REPO_KEY ? "cockpit: repo" : `cockpit: ${visibleKey}`]);
+    // In the GUI the new tab becomes the active one, which would swap the whole
+    // cockpit off screen. Put it back.
+    if (cockpitTab !== undefined) wez(["activate-tab", "--tab-id", String(cockpitTab)]);
+  }
+
+  let id = terminals.get(key);
+  if (id !== undefined) {
+    const moved = wez(["split-pane", "--right", "--percent", "50",
+                       "--pane-id", String(panes.fleet), "--move-pane-id", String(id)]);
+    if (moved === null) { terminals.delete(key); id = undefined; }
+    else log(`restored terminal pane ${id} for ${label ?? key}`);
+  }
+  if (id === undefined) {
+    const out = wez(["split-pane", "--right", "--percent", "50",
+                     "--pane-id", String(panes.fleet), "--cwd", cwd,
+                     "--", LOGIN_SHELL, "-l"]);
+    const spawned = Number.parseInt((out ?? "").trim(), 10);
+    if (!Number.isInteger(spawned)) return log(`could not open a terminal for ${label ?? key}`);
+    id = spawned;
+    terminals.set(key, id);
+    log(`opened terminal pane ${id} for ${label ?? key} at ${cwd}`);
+  }
+
+  visibleKey = key;
+  // split-pane activates whatever it put in the slot. Switching agents happens in
+  // the fleet view, so that is where the next keystroke belongs.
+  wez(["activate-pane", "--pane-id", String(panes.fleet)]);
+  publishShellPane(id);
+}
+
+/**
+ * Kill terminals whose agent is gone from the fleet. Without this they
+ * accumulate for the life of the window, pointing at worktrees that no longer
+ * exist, with no way to reach them (their agent is no longer in the list).
+ */
+async function reapTerminals() {
+  const candidates = [...terminals.keys()].filter((k) => k !== REPO_KEY && k !== visibleKey);
+  if (!candidates.length) return;
+
+  let list;
+  try { list = await agents(); } catch { return; }
+  const alive = new Set(list.map((a) => a.id));
+
+  for (const key of candidates) {
+    if (alive.has(key)) { reapStrikes.delete(key); continue; }
+    const strikes = (reapStrikes.get(key) ?? 0) + 1;
+    reapStrikes.set(key, strikes);
+    if (strikes < REAP_STRIKES) continue;
+    wez(["kill-pane", "--pane-id", String(terminals.get(key))]);
+    log(`reaped terminal pane ${terminals.get(key)} — agent ${key} is gone`);
+    terminals.delete(key);
+    reapStrikes.delete(key);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,16 +490,19 @@ async function onEnter(jobId, knownName) {
   ].filter(Boolean).join(" ");
 
   await runInPane(panes.diff, `cd ${JSON.stringify(worktree)} && ${cmd}`);
-  await runInPane(panes.shell, `cd ${JSON.stringify(worktree)}`);
+  await showTerminal(jobId, worktree, agent.name);
 
   watchAnnotations(reviewFile);
   watchWorktree(worktree, reviewFile);
 }
 
-function onExit() {
+async function onExit() {
   if (attached) log(`exit ${attached.jobId} → fleet list`);
   stopWatchers();
   attached = null;              // blocks injection while the list is showing
+  // The agent's own terminal is parked, not closed: whatever is running in it
+  // keeps running, and entering that agent again brings it back mid-flight.
+  await showTerminal(REPO_KEY, panes.repo, "repo");
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +557,7 @@ async function reconcile() {
     if (!state) return;
 
     if (state.mode === "list") {
-      if (attached) onExit();
+      if (attached) await onExit();
       return;
     }
     if (attached && attached.name === state.name) return;   // already correct
@@ -443,6 +584,7 @@ tail(FLEET_LOG, (line) => {
   if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, 250);
 });
 setInterval(reconcile, POLL_MS);
+setInterval(reapTerminals, REAP_MS);
 reconcile();
 
 process.on("SIGINT", () => { stopWatchers(); process.exit(0); });

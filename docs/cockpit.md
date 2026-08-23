@@ -6,7 +6,7 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 ┌──────────────────────────────────────────────────┐
 │  revdiff — merge-base → working tree, --untracked │  55%
 ├─────────────────────────┬────────────────────────┤
-│  claude agents (fleet)  │  shell @ agent worktree │  45%
+│  claude agents (fleet)  │  THIS agent's terminal  │  45%
 └─────────────────────────┴────────────────────────┘
 ```
 
@@ -49,14 +49,18 @@ is deliberately cheap.
 ## Using it
 
 1. Enter an agent in the fleet view. The diff pane retargets to that agent's
-   worktree and the shell pane `cd`s there. No action needed.
+   worktree and the bottom-right pane becomes *that agent's own terminal* — its
+   own shell, history, scrollback and running jobs, opened in the worktree the
+   first time and resumed every time after. No action needed.
 2. Read the diff. While you have not annotated anything, it auto-reloads as the
    agent writes.
 3. Annotate with `a`. Type, `Enter`.
 4. Press **`O`** — flush. The review is typed into the agent's prompt box and
    **left unsent**. Edit the wording if you like, then press Enter yourself.
 5. Keep going. The pane never closes; `R` reloads by hand after the agent works.
-6. Go back to the list. The daemon stops following that agent.
+6. Go back to the list. The daemon stops following that agent, and the terminal
+   pane returns to the repo-root shell. The agent's own terminal keeps running in
+   the background — enter that agent again and you are back in it, mid-flight.
 
 ## Why the details are the way they are
 
@@ -75,12 +79,55 @@ Each of these is a measured finding, not a preference — sources in
 | Long reviews sent as bracketed paste | Over ~10 lines the prompt box collapses them to a `[Pasted text +N lines]` chip. Shorter ones stay expanded and directly editable. |
 | Watchers torn down *before* switching agents | Quitting revdiff flushes its annotations; that write must not be mistaken for a review of the agent being switched to. |
 
+## Per-agent terminals
+
+Each agent gets its own shell, and so does the fleet list (cwd = the cockpit
+repo). Only one is on screen at a time, in the bottom-right slot.
+
+Switching does **not** open a new shell or `cd` a shared one. The outgoing pane is
+moved into a tab of its own and the incoming pane is moved back into the slot:
+
+```
+switch away:   wezterm cli move-pane-to-new-tab --pane-id <outgoing>
+switch back:   wezterm cli split-pane --right --percent 50 \
+                   --pane-id <fleet> --move-pane-id <incoming>
+```
+
+WezTerm never tears the PTY down across a move, which is the whole reason this
+works: start `sleep 60`, switch away, come back 30 seconds later, and it has 30
+seconds left. Scrollback, cwd, shell history and any running job come back with
+the pane.
+
+Parked terminals live in tabs of the cockpit window, and `enable_tab_bar = false`
+keeps them off screen — activating one would fill the window with a bare shell
+and look exactly like the cockpit had vanished. They are still titled
+(`cockpit: <job id>`), so `wezterm cli list` is readable while debugging.
+
+A terminal is killed only when its agent leaves the fleet, and only after **two**
+consecutive `claude agents --json` reads fail to mention it — one bad read must
+not take out a shell with a build running in it. The repo-root shell is never
+reaped.
+
+### Measured, on wezterm 20240203
+
+Against a headless `wezterm-mux-server` (an isolated `daemon_options.pid_file` and
+socket, so no window had to be disturbed to find any of this out):
+
+| Question | Answer |
+|---|---|
+| Does a parked pane keep running? | Yes. A 1/s counter accrued 21 ticks while its pane sat in a background tab, and kept climbing after it was moved back. |
+| What does `split-pane --move-pane-id` return? | The **moved** pane's id, not a new one. The 50/50 bottom row is restored. |
+| Does scrollback survive? | Yes — text written before the park is still in the pane after it returns. |
+| Does killing a parked pane leave an empty tab? | No, `kill-pane` disposes of the tab too. |
+| What does the pane experience? | Resize to the full tab and back: two SIGWINCHes per switch. Line output is unaffected; a full-screen TUI reflows. |
+
 ## Configuration
 
 | Env | Effect |
 |---|---|
 | `COCKPIT_AUTO_RELOAD=0` | Never auto-reload the diff; `R` by hand only. |
 | `COCKPIT_DIR` | State directory (default `~/.claude/cockpit`). Used by the tests. |
+| `COCKPIT_REAP_MS` | How often to check whether a terminal's agent still exists (default 15000). Two consecutive misses kill it. The tests drive this down so the wait is seconds. |
 
 ## Testing
 
@@ -88,11 +135,19 @@ Each of these is a measured finding, not a preference — sources in
 spikes/cockpit-test/run.sh
 ```
 
-Stubs `wezterm` with a shim that records argv and stdin, builds a throwaway git
-repo with both a modified and an untracked file, and drives a full
-attach → review → detach cycle. Asserts the panes are retargeted, the review
-reaches the *fleet* pane carrying no `\r`, and that nothing is typed once the
-fleet list is showing.
+Stubs `wezterm` with a shim that records argv and stdin **and models a pane
+table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
+throwaway git repos, and drives attach → review → switch → switch back → detach →
+reap. 34 assertions. Beyond the review-injection ones it asserts that entering an
+agent *opens* a terminal in its worktree rather than `cd`-ing a shared one, that
+switching *parks* the outgoing terminal instead of killing it, that switching back
+*moves the same pane in* rather than spawning a second shell, and that a terminal
+is reaped only once its agent has left the fleet.
+
+One trap the shim has to avoid, written down because it cost a debugging round:
+only `send-text` carries stdin, and reading stdin for the other subcommands hangs
+— node's async `execFile` leaves the stdin pipe open, so `cat` blocks until the
+daemon's 4s timeout on *every* poll, which looks exactly like a dead mux.
 
 ## Verified live
 
@@ -106,6 +161,18 @@ Driven end to end on 2026-08-23 against a real WezTerm window, not a stub:
 | Shell pane | `cd`'d into the agent's worktree, branch showing in the prompt |
 | Flush a review | `injected 9 lines into 64793781 (unsent)` — text sitting in the prompt box, **not** submitted |
 | Detach, then flush again | Nothing typed. The new-session box stayed empty and the daemon logged no injection |
+
+Per-agent terminals were driven end to end the same day, against a real mux with
+the real daemon (not the stub):
+
+| Step | Observed |
+|---|---|
+| Enter agent *alpha* | Repo shell parked to a tab of its own; `opened terminal pane 6 … at …/wtA` |
+| Start a 1/s counter in it | 3 ticks recorded |
+| Switch to agent *beta* | `opened terminal pane 7 … at …/wtB`; alpha's pane 6 parked, **counter still climbing** (7, then 24) |
+| Switch back to *alpha* | `restored terminal pane 6` — the same pane, counter unbroken at 28, `ALPHA-SCROLLBACK` still on screen |
+| Back to the fleet list | `restored terminal pane 5 for repo`; both agent terminals still alive and parked |
+| Remove *beta* from the fleet | `reaped terminal pane 7 — agent bbb22222 is gone`, and its tab with it |
 
 Three things the live run taught that the stubbed test could not:
 
@@ -169,3 +236,9 @@ one**, the daemon leaves the panes where they are rather than guessing.
   you press `O`, so auto-reload's "have you started annotating?" check is based on
   the flushed file. revdiff's own confirmation prompt is the backstop.
 - **One agent at a time**, by design (R6).
+- **Terminals live and die with the window.** Closing the cockpit kills every
+  agent terminal; nothing survives a rebuild. This is the deliberate trade for not
+  putting a detached-session multiplexer (`screen`, `dtach`) between you and every
+  shell, with its own scrollback, escape key and resize quirks.
+- **Extra panes made with ALT+t are not managed.** They stay where they are while
+  the daemon swaps its own pane in and out around them, which distorts the layout.

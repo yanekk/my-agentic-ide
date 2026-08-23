@@ -1,9 +1,11 @@
 # agentic-ide
 
 A terminal cockpit for reviewing what `claude agents` produce. Entering an agent
-in the fleet view switches the diff and the terminal to that agent's worktree;
-review comments come back as a prompt typed into the agent's input box, left
-**unsent** so the wording can be edited first.
+in the fleet view switches the diff to that agent's worktree and swaps in that
+agent's **own terminal** — a private shell per agent that keeps running while you
+are elsewhere, so switching away and back resumes it mid-flight. Review comments
+come back as a prompt typed into the agent's input box, left **unsent** so the
+wording can be edited first.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -61,6 +63,10 @@ in `docs/cockpit.md` and `spikes/pty-inject/RESULTS.md`.
 | `--no-confirm-reload` deliberately **not** passed | So an auto-reload with unflushed annotations prompts instead of silently discarding them. |
 | Splits name their program explicitly | They would otherwise inherit `default_prog` and re-run the layout script forever. |
 | Layout failures `exec` a shell, never exit | As `default_prog` it is the window's only pane; exiting closes the window and takes the error message with it. |
+| Agent terminals are **moved**, never respawned | `move-pane-to-new-tab` parks the outgoing pane and `split-pane --move-pane-id` brings the incoming one back. WezTerm never tears the PTY down, so a `sleep 60` left running has ~30s left when you return 30s later. Measured: a 1/s counter accrued 21 ticks while its pane sat parked. |
+| The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
+| Parking re-activates the cockpit tab | In the GUI the newly created tab becomes the active one, which would swap the whole cockpit off screen. |
+| Reaping a terminal needs **two** consecutive misses | One failed `claude agents` read must not be enough to kill a shell with someone's build running in it. |
 
 ## How agent switching is detected
 
@@ -78,6 +84,11 @@ something was attached, never *which*.
 
 - Agent names must be unique to resolve from the pane header; ambiguity is logged
   and the panes are left alone rather than pointed at a guess.
+- Agent terminals live and die with the cockpit **window**. Closing it kills every
+  one of them; nothing survives a rebuild. (Deliberate — the alternative is a
+  detached-session multiplexer between you and every shell.)
+- A parked pane is resized to the full tab and back, so it takes two SIGWINCHes
+  per switch. Line-oriented output does not care; a full-screen TUI reflows.
 - Unflushed annotations are invisible to the daemon, so auto-reload's "have you
   started commenting?" check is based on the flushed file.
 - One agent at a time, by design.

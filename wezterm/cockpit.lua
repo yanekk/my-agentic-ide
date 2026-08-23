@@ -79,7 +79,11 @@ return {
 
   -- The diff pane leans on truecolor for syntax highlighting.
   color_scheme = "Tokyo Night",
-  hide_tab_bar_if_only_one_tab = true,
+  -- Parked agent terminals live in tabs of this window (see cockpitd.mjs). The
+  -- tab bar is off so they stay off screen and cannot be clicked into --
+  -- activating one would fill the window with a bare shell and look exactly like
+  -- the cockpit had vanished. `wezterm cli list` still shows them, titled.
+  enable_tab_bar = false,
   window_close_confirmation = "NeverPrompt",
   window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
   scrollback_lines = 10000,
