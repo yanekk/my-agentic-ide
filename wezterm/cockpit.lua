@@ -84,7 +84,14 @@ return {
   -- activating one would fill the window with a bare shell and look exactly like
   -- the cockpit had vanished. `wezterm cli list` still shows them, titled.
   enable_tab_bar = false,
-  window_close_confirmation = "NeverPrompt",
+  -- Closing this window kills every parked agent terminal with it (see the
+  -- known limits in CLAUDE.md), so the red button must ask first.
+  window_close_confirmation = "AlwaysPrompt",
+  -- ...and the prompt must actually appear. WezTerm skips it when every pane is
+  -- running a "harmless" process, and that default list is exactly the shells
+  -- the cockpit runs (zsh, bash, sh, fish, ...), so an empty list is what makes
+  -- AlwaysPrompt mean always.
+  skip_close_confirmation_for_processes_named = {},
   window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
   scrollback_lines = 10000,
 
