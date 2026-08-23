@@ -159,6 +159,40 @@ keybindings. But hosting `claude agents` inside our own pane means embedding a
 terminal emulator (node-pty + `@xterm/headless` and a redraw loop): writing a
 mini-tmux to avoid installing one. Not recommended unless both above fail.
 
+## Why the agent cannot open the review itself
+
+The revdiff plugin launches its TUI by splitting the terminal, detecting it in the
+order tmux → Zellij → herdr → kitty → wezterm → cmux → ghostty → iTerm2 → Emacs
+vterm. If none matches it **hard-errors** — there is no inline fallback:
+
+```
+error: no overlay terminal available (requires agterm, tmux, zellij, herdr,
+kitty, wezterm, cmux, ghostty, iTerm2, or emacs vterm)
+```
+
+Detection reads environment variables (`$TMUX`, `$ZELLIJ`, `$WEZTERM_PANE`, …) of
+**the process running the skill**. For a *background* agent that process is the
+daemon-side worker, and its environment is frozen at spawn time. Measured on the
+test agent (pid 15650):
+
+```
+VSCODE_INJECTION=1
+TERM=xterm-256color          # no WEZTERM_PANE, no TMUX, no ZELLIJ
+```
+
+Attaching to that agent from a WezTerm pane later does **not** change this — the
+TUI is proxied to your terminal, but the agent's own tools still run in the
+environment it was launched with. So `/revdiff` inside an attached background
+agent fails, and no amount of choosing the right terminal fixes it.
+
+**This is a design input, not just a testing nuisance.** It rules out the
+"zero-glue" idea of letting the agent drive the review, and confirms the
+architecture already chosen: **the cockpit owns the revdiff pane.** The human side
+launches revdiff in a pane it controls, reads the annotations, and types them into
+the agent — the agent is never asked to open a UI. The plugin remains useful for
+*foreground* sessions started inside a supported terminal, which is how the loop
+can be rehearsed before the daemon exists.
+
 ## Free stopgap, available tonight
 
 revdiff ships a Claude Code plugin (`/plugin install revdiff@revdiff`). If the
