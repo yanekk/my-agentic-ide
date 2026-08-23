@@ -24,7 +24,12 @@ $ claude agents --json
 Fields: `pid, id, cwd, kind, sessionId, name, startedAt, status, state`. Crucially the
 `cwd` is the **live** cwd — for the very agent §4 used as its worked example it returns the
 worktree, not the repo root. So `--json` reproduces the correct answer through a documented
-flag, and `--cwd <path>` filters to one repo.
+flag.
+
+`--cwd <path>` filters the list, but note the asymmetry (measured, see
+`spikes/pty-inject/RESULTS.md`): the **filter** matches the *repo root*, while the **`cwd`
+field** reports the *live worktree*. Passing a worktree path to `--cwd` returns `[]` even
+when agents are demonstrably inside it. Filter by repo root; read location from the field.
 
 **Consequence:** only *one* undocumented dependency remains — knowing **which** agent is
 currently attached, which still requires tailing `--debug-file` for `[FV-attach]`. Everything
@@ -172,12 +177,17 @@ carries exactly one undocumented dependency, and keeps you on the tool you alrea
 
 Ordered by how much damage they do if they turn out badly.
 
-1. **Does `sendText(text, false)` actually land in the fleet TUI's prompt box?**
-   *This is the whole design.* The fleet view is a full-screen Ink TUI; it should receive the
-   bytes as keystrokes, but multi-line text and bracketed-paste handling are unknowns — a
-   newline inside the payload would submit early. **Spike first, before anything else.**
-   Mitigation if it fails: send a single line with `\n` escaped, or write the review to a
-   file and type only `Review comments in /tmp/review-N.md`.
+1. ~~**Does `sendText(text, false)` actually land in the fleet TUI's prompt box?**~~
+   **RETIRED 2026-08-23 — verdict GO.** Verified end-to-end against 2.1.241: multi-line
+   payloads land unsent in an attached agent's prompt box, through the real fleet TUI.
+   Full evidence in `spikes/pty-inject/RESULTS.md`.
+
+   The risk as originally stated was **wrong** in a way worth keeping: `\n` does *not*
+   submit — it inserts a newline. `\r` submits, because that is what the Enter key sends.
+   The mitigation is therefore one line (`payload.replace(/\r\n|\r/g, "\n")`), not a
+   redesign. Two new hazards replaced it, both cheap: never type while the fleet view is
+   in *list* mode (its prompt box dispatches a **new agent**), and don't leave a composed
+   review pending in the box across a reload.
 
 2. **`[FV-attach]` log format changes between releases.** Undocumented, and the only remaining
    one. Mitigation: keep the parser to a single regex, and always ship a manual picker built
@@ -195,13 +205,14 @@ Ordered by how much damage they do if they turn out badly.
 
 ## 5. Recommended sequence
 
-1. **One hour with Conductor.** Establish the quality bar for comment→agent, and confirm
-   whether losing `claude agents` is a real loss to you or a theoretical one. If it's
-   theoretical, stop here — you're done and you built nothing.
-2. **Spike risk #1** (a throwaway extension: one terminal running `claude agents`, one
-   command calling `sendText`). Half a day. This is a go/no-go for Path B.
-3. If go: **build the VSCode extension** as scoped in §3C.
-4. If no-go: **fork Superset** and replace its agent manager with a fleet follower.
+1. ~~**Spike risk #1.**~~ **Done — GO.** See `spikes/pty-inject/RESULTS.md`. Path B is open.
+2. **One hour with Conductor.** Still worth it: it establishes the quality bar for
+   comment→agent, and tells you whether losing `claude agents` is a real loss or a
+   theoretical one. If theoretical, stop — you're done and you built nothing.
+3. Otherwise **build the VSCode extension** as scoped in §3C. The R5 mechanism is proven,
+   so the remaining work is ordinary: diff computation, a file watcher, and the comment UI.
+4. Fallback if VSCode's constraints bite: **fork Superset** and replace its agent manager
+   with a fleet follower.
 
 ## Sources
 
