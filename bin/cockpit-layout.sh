@@ -14,20 +14,27 @@
 #
 # WezTerm panes die with the window, so re-running this is the normal way to get
 # the cockpit back -- it is meant to be cheap, not precious.
-set -euo pipefail
+set -uo pipefail
 
 REPO="${1:-$PWD}"
 DIR="$HOME/.claude/cockpit"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -z "${WEZTERM_PANE:-}" ]; then
-    echo "error: not inside a WezTerm pane (WEZTERM_PANE unset)." >&2
-    echo "       open WezTerm and run this there." >&2
-    exit 1
-fi
-command -v wezterm >/dev/null || { echo "error: wezterm cli not on PATH" >&2; exit 1; }
-command -v revdiff >/dev/null || { echo "error: revdiff not on PATH" >&2; exit 1; }
-command -v node    >/dev/null || { echo "error: node not on PATH" >&2; exit 1; }
+# This script is WezTerm's `default_prog`, so it is pane 1 of a brand-new window.
+# If it exits, the pane closes -- and with one pane, so does the whole window,
+# which looks exactly like "WezTerm is broken" with no clue why. So every failure
+# path drops into a normal login shell instead, leaving the error on screen.
+die() {
+    echo "cockpit: $*" >&2
+    echo "cockpit: falling back to a plain shell." >&2
+    exec "${SHELL:-/bin/zsh}" -l
+}
+
+[ -n "${WEZTERM_PANE:-}" ] || die "not inside a WezTerm pane (WEZTERM_PANE unset)"
+command -v wezterm >/dev/null || die "wezterm cli not on PATH"
+command -v revdiff >/dev/null || die "revdiff not on PATH"
+command -v node    >/dev/null || die "node not on PATH"
+command -v claude  >/dev/null || die "claude not on PATH"
 
 mkdir -p "$DIR"
 FLEET="$WEZTERM_PANE"
@@ -44,10 +51,7 @@ if ! wezterm cli list >/dev/null 2>&1; then
         ln -sf "$LIVE" "$SOCK_DIR/default-org.wezfurlong.wezterm"
         echo "cockpit: repaired stale wezterm socket → $(basename "$LIVE")" >&2
     fi
-    wezterm cli list >/dev/null 2>&1 || {
-        echo "error: cannot reach the wezterm mux via 'wezterm cli'." >&2
-        exit 1
-    }
+    wezterm cli list >/dev/null 2>&1 || die "cannot reach the wezterm mux via 'wezterm cli'"
 fi
 
 # Both splits name their program explicitly. When this script is wired up as
@@ -63,6 +67,12 @@ DIFF=$(wezterm cli split-pane --top --percent 55 --pane-id "$FLEET" --cwd "$REPO
 # Bottom-right shell, scoped to the repo until an agent is entered.
 SHELL_PANE=$(wezterm cli split-pane --right --percent 50 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -l)
+
+# split-pane prints the new pane id; anything else means the layout is not what
+# the daemon will assume, so stop before writing a state file that lies.
+case "$DIFF$SHELL_PANE" in
+    *[!0-9]*|"") die "could not split panes (got diff='$DIFF' shell='$SHELL_PANE')" ;;
+esac
 
 printf '{"diff":%s,"fleet":%s,"shell":%s,"repo":"%s"}\n' \
     "$DIFF" "$FLEET" "$SHELL_PANE" "$REPO" > "$DIR/panes.json"
