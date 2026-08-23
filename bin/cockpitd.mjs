@@ -222,7 +222,7 @@ function watchWorktree(worktree, reviewFile) {
   watchers.push(w);
 }
 
-async function onEnter(jobId) {
+async function onEnter(jobId, knownName) {
   // Tear down the previous agent's watchers BEFORE touching the panes: quitting
   // revdiff flushes its annotations, and that write must not be mistaken for a
   // review of the agent we are switching to.
@@ -239,7 +239,7 @@ async function onEnter(jobId) {
 
   const worktree = agent.cwd;
   const reviewFile = path.join(DIR, `review-${jobId}.md`);
-  attached = { jobId, worktree, reviewFile };
+  attached = { jobId, worktree, reviewFile, name: knownName ?? agent.name };
   log(`enter ${jobId} "${agent.name}" → ${worktree}`);
 
   const base = mergeBase(worktree);
@@ -268,13 +268,78 @@ function onExit() {
 }
 
 // ---------------------------------------------------------------------------
+// Reconciling against what the fleet pane actually shows
+//
+// The debug log is fast but undocumented, and it only exists if the fleet view
+// was started with --debug-file. The fleet pane renders the attached agent's
+// name in its own header:
+//
+//     ────────────────────────── polish psychiatric hotline voiceover ─
+//
+// and shows "describe a task for a new session" when it is back at the list. We
+// own that pane, so `wezterm cli get-text` can read it -- a fully supported way
+// to know the truth. The log is therefore demoted to a latency hint that merely
+// triggers an immediate reconcile; this poll decides what is actually true.
+// ---------------------------------------------------------------------------
+
+const HEADER = /─{10,}\s+(\S.*?)\s+─/;
+const LIST_MARKER = "describe a task for a new session";
+const POLL_MS = 800;
+
+async function paneState() {
+  let text;
+  try {
+    const { stdout } = await execFileAsync(
+      "wezterm", ["cli", "get-text", "--pane-id", String(panes.fleet)],
+      { timeout: 4000, maxBuffer: 8 << 20 },
+    );
+    text = stdout;
+  } catch {
+    return null;                                  // pane gone or mux busy
+  }
+  if (text.includes(LIST_MARKER)) return { mode: "list" };
+  const m = text.match(HEADER);
+  return m ? { mode: "agent", name: m[1].trim() } : null;
+}
+
+let reconciling = false;
+
+async function reconcile() {
+  if (reconciling) return;
+  reconciling = true;
+  try {
+    const state = await paneState();
+    if (!state) return;
+
+    if (state.mode === "list") {
+      if (attached) onExit();
+      return;
+    }
+    if (attached && attached.name === state.name) return;   // already correct
+
+    let list;
+    try { list = await agents(); } catch { return; }
+    const hits = list.filter((a) => a.name === state.name);
+    if (hits.length !== 1) {
+      // Ambiguous or unknown: a truncated header, or two agents sharing a name.
+      // Better to leave the panes where they are than to point them at a guess.
+      if (hits.length > 1) log(`ambiguous agent name ${JSON.stringify(state.name)}`);
+      return;
+    }
+    await onEnter(hits[0].id, state.name);
+  } finally {
+    reconciling = false;
+  }
+}
 
 log(`cockpitd up · panes ${JSON.stringify(panes)} · auto-reload ${AUTO_RELOAD}`);
+
+// The log only nudges; reconcile() decides.
 tail(FLEET_LOG, (line) => {
-  const enter = line.match(ENTER);
-  if (enter) return void onEnter(enter[1]);
-  if (EXIT.test(line)) onExit();
+  if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, 250);
 });
+setInterval(reconcile, POLL_MS);
+reconcile();
 
 process.on("SIGINT", () => { stopWatchers(); process.exit(0); });
 process.on("SIGTERM", () => { stopWatchers(); process.exit(0); });

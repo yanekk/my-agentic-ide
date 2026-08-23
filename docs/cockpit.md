@@ -120,12 +120,51 @@ Three things the live run taught that the stubbed test could not:
    line at a time, so discarding a multi-line review means holding it down.
    `ctrl+y` pastes it back if you overshoot.
 
+## How switching is detected
+
+Three signals exist. The daemon uses the two that carry identity, and ignores the
+one that does not.
+
+| Signal | Identifies the agent? | Used |
+|---|---|---|
+| **Fleet pane's own header** — `wezterm cli get-text` on the pane we own | ✅ by name | **source of truth**, polled every 800ms |
+| `[FV-attach]` in `--debug-file` | ✅ by job id | latency hint only — triggers an early reconcile |
+| `~/.claude/daemon/attach-journal/*.json` | ❌ **nothing** | unused |
+
+**The attach journal cannot drive this.** It records a `gestureId`, the attaching
+client's pid, and timings — but no job id, session id, cwd, or agent name. It can
+tell you *that* something was attached, never *which*, and each attach gets a
+fresh `gestureId` so consecutive attaches of one agent cannot even be correlated.
+It is a crash beacon for attach telemetry, not a navigation log.
+
+What replaced it is better: the fleet view **renders the attached agent's name in
+its own header**, and the cockpit owns that pane —
+
+```
+──────────────────────────── polish psychiatric hotline voiceover ─
+```
+
+so `wezterm cli get-text` reads it through a supported interface, and
+`claude agents --json` maps the name to the job id and worktree. When the pane is
+back at the list it says `describe a task for a new session` instead, which is how
+detach is detected.
+
+This makes the daemon **self-correcting**: it reconciles what the panes show
+against what it believes, so it recovers from a missed event, a restart
+mid-session, or a fleet view started without `--debug-file`. The debug log is now
+only an optimisation — losing it costs up to 800ms of latency, not correctness.
+
+Two deliberate refusals: if the header name matches **no** agent, or **more than
+one**, the daemon leaves the panes where they are rather than guessing.
+
 ## Known limits
 
-- **The attach signal is undocumented.** The daemon greps `[FV-attach]` out of the
-  debug log; that format could change between Claude Code releases. Everything
-  else (`claude agents --json`) is supported CLI. If focus-following silently
-  stops after an upgrade, this is the first thing to check.
+- **Agent names must be unique to be resolvable.** Two agents sharing a name make
+  the header ambiguous; the daemon logs it and does nothing rather than pointing
+  the panes at a coin flip. The debug log still resolves those correctly by job
+  id, so this only bites if that log is unavailable *and* names collide.
+- **A very narrow fleet pane could truncate the header name**, which reads as
+  "no match" and stops following. The panes stay put; widening the window fixes it.
 - **Unflushed annotations are invisible.** The daemon only learns of a review when
   you press `O`, so auto-reload's "have you started annotating?" check is based on
   the flushed file. revdiff's own confirmation prompt is the backstop.

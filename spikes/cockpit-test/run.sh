@@ -18,8 +18,22 @@ CALLS="$T/calls.log"
 : > "$CALLS"
 
 # --- stub wezterm ----------------------------------------------------------
+# Records every call, and emulates `cli get-text` by rendering a fake fleet pane
+# from $T/fleetstate -- which is how the daemon now decides what is attached.
+FLEETSTATE="$T/fleetstate"
+echo list > "$FLEETSTATE"
+
 cat > "$T/bin/wezterm" <<EOF
 #!/usr/bin/env bash
+if [ "\${2:-}" = "get-text" ]; then
+    s=\$(cat "$FLEETSTATE")
+    if [ "\$s" = "list" ]; then
+        printf '  enter to collapse\n❯ describe a task for a new session\n'
+    else
+        printf -- '──────────────────────────── %s ─\n❯ \n' "\$s"
+    fi
+    exit 0
+fi
 {
   printf 'ARGV:'
   for a in "\$@"; do printf ' %q' "\$a"; done
@@ -42,12 +56,22 @@ git -C "$WT" checkout -qb agent-branch
 echo changed >> "$WT/tracked.txt"
 echo brand-new > "$WT/created-by-agent.txt"      # untracked, must still be reviewed
 
+# A second worktree, to prove switching between agents follows to a new folder.
+WT2="$T/worktree2"
+mkdir -p "$WT2"
+git init -q -b main "$WT2"
+git -C "$WT2" config user.email t@t; git -C "$WT2" config user.name t
+echo other > "$WT2/other.txt"
+git -C "$WT2" add -A; git -C "$WT2" commit -qm base2
+
 # --- stub `claude agents --json` -------------------------------------------
 cat > "$T/bin/claude" <<EOF
 #!/usr/bin/env bash
 [ "\$1" = "agents" ] && cat <<'JSON'
 [{"pid":1,"id":"abc12345","cwd":"$WT","kind":"background",
-  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
+ {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
+  "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 EOF
 chmod +x "$T/bin/claude"
@@ -77,8 +101,10 @@ refute() {
 
 echo
 echo "== 1. attach: panes retargeted =="
+# The pane now shows an agent; the log line is only a nudge to reconcile sooner.
+echo "test agent" > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] respawnJob abc12345: ok=false alive=true' >> "$T/state/fleet.log"
-sleep 2.5
+sleep 3
 
 MB=$(git -C "$WT" merge-base main HEAD)
 check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
@@ -101,8 +127,9 @@ refute "no carriage return in payload"           '\r' "$CALLS"
 
 echo
 echo "== 3. detach: injection refused while the fleet list is showing =="
+echo list > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] attachJob returned after 2020ms — remounting list' >> "$T/state/fleet.log"
-sleep 1
+sleep 2
 : > "$CALLS"
 printf '## tracked.txt:9 (+)\nSHOULD NOT BE SENT\n' >> "$T/state/review-abc12345.md"
 sleep 1.5
@@ -114,6 +141,17 @@ sleep 1.5
 refute "nothing typed after detach"              "SHOULD NOT BE SENT" "$CALLS"
 check  "detach was processed"                    "exit abc12345" "$T/daemon.log"
 refute "no stray git errors in the log"          "fatal:" "$T/daemon.log"
+
+echo
+echo "== 4. switch A→B with NO log line: the pane itself is the signal =="
+: > "$CALLS"
+echo "second agent" > "$FLEETSTATE"     # nothing appended to fleet.log
+sleep 3
+
+check "followed to the second agent's worktree"  "cd \"$WT2\"" "$CALLS"
+check "resolved it by the name in the header"    "enter def67890" "$T/daemon.log"
+check "review file re-keyed to the new job"      "review-def67890.md" "$CALLS"
+refute "did not stay on the first worktree"      "cd \"$WT\" " "$CALLS"
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
