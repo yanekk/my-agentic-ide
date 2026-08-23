@@ -193,7 +193,40 @@ the agent — the agent is never asked to open a UI. The plugin remains useful f
 *foreground* sessions started inside a supported terminal, which is how the loop
 can be rehearsed before the daemon exists.
 
-## Free stopgap, available tonight
+## The operating model: `O`, not `q`
+
+revdiff's *documented* flow is open → review → **quit**, emitting annotations on
+exit. That is the wrong shape for R1, where the diff pane is permanently present
+and you never quit it.
+
+The right mechanism is **`O` — flush annotations to the output file mid-session,
+without quitting.** Verified: annotate, press `O`, the status bar reports
+`Wrote 1 annotation to output file`, the file contains the anchored markdown, and
+revdiff stays open on the same diff.
+
+So the runtime loop is:
+
+```
+revdiff --untracked -o /tmp/review-<job>.md  <merge-base>     ← launched once per agent, stays up
+   │
+   ├─ you annotate ......................... a, then type
+   ├─ you press O .......................... flush, pane stays open
+   │      └─ daemon sees the file change → strips \r → writes into the fleet pane, UNSENT
+   ├─ agent works ..........................
+   ├─ daemon sends R ....................... reload, only while no annotations pending
+   └─ (repeat -- never quit)
+```
+
+Three supporting details that make it hold together:
+
+- **`R` reloads** the diff for R4, but *drops* annotations — so the daemon may only
+  auto-reload while the annotation set is empty. Once you start commenting the
+  pane freezes, which is the correct behaviour anyway.
+- **`--annotations=<file>` preloads**, so switching to another agent and back can
+  restore an in-progress review rather than losing it.
+- **`-o` is required for `O`** to work at all.
+
+## Free stopgap — probably skip it
 
 revdiff ships a Claude Code plugin (`/plugin install revdiff@revdiff`). If the
 *agent* runs `/revdiff main...HEAD`, it opens the TUI for you to annotate and the
