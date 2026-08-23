@@ -195,23 +195,51 @@ function injectReview(text) {
   log(`injected ${safe.split("\n").length} lines into ${attached.jobId} (unsent)`);
 }
 
+/**
+ * Watch for review flushes (`O` in revdiff).
+ *
+ * Two things here are deliberate, and both were learned by getting them wrong:
+ *
+ * 1. **Watch the DIRECTORY, not the file.** revdiff flushes atomically -- it
+ *    writes a temporary file and renames it over the target -- so the path gets a
+ *    new inode every time. `fs.watch` on the file follows the inode it opened
+ *    with, so it fires for the first flush and then watches a deleted file
+ *    forever. Measured: inode 32065744 → 32065765 across one flush. Directory
+ *    watches survive the replacement.
+ *
+ * 2. **Trigger on write identity, not content.** `O` is an explicit "send this to
+ *    the agent" gesture, so pressing it twice must inject twice even if nothing
+ *    changed -- the reviewer may have cleared the prompt box and want it back.
+ *    Deduplicating on content silently swallows that. Keying on mtime+size
+ *    instead collapses the several filesystem events of a single write while
+ *    still treating a second flush as a second request.
+ */
 function watchAnnotations(file) {
-  fs.writeFileSync(file, "");
-  let last = "";
+  try { fs.writeFileSync(file, ""); } catch {}
+  const name = path.basename(file);
+  let lastWrite = "";
   let timer = null;
+
   const check = () => {
-    let cur = "";
-    try { cur = fs.readFileSync(file, "utf8"); } catch { return; }
-    if (!cur.trim() || cur === last) return;
-    last = cur;
+    let st, cur;
+    try {
+      st = fs.statSync(file);
+      cur = fs.readFileSync(file, "utf8");
+    } catch {
+      return;                                   // mid-rename; the next event wins
+    }
+    const id = `${st.mtimeMs}:${st.size}`;
+    if (!cur.trim() || id === lastWrite) return;
+    lastWrite = id;
     injectReview(composePrompt(cur));
   };
-  const w = fs.watch(file, () => {
+
+  const w = fs.watch(DIR, (_event, changed) => {
+    if (changed && changed !== name) return;
     clearTimeout(timer);
     timer = setTimeout(check, ANNOTATION_DEBOUNCE_MS);
   });
   watchers.push(w);
-  return () => (last = "");
 }
 
 function watchWorktree(worktree, reviewFile) {
