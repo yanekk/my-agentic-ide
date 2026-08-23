@@ -20,8 +20,8 @@ Usage:
 import os, pty, re, select, signal, sys, termios, struct, fcntl, time
 
 COLS, ROWS = 120, 40
-SETTLE = 2.5          # seconds to wait for the TUI to paint before injecting
-OBSERVE = 3.0         # seconds to watch after injecting
+SETTLE = float(os.environ.get("PROBE_SETTLE", 2.5))   # wait for the TUI to paint
+OBSERVE = float(os.environ.get("PROBE_OBSERVE", 3.0))  # watch after injecting
 
 
 class Term:
@@ -243,6 +243,33 @@ def scenario_fleet(t):
 
 
 SCENARIOS["fleet"] = scenario_fleet
+
+
+KEYNAMES = {
+    "<cr>": "\r", "<lf>": "\n", "<esc>": "\x1b", "<tab>": "\t",
+    "<up>": "\x1b[A", "<down>": "\x1b[B", "<right>": "\x1b[C", "<left>": "\x1b[D",
+    "<space>": " ", "<bs>": "\x7f",
+}
+
+
+def scenario_keys(t):
+    """Drive any TUI from PROBE_KEYS: a ;-separated script of literals and keys.
+
+        PROBE_KEYS='<down>;<cr>;a;looks wrong;<cr>;@'
+
+    Each step is sent, then the screen is dumped, so the UI can be learned
+    incrementally instead of guessed at.
+    """
+    script = os.environ.get("PROBE_KEYS", "")
+    for i, step in enumerate(s for s in script.split(";") if s):
+        keys = KEYNAMES.get(step.lower(), step)
+        t.send(keys)
+        t.pump(float(os.environ.get("PROBE_STEP", 1.2)))
+        show(t, f"step {i + 1}: {step!r}")
+    return t
+
+
+SCENARIOS["keys"] = scenario_keys
 
 
 def main():

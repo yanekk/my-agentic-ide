@@ -221,3 +221,9 @@ Ordered by how much damage they do if they turn out badly.
 - [superset-sh/superset](https://github.com/superset-sh/superset)
 - [Best agent management tools 2026](https://nimbalyst.com/blog/best-agent-management-tools-2026/)
 - [VS Code multi-agent development](https://code.visualstudio.com/blogs/2026/02/05/multi-agent-development)
+
+---
+
+> **Superseded 2026-08-23.** Conductor was tried and rejected, adding R8–R10
+> (lightweight, monospaced throughout, keyboard-controlled). R9 disqualifies VSCode,
+> and the terminal path unblocked. See `tool-selection-rev2.md`.

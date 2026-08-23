@@ -24,6 +24,9 @@ editor" (extension ecosystem, refactoring, language support) do **not** apply.
 | R5 | **Comment → prompt, pre-filled unsent.** Comments anchored to file:line, composed into a prompt, and *typed into the agent's prompt box without submitting* so the wording can be edited before send. | This is the sharpest constraint — see below. |
 | R6 | 2–4 concurrent agents, strictly one at a time. No side-by-side comparison. | Single-context model is safe. |
 | R7 | No vim/neovim/tmux background. VSCode only. | Modal editing and multiplexer config carry real learning cost. |
+| R8 | **Lightweight.** | Added 2026-08-23 after trying Conductor: it was too heavy. |
+| R9 | **Monospaced throughout**, including UI chrome. | Rules out any GUI with proportional-font UI — VSCode's tabs, sidebars and comment threads included. |
+| R10 | **Keyboard-controlled.** | Mouse-optional, not mouse-first. |
 
 ## Explicit non-requirements
 
@@ -33,6 +36,13 @@ editor" (extension ecosystem, refactoring, language support) do **not** apply.
 - Editing, debugging, language intelligence in the agent's worktree.
 - Reviewing two agents simultaneously.
 - GitHub round-trip. Comments stay local.
+
+## Field notes
+
+**Conductor, tried 2026-08-23 — rejected.** Too heavy, not monospaced, not
+keyboard-first, and it brings its own harness. The `claude agents` model is
+actively preferred, not merely incumbent. This closes Path A (replacing the fleet
+with an orchestrator) for good and produced R8–R10 above.
 
 ## Build appetite
 
