@@ -84,10 +84,25 @@ UI — all of that is now off-the-shelf. A small daemon that:
 
 Call it a few hundred lines of Node (the only runtime already installed).
 
-## The open question: what hosts the panes?
+## Pane host: WezTerm — DECIDED 2026-08-23
 
-This is the one genuine fork left, and it is a preference call — both are
-defensible, and it is the shell you would live in daily.
+**Chosen: WezTerm.** One window that is both terminal and multiplexer, the best
+automation CLI of the candidates, and a deliberate move off the VSCode terminal.
+
+Recorded for completeness: the analysis below leaned Zellij, on the grounds that
+its always-visible keybinding bar suits someone with no multiplexer background,
+its KDL layouts are declarative, and its sessions survive a window close. That
+reasoning still stands on its own terms — it was outweighed by wanting a single
+purpose-built window. Two consequences to design around:
+
+- **No free session persistence.** WezTerm panes die with the window (a separate
+  `wezterm-mux-server` would be needed). Already an explicit non-requirement, but
+  it means the layout script must be cheap to re-run — treat relaunching the
+  cockpit as the normal case, not the exception.
+- **Keybindings are not discoverable on screen.** Worth defining a small, written-
+  down set in `.wezterm.lua` rather than relying on defaults.
+
+### The comparison, for the record
 
 **WezTerm** — terminal *and* multiplexer in one binary, so it replaces Terminal.app
 rather than nesting inside it. Its CLI is the best available for this kind of
