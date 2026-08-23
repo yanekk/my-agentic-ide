@@ -24,7 +24,10 @@ makes typing-without-submitting possible.
 - **Work in the main checkout.** Do not create git worktrees unless explicitly
   asked. (`.claude/settings.json` disables background-session auto-isolation so
   this holds for background jobs too.)
-- Commit to `main` directly unless a PR is asked for.
+- Commit to `main` directly unless a PR is asked for, and **push it**. This is
+  a private repo that sets up one person's development environment: there is no
+  shared branch to protect, and an unpushed commit is just work waiting to be
+  lost with the machine.
 - `.claude/worktrees/` is gitignored — agent worktrees live there and must not
   appear in reviews.
 
