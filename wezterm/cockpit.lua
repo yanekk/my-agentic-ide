@@ -12,14 +12,26 @@ local wezterm = require("wezterm")
 local act = wezterm.action
 
 local HOME = os.getenv("HOME")
-local START_DIR = HOME .. "/src"
 
--- Finding the layout script.
+-- Where this checkout lives, and which projects root the fleet view opens in.
 --
--- `wezterm.config_file` reports the path wezterm was pointed at, which for a
--- symlinked ~/.wezterm.lua is the SYMLINK, not its target -- so resolving
--- relative to it yields nonsense like /Users/you/../bin/cockpit-layout.sh. Try
--- candidates and pick the first that exists instead.
+-- Both are recorded by bin/install.sh rather than worked out here, because this
+-- file cannot reliably locate itself: `wezterm.config_file` reports the path
+-- wezterm was pointed at, which for a symlinked ~/.wezterm.lua is the SYMLINK,
+-- so resolving relative to it yields nonsense like /Users/you/../bin/. Guessing
+-- instead meant a hardcoded $HOME/src/agentic-ide, which broke for any other
+-- clone name or projects root (~/git on a work machine). The installer knows
+-- both for certain, so it writes them down.
+--
+-- Absent -- an un-installed checkout -- everything below falls back to the old
+-- guesses, so a plain `wezterm --config-file .../cockpit.lua start` still works.
+local function installed()
+  local ok, cfg = pcall(dofile, HOME .. "/.claude/cockpit/config.lua")
+  if ok and type(cfg) == "table" then return cfg end
+  return {}
+end
+local CFG = installed()
+
 local function first_existing(patterns)
   for _, pattern in ipairs(patterns) do
     local ok, hits = pcall(wezterm.glob, pattern)
@@ -28,12 +40,21 @@ local function first_existing(patterns)
   return nil
 end
 
+-- A default_cwd that does not exist leaves every pane starting somewhere
+-- arbitrary, so fall back to $HOME rather than trust a stale config.
+local START_DIR = first_existing({ CFG.start_dir or (HOME .. "/src") }) or HOME
+
+-- Finding the layout script: try candidates, take the first that exists.
 local CONFIG_DIR = wezterm.config_file:match("(.*)/[^/]*$") or HOME
-local COCKPIT = first_existing({
-  CONFIG_DIR .. "/../bin/cockpit-layout.sh",              -- config read from the repo
-  HOME .. "/src/agentic-ide/bin/cockpit-layout.sh",       -- merged to main
-  HOME .. "/src/agentic-ide/.claude/worktrees/*/bin/cockpit-layout.sh", -- still on a branch
-})
+local CANDIDATES = {}
+if CFG.repo then
+  table.insert(CANDIDATES, CFG.repo .. "/bin/cockpit-layout.sh")           -- installed
+  table.insert(CANDIDATES, CFG.repo .. "/.claude/worktrees/*/bin/cockpit-layout.sh")
+end
+table.insert(CANDIDATES, CONFIG_DIR .. "/../bin/cockpit-layout.sh")        -- config read from the repo
+table.insert(CANDIDATES, HOME .. "/src/agentic-ide/bin/cockpit-layout.sh") -- never installed
+table.insert(CANDIDATES, HOME .. "/src/agentic-ide/.claude/worktrees/*/bin/cockpit-layout.sh")
+local COCKPIT = first_existing(CANDIDATES)
 
 local LOGIN_SHELL = os.getenv("SHELL") or "/bin/zsh"
 
@@ -65,7 +86,7 @@ return {
   font = wezterm.font_with_fallback({ "Menlo", "Monaco", "Apple Color Emoji" }),
   font_size = 13.0,
 
-  -- Open straight into the cockpit, in ~/src.
+  -- Open straight into the cockpit, in the projects root the installer recorded.
   default_cwd = START_DIR,
   default_prog = LAUNCH,
 

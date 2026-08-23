@@ -10,28 +10,53 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 └─────────────────────────┴────────────────────────┘
 ```
 
-## Prerequisites
+## Install
 
-`wezterm`, `revdiff`, `node`, `claude`, `git`. All installed.
+```bash
+bin/install.sh                    # or: bin/install.sh --start-dir ~/git
+```
+
+Idempotent, and `--check` reports without writing anything. It does three things:
+verifies the tools below **through a login shell** (the PATH a GUI-launched
+WezTerm actually gets, which is not the one your interactive shell has), writes
+`~/.claude/cockpit/config.lua` recording this checkout and the projects root the
+fleet view opens in, and points `~/.wezterm.lua` at `wezterm/cockpit.lua`.
+
+Nothing here assumes where the repo lives or what the clone is called. The
+projects root is remembered, so later runs need `--start-dir` only when it
+changes -- `~/src` on one machine, `~/git` on another.
+
+An existing `~/.wezterm.lua` of your own is never replaced silently: the
+installer stops and tells you to either launch with `--config-file` or re-run
+with `--force`, which keeps a copy at `~/.wezterm.lua.before-cockpit`.
+
+### Prerequisites
+
+| tool | install |
+|---|---|
+| `wezterm` | `brew install --cask wezterm` |
+| `revdiff` | `brew tap umputun/apps && brew install revdiff` (third-party tap) |
+| `node` | `brew install node` |
+| `claude` | [claude.com/product/claude-code](https://claude.com/product/claude-code), then sign in |
+| `git` | `xcode-select --install` |
 
 ## Start it
 
 ```bash
-wezterm --config-file ~/src/agentic-ide/wezterm/cockpit.lua start
+wezterm --config-file <checkout>/wezterm/cockpit.lua start
 ```
 
 **Opening the window *is* starting the cockpit** — `wezterm/cockpit.lua` sets
 `default_prog` to the layout script, so the panes build themselves and the fleet
 view comes up in `~/src`. Nothing else to run.
 
-To make it your normal terminal, merge `wezterm/cockpit.lua` into
-`~/.wezterm.lua`; it is kept separate only so it can be tried without disturbing
-your existing setup.
+That form needs no installer and is how to try it without disturbing your
+existing setup. `bin/install.sh` is what makes it your normal terminal.
 
 Or drive it by hand from inside any WezTerm pane:
 
 ```bash
-~/src/agentic-ide/bin/cockpit-layout.sh ~/src/some-repo
+<checkout>/bin/cockpit-layout.sh ~/src/some-repo
 ```
 
 Either way it splits the panes, records their ids in

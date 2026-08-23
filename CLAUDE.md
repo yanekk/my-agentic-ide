@@ -30,11 +30,17 @@ makes typing-without-submitting possible.
 
 ## Running it
 
-Just open WezTerm. `~/.wezterm.lua` symlinks to `wezterm/cockpit.lua`, whose
-`default_prog` builds the layout, starts the daemon, and launches the fleet view
-in `~/src`. Re-opening the window is the supported way to rebuild everything.
+Once per machine: `bin/install.sh`. It checks the five tools, records where this
+checkout is and which projects root to open in, and points `~/.wezterm.lua` here.
+`--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
+remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
+
+After that, just open WezTerm. `~/.wezterm.lua` symlinks to `wezterm/cockpit.lua`,
+whose `default_prog` builds the layout, starts the daemon, and launches the fleet
+view. Re-opening the window is the supported way to rebuild everything.
 
 ```
+bin/install.sh          per-machine setup: prerequisites, config.lua, the symlink
 bin/cockpit-layout.sh   splits panes, records ids, starts daemon, execs fleet view
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 wezterm/cockpit.lua     window config; default_prog is the layout script
@@ -43,7 +49,8 @@ spikes/pty-inject/      PTY harness used to settle how injection behaves
 docs/cockpit.md         how it works and why; read before changing the daemon
 ```
 
-State lives in `~/.claude/cockpit/`: `panes.json`, `fleet.log`, `daemon.log`,
+State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
+file that is *not* regenerated), `panes.json`, `fleet.log`, `daemon.log`,
 `review-<jobId>.md`. Debug with `tail -f ~/.claude/cockpit/daemon.log`.
 
 ## Things that are true because they were measured
@@ -62,6 +69,7 @@ in `docs/cockpit.md` and `spikes/pty-inject/RESULTS.md`.
 | Reviews trigger on mtime+size, not content | `O` is an explicit "send this" gesture, so pressing it twice must inject twice even if nothing changed. |
 | `--no-confirm-reload` deliberately **not** passed | So an auto-reload with unflushed annotations prompts instead of silently discarding them. |
 | Splits name their program explicitly | They would otherwise inherit `default_prog` and re-run the layout script forever. |
+| The checkout's path is recorded, not derived | A symlinked `~/.wezterm.lua` makes `wezterm.config_file` report the **symlink**, so the config cannot locate its own repo. It used to guess `~/src/agentic-ide`, which is wrong for any other clone name or projects root. `bin/install.sh` writes both paths to `~/.claude/cockpit/config.lua`; the old guesses remain as fallbacks so an un-installed checkout still runs. |
 | Layout failures `exec` a shell, never exit | As `default_prog` it is the window's only pane; exiting closes the window and takes the error message with it. |
 | Agent terminals are **moved**, never respawned | `move-pane-to-new-tab` parks the outgoing pane and `split-pane --move-pane-id` brings the incoming one back. WezTerm never tears the PTY down, so a `sleep 60` left running has ~30s left when you return 30s later. Measured: a 1/s counter accrued 21 ticks while its pane sat parked. |
 | The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
