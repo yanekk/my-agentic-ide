@@ -47,6 +47,42 @@ the same PTY harness used for the injection spike. Not from docs — observed:
 - Go binary, single install, monospaced and keyboard-driven by construction.
   R8/R9/R10 satisfied for free.
 
+### Trap: agent-created files are invisible by default
+
+Found by testing against a real agent diff, and it would have been a serious bug
+in the cockpit. `git diff` does not report **untracked** files, so a plain
+`revdiff` shows only *modified* files. Agents create new files constantly — in the
+test, two of the three files the agent produced were new, and neither appeared.
+
+**The cockpit must always pass `--untracked`.** revdiff then lists them in the
+tree with a `?` marker (`M` for modified):
+
+```
+docs/research/
+ ? README.md
+ M fleet-focus.py
+ ? fleet_resolve.py
+```
+
+(`git add -N` also works and was verified, but it writes to the agent's index —
+never mutate a worktree you are only supposed to be reviewing. Use the flag.)
+
+### Getting R3's range exactly right
+
+`revdiff [base] [against]` defaults `against` to the working tree, so a single
+base argument gives *base → working tree*. That distinction decides R3:
+
+| Command | Range | Includes uncommitted? |
+|---|---|---|
+| `revdiff main...HEAD` | merge-base → HEAD | ✗ committed only |
+| `revdiff main` | main tip → working tree | ✓ but skewed if main moved |
+| **`revdiff --untracked $(git merge-base main HEAD)`** | **merge-base → working tree** | ✓ **this is R3** |
+
+Measured on this branch: `main...HEAD` reported 5 files / 827 insertions, while
+diffing from the merge-base commit reported 6 / 828 — the difference being
+uncommitted work. Resolve the merge-base per worktree rather than hardcoding
+`main`, since agents branch from wherever they started.
+
 **Its one gap is R4 (live).** There is no file watcher; `R` reloads manually, and
 reload *drops* annotations (`--no-confirm-reload` only skips the prompt, it does
 not preserve them).
