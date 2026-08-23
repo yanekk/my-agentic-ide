@@ -16,19 +16,35 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 
 ## Start it
 
-Open **WezTerm** (not the VSCode terminal — the layout script needs a real
-WezTerm pane), then:
+```bash
+wezterm --config-file ~/src/agentic-ide/wezterm/cockpit.lua start
+```
+
+**Opening the window *is* starting the cockpit** — `wezterm/cockpit.lua` sets
+`default_prog` to the layout script, so the panes build themselves and the fleet
+view comes up in `~/src`. Nothing else to run.
+
+To make it your normal terminal, merge `wezterm/cockpit.lua` into
+`~/.wezterm.lua`; it is kept separate only so it can be tried without disturbing
+your existing setup.
+
+Or drive it by hand from inside any WezTerm pane:
 
 ```bash
 ~/src/agentic-ide/bin/cockpit-layout.sh ~/src/some-repo
 ```
 
-That splits the panes, records their ids in `~/.claude/cockpit/panes.json`,
-starts the daemon, and finally `exec`s `claude agents --debug-file` into the
-bottom-left pane. The `--debug-file` is required — it is what the daemon follows.
+Either way it splits the panes, records their ids in
+`~/.claude/cockpit/panes.json`, starts one daemon (killing any previous), and
+`exec`s `claude agents --debug-file` into the bottom-left pane. The
+`--debug-file` is required — it is what the daemon follows.
 
-WezTerm panes die with the window, so re-running this script *is* the recovery
-path. It is deliberately cheap.
+The fleet view is scoped with `--cwd` to the directory you launch against, so a
+cockpit for `~/src` shows every agent under it and one for a single repo shows
+only that repo's. `COCKPIT_ALL_AGENTS=1` disables the filter.
+
+WezTerm panes die with the window, so re-running this *is* the recovery path. It
+is deliberately cheap.
 
 ## Using it
 
@@ -77,6 +93,32 @@ repo with both a modified and an untracked file, and drives a full
 attach → review → detach cycle. Asserts the panes are retargeted, the review
 reaches the *fleet* pane carrying no `\r`, and that nothing is typed once the
 fleet list is showing.
+
+## Verified live
+
+Driven end to end on 2026-08-23 against a real WezTerm window, not a stub:
+
+| Step | Observed |
+|---|---|
+| Launch | Three panes built themselves — diff 25×200 on top, fleet and shell 20 rows below |
+| Attach an agent | `enter 64793781 … → …/worktrees/requirements-and-tool-selection` in the daemon log |
+| Diff pane | revdiff up on the agent's merge-base diff, file tree populated, untracked `? cockpit.lua` listed |
+| Shell pane | `cd`'d into the agent's worktree, branch showing in the prompt |
+| Flush a review | `injected 9 lines into 64793781 (unsent)` — text sitting in the prompt box, **not** submitted |
+| Detach, then flush again | Nothing typed. The new-session box stayed empty and the daemon logged no injection |
+
+Three things the live run taught that the stubbed test could not:
+
+1. **`default_prog` recursion.** With the layout script as `default_prog`, every
+   `split-pane` would inherit it and re-run the script forever. Both splits (and
+   the ALT+t binding) now name a login shell explicitly.
+2. **Stale WezTerm socket.** Killing `wezterm-gui` rather than quitting leaves
+   `default-org.wezfurlong.wezterm` symlinked to a dead instance, and every
+   `wezterm cli` call then fails with `failed to connect`. The layout script now
+   detects this and repoints the symlink at the newest live socket.
+3. **Clearing an injected review takes several keystrokes.** `ctrl+u` kills one
+   line at a time, so discarding a multi-line review means holding it down.
+   `ctrl+y` pastes it back if you overshoot.
 
 ## Known limits
 

@@ -1,0 +1,73 @@
+-- WezTerm config for the cockpit.
+--
+-- Kept separate from your own ~/.wezterm.lua so the cockpit can be launched with
+--   wezterm --config-file <this file> start
+-- without disturbing your normal terminal setup. Merge it in later if you'd
+-- rather the cockpit just be how WezTerm always opens.
+--
+-- WezTerm shows no on-screen keybinding hints (unlike Zellij), so the bindings
+-- below are deliberately few and written down here rather than memorised.
+
+local wezterm = require("wezterm")
+local act = wezterm.action
+
+local HOME = os.getenv("HOME")
+local START_DIR = HOME .. "/src"
+
+-- Resolved relative to this config file rather than hardcoded, so the same file
+-- works from a git worktree during development and from the main checkout after
+-- it is merged.
+local CONFIG_DIR = wezterm.config_file:match("(.*)/[^/]*$")
+local COCKPIT = CONFIG_DIR .. "/../bin/cockpit-layout.sh"
+
+-- Splits must name their program explicitly. `default_prog` below launches the
+-- cockpit, and a split that inherited it would re-run the layout script and
+-- recurse without end.
+local LOGIN_SHELL = { os.getenv("SHELL") or "/bin/zsh", "-l" }
+
+return {
+  -- VSCode's default monospace stack on macOS is Menlo, then Monaco. WezTerm
+  -- otherwise uses its own bundled JetBrains Mono, which is why it looked
+  -- unfamiliar. Both of these are already on the system -- nothing to install.
+  font = wezterm.font_with_fallback({ "Menlo", "Monaco", "Apple Color Emoji" }),
+  font_size = 13.0,
+
+  -- Open straight into the cockpit, in ~/src.
+  default_cwd = START_DIR,
+  default_prog = { COCKPIT, START_DIR },
+
+  -- Big enough that revdiff's top pane is readable. The cockpit splits 55/45,
+  -- so at 46 rows the diff gets ~25 and each bottom pane ~20.
+  initial_rows = 46,
+  initial_cols = 200,
+
+  -- The diff pane leans on truecolor for syntax highlighting.
+  color_scheme = "Tokyo Night",
+  hide_tab_bar_if_only_one_tab = true,
+  window_close_confirmation = "NeverPrompt",
+  window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
+  scrollback_lines = 10000,
+
+  keys = {
+    -- Move between panes. ALT+arrow, no prefix key to remember.
+    { key = "UpArrow",    mods = "ALT", action = act.ActivatePaneDirection("Up") },
+    { key = "DownArrow",  mods = "ALT", action = act.ActivatePaneDirection("Down") },
+    { key = "LeftArrow",  mods = "ALT", action = act.ActivatePaneDirection("Left") },
+    { key = "RightArrow", mods = "ALT", action = act.ActivatePaneDirection("Right") },
+
+    -- Zoom the focused pane full-window and back. Useful for reading a big diff
+    -- without disturbing the layout the daemon depends on.
+    { key = "z", mods = "ALT", action = act.TogglePaneZoomState },
+
+    -- Another shell beside the existing one, in the same directory.
+    { key = "t", mods = "ALT", action = act.SplitPane {
+        direction = "Right",
+        size = { Percent = 50 },
+        command = { args = LOGIN_SHELL },
+    } },
+
+    -- Resize the diff/bottom split.
+    { key = "=", mods = "ALT", action = act.AdjustPaneSize { "Up", 3 } },
+    { key = "-", mods = "ALT", action = act.AdjustPaneSize { "Down", 3 } },
+  },
+}
