@@ -51,16 +51,19 @@ wezterm-mux-server --config-file "$T/wezterm.lua" --daemonize; sleep 1
 export WEZTERM_UNIX_SOCKET="$T/sock"
 cli() { wezterm --config-file "$T/wezterm.lua" cli --no-auto-start "$@"; }
 
-# Build the layout the way bin/cockpit-layout.sh does, strip included.
+# Build the layout the way bin/cockpit-layout.sh does: footer first (full width),
+# then diff / shell / strip.
 FLEET=$(cli list --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["pane_id"])')
+FOOTER=$(cli split-pane --bottom --percent 5 --pane-id "$FLEET" \
+        -- bash -lc "COCKPIT_DIR='$T/state' exec node '$ROOT/bin/cockpit-strip.mjs' footer")
 DIFF=$(cli split-pane --top --percent 55 --pane-id "$FLEET" --cwd "$T" -- bash --norc)
 SH=$(cli split-pane --right --percent 50 --pane-id "$FLEET" --cwd "$T" -- bash --norc)
 STRIP=$(cli split-pane --right --percent 20 --pane-id "$SH" \
         -- bash -lc "COCKPIT_DIR='$T/state' exec node '$ROOT/bin/cockpit-strip.mjs'")
 
 mkdir -p "$T/state"
-printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"repo":"%s"}\n' \
-    "$DIFF" "$FLEET" "$SH" "$STRIP" "$T" > "$T/state/panes.json"
+printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"foot":%s,"repo":"%s"}\n' \
+    "$DIFF" "$FLEET" "$SH" "$STRIP" "$FOOTER" "$T" > "$T/state/panes.json"
 : > "$T/state/fleet.log"; : > "$T/state/cmd"
 
 fleet_shows() {
@@ -93,22 +96,26 @@ print('yes' if any(p['pane_id']==$1 for p in json.load(sys.stdin)) else 'no')"; 
 vterm() { python3 -c "import json;print(json.load(open('$T/state/panes.json'))['shell'])"; }
 nterms(){ python3 -c "import json;print(len(json.load(open('$T/state/terminals.json'))['terminals']))" 2>/dev/null || echo 0; }
 cmd()   { printf '%s\n' "$1" >> "$T/state/cmd"; sleep 2.5; }
-# Poll: the strip's node renderer can be a beat behind the daemon on a cold start.
-strip_has() {
+# Poll: a node renderer can be a beat behind the daemon on a cold start.
+pane_has() {  # pane_has <pane-id> <text>
   for _ in $(seq 1 20); do
-    cli get-text --pane-id "$STRIP" | grep -qF "$1" && { echo yes; return; }
+    cli get-text --pane-id "$1" | grep -qF "$2" && { echo yes; return; }
     sleep 0.5
   done
   echo no
 }
 FLEET_COLS=$(cols "$FLEET")
 
-echo "== baseline: strip sits on the right edge, narrow, and renders =="
+echo "== baseline: strip on the right edge, footer full-width along the bottom =="
 want "strip is a live pane"        "yes" "$(alive "$STRIP")"
 gt   "fleet is the wide left pane" 40   "$(cols "$FLEET")"
 want "strip is narrower than the shell" "yes" \
      "$([ "$(cols "$STRIP")" -lt "$(cols "$SH")" ] && echo yes || echo no)"
-want "strip shows its heading"     "yes" "$(strip_has TERMINALS)"
+want "strip shows its heading"     "yes" "$(pane_has "$STRIP" TERMINALS)"
+# The footer and the diff pane both span the window; the fleet pane is only half.
+want "footer is full-width, like the diff pane" "$(cols "$DIFF")" "$(cols "$FOOTER")"
+gt   "...which is wider than the half-width fleet pane" "$(cols "$FLEET")" "$(cols "$FOOTER")"
+want "footer shows the key legend"  "yes" "$(pane_has "$FOOTER" "new")"
 
 echo
 echo "== enter alpha: one terminal in the slot, strip intact =="
@@ -149,6 +156,8 @@ want "beta's terminal differs from alpha's" "yes" \
 want "alpha terminal 1 still alive parked" "yes" "$(alive "$TA1")"
 want "alpha terminal 2 still alive parked" "yes" "$(alive "$TA2")"
 want "beta's list shows 1"            "1" "$(nterms)"
+want "footer untouched by the switch, still full-width" "$(cols "$DIFF")" "$(cols "$FOOTER")"
+want "footer now names the attached agent" "yes" "$(pane_has "$FOOTER" "beta agent")"
 
 echo
 echo "== back to alpha: its CURRENT terminal (#2) returns, #1 still parked =="

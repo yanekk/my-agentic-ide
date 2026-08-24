@@ -7,12 +7,15 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 │  revdiff — merge-base → working tree, --untracked │  55%
 ├─────────────────────────┬───────────────────┬────┤
 │  claude agents (fleet)  │ THIS agent's term │list│  45%
-└─────────────────────────┴───────────────────┴────┘
+├─────────────────────────┴───────────────────┴────┤
+│  ⌥t new · ⌥[ ⌥] switch · ⌥w close   (key legend)  │  footer
+└──────────────────────────────────────────────────┘
 ```
 
 The bottom-right is not one terminal but a *set* — VSCode's terminal-tab model.
 The active one fills the slot; the narrow strip on the right edge lists them all
-and marks it. `⌥t` new, `⌥[`/`⌥]` cycle, `⌥w` close. See [Multiple terminals per
+and marks it, and a full-width footer along the bottom shows the keys. `⌥t` new,
+`⌥[`/`⌥]` cycle, `⌥w` close. See [Multiple terminals per
 agent](#multiple-terminals-per-agent).
 
 ## Install
@@ -145,6 +148,20 @@ The strip is **never parked**: it is pure display (it renders `terminals.json`,
 written by the daemon on every change) and clings to the right edge for every
 agent. The one exception is a diff-slot rebuild, which parks the terminal *and*
 the strip so the full-width split can come off the fleet pane alone.
+
+### The key legend is a footer pane
+
+The gestures need to be discoverable, but WezTerm's status bar lives in the tab
+bar — and the tab bar is off, because parked terminals live in tabs and a visible
+one would look like the cockpit had vanished. So the legend is its own thin
+full-width pane along the bottom (`cockpit-strip.mjs footer`, the same renderer in
+a horizontal mode). It is split off **first**, while the fleet pane still fills
+the window, so it spans the full width; every later split happens in the region
+above it and leaves it untouched — including the diff-slot rebuild, which the
+footer sits entirely below. It renders the same `terminals.json` as the strip, so
+it also shows the attached agent's name and terminal count. Pure display, never
+parked, never managed by the daemon (`panes.json` records its id as `foot` only
+for debugging).
 
 ## Per-agent panes
 
@@ -304,12 +321,13 @@ spikes/pane-swap/live.sh           # the real daemon, real mux, real geometry
 spikes/pane-swap/live-terminals.sh # the multiple-terminals feature, end to end
 ```
 
-`live-terminals.sh` builds the layout *with* the strip and drives the real daemon
-through the command channel: it asserts the strip renders and stays on the edge,
-that `⌥t`/`⌥[`/`⌥]`/`⌥w` add/cycle/close terminals, that the active terminal keeps
-its geometry (47 cols beside a 12-col strip and a 59-col fleet pane), that every
-terminal survives a switch to another agent and back, and that the last terminal
-cannot be closed.
+`live-terminals.sh` builds the layout *with* the strip and footer and drives the
+real daemon through the command channel: it asserts the strip renders and stays on
+the edge, the footer renders the key legend full-width and survives a switch
+untouched (naming the attached agent), that `⌥t`/`⌥[`/`⌥]`/`⌥w` add/cycle/close
+terminals, that the active terminal keeps its geometry (47 cols beside a 12-col
+strip and a 59-col fleet pane), that every terminal survives a switch to another
+agent and back, and that the last terminal cannot be closed.
 
 The stub cannot see geometry, so `live.sh` drives the **real daemon** against a
 headless `wezterm-mux-server` with two throwaway worktrees and a fake `claude

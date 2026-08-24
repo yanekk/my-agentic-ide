@@ -71,6 +71,14 @@ fi
 # default would re-run this script and recurse without end.
 LOGIN_SHELL="${SHELL:-/bin/zsh}"
 
+# A thin full-width key-legend bar at the very bottom, so the terminal gestures
+# are always discoverable. Split FIRST, while the fleet pane still fills the
+# window, so it spans the full width; every later split happens in the region
+# above it and leaves it untouched (measured). It renders terminals.json in
+# `footer` mode -- pure display, so the daemon never parks or manages it.
+FOOTER=$(wezterm cli split-pane --bottom --percent 5 --pane-id "$FLEET" --cwd "$REPO" \
+       -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs' footer")
+
 # Top pane, full width, for revdiff. Splitting from the fleet pane leaves the
 # fleet pane as the bottom 45%.
 DIFF=$(wezterm cli split-pane --top --percent 55 --pane-id "$FLEET" --cwd "$REPO" \
@@ -90,12 +98,13 @@ STRIP=$(wezterm cli split-pane --right --percent 20 --pane-id "$SHELL_PANE" --cw
 
 # split-pane prints the new pane id; anything else means the layout is not what
 # the daemon will assume, so stop before writing a state file that lies.
-case "$DIFF$SHELL_PANE$STRIP" in
-    *[!0-9]*|"") die "could not split panes (got diff='$DIFF' shell='$SHELL_PANE' strip='$STRIP')" ;;
+case "$FOOTER$DIFF$SHELL_PANE$STRIP" in
+    *[!0-9]*|"") die "could not split panes (got footer='$FOOTER' diff='$DIFF' shell='$SHELL_PANE' strip='$STRIP')" ;;
 esac
 
-printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"repo":"%s"}\n' \
-    "$DIFF" "$FLEET" "$SHELL_PANE" "$STRIP" "$REPO" > "$DIR/panes.json"
+# `foot` is recorded for completeness/debugging; the daemon never touches it.
+printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"foot":%s,"repo":"%s"}\n' \
+    "$DIFF" "$FLEET" "$SHELL_PANE" "$STRIP" "$FOOTER" "$REPO" > "$DIR/panes.json"
 
 # The diff pane shows something useful before any agent is entered.
 wezterm cli send-text --pane-id "$DIFF" --no-paste \

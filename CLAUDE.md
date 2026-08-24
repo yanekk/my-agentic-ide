@@ -13,14 +13,17 @@ wording can be edited first.
 │  revdiff — the attached agent's diff              │  55%
 ├─────────────────────────┬───────────────────┬────┤
 │  claude agents (fleet)  │ shell @ worktree  │list│  45%
-└─────────────────────────┴───────────────────┴────┘
+├─────────────────────────┴───────────────────┴────┤
+│  ⌥t new · ⌥[ ⌥] switch · ⌥w close   (key legend)  │  footer
+└──────────────────────────────────────────────────┘
 ```
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
 another, `⌥[` / `⌥]` cycle, `⌥w` closes. Every terminal of every agent keeps
 running while parked, so all of them resume mid-flight on a return, not just the
-one that was on screen.
+one that was on screen. A thin full-width **footer** along the bottom always shows
+that key legend, so the gestures are discoverable without memorising them.
 
 Host is **WezTerm** — terminal and multiplexer in one, chosen for its pane-
 targeting CLI (`wezterm cli send-text --pane-id N --no-paste`), which is what
@@ -53,7 +56,7 @@ view. Re-opening the window is the supported way to rebuild everything.
 bin/install.sh          per-machine setup: prerequisites, config.lua, the symlink
 bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daemon
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
-bin/cockpit-strip.mjs   renders the per-agent terminal list in the right-edge pane
+bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (55 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
@@ -65,10 +68,10 @@ Sources for the measured claims: `docs/cockpit.md`, `spikes/pty-inject/RESULTS.m
 (injection, per-agent terminals) and `spikes/pane-swap/RESULTS.md` (the diff slot).
 
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
-file that is *not* regenerated), `panes.json` (now records the `strip` pane too),
-`fleet.log`, `daemon.log`, `review-<jobId>.md`, `terminals.json` (the strip's
-render source), and `cmd` (the command channel the terminal keybindings append
-to). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
+file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
+panes too), `fleet.log`, `daemon.log`, `review-<jobId>.md`, `terminals.json` (what
+the strip and footer render), and `cmd` (the command channel the terminal
+keybindings append to). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
 
 ## Things that are true because they were measured
 
@@ -100,6 +103,7 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | The strip is **never parked** | It is a pure display pane (`cockpit-strip.mjs` renders `terminals.json`); it stays on the right edge for every agent. A diff-slot rebuild is the one exception — it parks the terminal *and* the strip so the full-width split can come off the fleet pane alone, then moves both back. |
 | Terminal gestures go through the **daemon**, never a raw split | `⌥t`/`⌥[`/`⌥]`/`⌥w` append a verb to `~/.claude/cockpit/cmd`; the daemon owns every pane swap. A direct `SplitPane` keybinding (what `⌥t` used to be) makes an untracked pane the daemon then shuffles around it. |
 | Closing the **last** terminal is refused | The slot must always hold a terminal; `⌥w` on a lone terminal is a no-op, logged. |
+| The key legend is a **footer pane**, not a status bar | WezTerm's status bar lives in the tab bar, which is off (parked terminals live in tabs). So the legend is a thin full-width pane split off the bottom *first*, while the fleet pane still fills the window — every later split happens above it and leaves it untouched. Pure display; the daemon never manages it. |
 | The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
 | Parking re-activates the cockpit tab | In the GUI the newly created tab becomes the active one, which would swap the whole cockpit off screen. |
 | Reaping a terminal needs **two** consecutive misses | One failed `claude agents` read must not be enough to kill a shell with someone's build running in it. |
