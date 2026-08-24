@@ -675,38 +675,8 @@ function healMissingPanes() {
 }
 
 // ---------------------------------------------------------------------------
-// git / claude
+// claude
 // ---------------------------------------------------------------------------
-
-// stderr is ignored: probing for an upstream or an origin/HEAD that does not
-// exist is an expected miss, not an error worth printing.
-const git = (cwd, args) =>
-  execFileSync("git", args, {
-    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-
-/**
- * The commit an agent's work should be diffed against: the point where its
- * branch left the trunk. Agents branch from wherever they started, so the base
- * is discovered rather than hardcoded.
- */
-function mergeBase(worktree) {
-  const candidates = [];
-  try { candidates.push(git(worktree, ["rev-parse", "--abbrev-ref", "@{upstream}"])); } catch {}
-  try {
-    const head = git(worktree, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
-    candidates.push(head.replace("refs/remotes/", ""));
-  } catch {}
-  candidates.push("main", "master");
-
-  for (const base of candidates) {
-    try {
-      const mb = git(worktree, ["merge-base", base, "HEAD"]);
-      if (mb) return mb;
-    } catch {}
-  }
-  return null;
-}
 
 async function agents() {
   const { stdout } = await execFileAsync("claude", ["agents", "--json"], {
@@ -920,17 +890,19 @@ async function onEnter(jobId, knownName) {
   // entire point -- so revdiff is only started when there is no revdiff to
   // return to: a brand-new pane, or one whose revdiff was quit with `q`.
   if (shown && (shown.spawned || diffPaneStatus(shown.pane) === "shell")) {
-    const base = mergeBase(worktree);
-    if (!base) log(`warning: no merge base found in ${worktree}, showing working tree`);
-
+    // Base is HEAD, not a merge-base: the review shows the agent's UNCOMMITTED
+    // work, so a clean working tree shows an empty diff -- it matches what the
+    // agent would see from `git status`. `HEAD` is passed symbolically (not
+    // resolved to a SHA), so a reload re-reads it and committing work drops it
+    // out of the diff rather than pinning it forever.
+    //
     // --untracked is not optional: agents create new files constantly, and plain
-    // `git diff` does not report them. A single base argument diffs base ->
-    // WORKING TREE, which is what includes uncommitted work.
+    // `git diff` does not report them. `revdiff HEAD` diffs HEAD -> WORKING TREE.
     const cmd = [
       "revdiff", "--untracked",
       "-o", JSON.stringify(reviewFile),
-      base ?? "",
-    ].filter(Boolean).join(" ");
+      "HEAD",
+    ].join(" ");
 
     if (shown.spawned) await sleep(SHELL_SETTLE_MS);   // let the login shell start reading
     launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${cmd}`);

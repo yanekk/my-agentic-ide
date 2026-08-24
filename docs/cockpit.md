@@ -4,7 +4,7 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  revdiff — merge-base → working tree, --untracked │  55%
+│  revdiff — HEAD → working tree, --untracked       │  55%
 ├─────────────────────────┬───────────────────┬────┤
 │  claude agents (fleet)  │ THIS agent's term │list│  45%
 ├─────────────────────────┴───────────────────┴────┤
@@ -106,7 +106,7 @@ Each of these is a measured finding, not a preference — sources in
 | Payload has every `\r` replaced with `\n` | `\r` is what Enter sends and **submits**. `\n` merely inserts a newline. This one substitution is the whole reason the review can arrive unsent. |
 | Injection only while attached | The fleet **list** has its own prompt box that dispatches a *new agent*. Typing a review there would spawn one. |
 | `revdiff --untracked` | `git diff` does not report untracked files, and agents create new files constantly. Without this, new files are invisible. |
-| Diff range is a bare merge-base commit | `revdiff [base] [against]` defaults `against` to the working tree, so `revdiff <merge-base>` spans committed **and** uncommitted work. `main...HEAD` would miss the uncommitted part. |
+| Diff range is `HEAD`, passed symbolically | `revdiff [base] [against]` defaults `against` to the working tree, so `revdiff HEAD` diffs `HEAD` → working tree: the agent's **uncommitted** work, an empty diff on a clean tree, matching `git status`. Passing `HEAD` rather than a resolved SHA lets a reload re-read it, so committing drops work out of the diff. (A merge-base base — the old R3 — froze at launch and kept showing committed work.) |
 | Merge base is discovered, not `main` | Agents branch from wherever they started. Tries `@{upstream}`, then `origin/HEAD`, then `main`, then `master`. |
 | Auto-reload pauses once you annotate | `R` drops annotations. The pane freezes the moment you start commenting, so text cannot shift under you. |
 | `--no-confirm-reload` deliberately **not** passed | So an auto-reload with unflushed annotations prompts instead of silently discarding them. |
@@ -348,7 +348,7 @@ Driven end to end on 2026-08-23 against a real WezTerm window, not a stub:
 |---|---|
 | Launch | Three panes built themselves — diff 25×200 on top, fleet and shell 20 rows below |
 | Attach an agent | `enter 64793781 … → …/worktrees/requirements-and-tool-selection` in the daemon log |
-| Diff pane | revdiff up on the agent's merge-base diff, file tree populated, untracked `? cockpit.lua` listed |
+| Diff pane | revdiff up on the agent's `HEAD` → working-tree diff, file tree populated, untracked `? cockpit.lua` listed |
 | Shell pane | `cd`'d into the agent's worktree, branch showing in the prompt |
 | Flush a review | `injected 9 lines into 64793781 (unsent)` — text sitting in the prompt box, **not** submitted |
 | Detach, then flush again | Nothing typed. The new-session box stayed empty and the daemon logged no injection |

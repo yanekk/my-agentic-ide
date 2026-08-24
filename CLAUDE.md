@@ -84,8 +84,7 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | `\r` → `\n` on every injected payload | `\r` is what Enter sends and **submits**; `\n` only inserts a newline. This one substitution is why a review can arrive unsent. |
 | Never type unless attached to an agent | The fleet **list**'s prompt box dispatches a **new agent**; a review typed there would spawn one. |
 | `revdiff --untracked` always | `git diff` omits untracked files and agents create new files constantly — without it, new files are invisible. |
-| Diff range is a bare merge-base commit | `revdiff [base] [against]` defaults `against` to the working tree, so this spans committed *and* uncommitted work. `main...HEAD` misses the uncommitted part. |
-| Merge base is discovered, not `main` | Agents branch from wherever they started: `@{upstream}`, then `origin/HEAD`, then `main`, then `master`. |
+| Diff range is `HEAD`, passed symbolically | `revdiff --untracked HEAD` diffs `HEAD` → working tree, so the review is the agent's **uncommitted** work and a clean tree shows an empty diff — it matches what the agent sees from `git status`. Passing `HEAD` (not a resolved SHA) means a reload re-reads it, so committing work drops it out of the diff instead of pinning it. A merge-base base was tried first (see the old R3) but froze at launch: it kept showing committed work forever, and on an agent sitting on the trunk it degenerated to `HEAD` anyway. |
 | Watch the review file's **directory** | revdiff flushes atomically (write temp + rename), so the path gets a new inode each time and a file watch goes deaf after one flush. |
 | Reviews trigger on mtime+size, not content | `O` is an explicit "send this" gesture, so pressing it twice must inject twice even if nothing changed. |
 | `--no-confirm-reload` deliberately **not** passed | So an auto-reload with unflushed annotations prompts instead of silently discarding them. |

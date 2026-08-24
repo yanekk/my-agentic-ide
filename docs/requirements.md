@@ -19,7 +19,7 @@ editor" (extension ecosystem, refactoring, language support) do **not** apply.
 |---|---|---|
 | R1 | **One window, three panes.** Top: diff, full width. Bottom-left: `claude agents`. Bottom-right: terminal scoped to the current agent's worktree, with a *list* of terminals on its right edge and a way to add more (VSCode's terminal-tab UX). | The layout is specified, not approximate. |
 | R2 | **Auto-follow on attach.** Entering an agent in the fleet TUI must switch the diff and the terminal cwd with no user action. | Signal is solved — see `research/claude-agents-watching.md`. |
-| R3 | **Diff = merge-base → now.** Cumulative agent contribution: worktree commits *plus* uncommitted changes, against the branch point with main. | Not `git diff`, not per-commit. |
+| R3 | **Diff = `HEAD` → now.** The agent's *uncommitted* work (`revdiff --untracked HEAD`): a clean working tree shows an empty diff, matching `git status`. | Superseded the original "merge-base → now" (worktree commits plus uncommitted changes): that base froze at launch and kept showing already-committed work on a clean tree, and degenerated to `HEAD` for an agent on the trunk. |
 | R4 | **Live diff.** Updates as the agent writes files. | Watch the worktree; refresh continuously. |
 | R5 | **Comment → prompt, pre-filled unsent.** Comments anchored to file:line, composed into a prompt, and *typed into the agent's prompt box without submitting* so the wording can be edited before send. | This is the sharpest constraint — see below. |
 | R6 | 2–4 concurrent agents, strictly one at a time. No side-by-side comparison. | Single-context model is safe. |

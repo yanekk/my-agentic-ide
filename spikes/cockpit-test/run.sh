@@ -209,10 +209,9 @@ echo "test agent" > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] respawnJob abc12345: ok=false alive=true' >> "$T/state/fleet.log"
 sleep 3
 
-MB=$(git -C "$WT" merge-base main HEAD)
 check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
 check "revdiff invoked with --untracked"         "revdiff --untracked" "$CALLS"
-check "diff range is the merge-base commit"      "$MB" "$CALLS"
+check "diff range is HEAD -> working tree"       "revdiff --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "annotations routed to a per-job file"     "review-abc12345.md" "$CALLS"
 check "the agent got its OWN diff pane"          "opened diff pane 31" "$T/daemon.log"
 check "revdiff typed into that pane, not the old one" "--pane-id 31 --no-paste" "$CALLS"
