@@ -49,7 +49,7 @@ export WEZTERM_UNIX_SOCKET="$T/sock"
 echo "### 1. the footer's rows through every swap, split with --percent 5"
 FLEET=$(cli list --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["pane_id"])')
 FOOT=$(cli split-pane --bottom --percent 5 --pane-id "$FLEET" -- bash --norc)
-DIFF=$(cli split-pane --top --percent 55 --pane-id "$FLEET" -- bash --norc)
+DIFF=$(cli split-pane --top --percent 42 --pane-id "$FLEET" -- bash --norc)
 SH=$(cli split-pane --right --percent 50 --pane-id "$FLEET" -- bash --norc)
 STRIP=$(cli split-pane --right --percent 20 --pane-id "$SH" -- bash --norc)
 echo "  layout fleet=$FLEET foot=$FOOT diff=$DIFF sh=$SH strip=$STRIP"
@@ -75,7 +75,7 @@ cli activate-tab --pane-id "$FLEET" >/dev/null 2>&1; sleep 0.5
 cli move-pane-to-new-tab --pane-id "$STRIP" >/dev/null
 cli activate-tab --pane-id "$FLEET" >/dev/null 2>&1; sleep 0.5
 echo "  mid-rebuild, fleet and footer alone in the tab:"; geo
-cli split-pane --top --percent 55 --pane-id "$FLEET" -- bash --norc >/dev/null; sleep 0.5
+cli split-pane --top --percent 42 --pane-id "$FLEET" -- bash --norc >/dev/null; sleep 0.5
 cli split-pane --right --percent 50 --pane-id "$FLEET" --move-pane-id "$S2" >/dev/null; sleep 0.5
 cli split-pane --right --percent 20 --pane-id "$S2" --move-pane-id "$STRIP" >/dev/null; sleep 0.5
 echo "  after a full diff-slot rebuild:"; geo
