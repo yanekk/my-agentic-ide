@@ -35,8 +35,8 @@ function read() {
 }
 
 // The daemon persists one of these mode names; anything else falls back to the
-// default label rather than showing a raw token.
-const DIFF_MODE_LABELS = { uncommitted: "uncommitted", lastcommit: "last commit" };
+// default (uncommitted) rather than showing a raw token.
+const DIFF_MODE_LABELS = { uncommitted: "Uncommitted Changes", lastcommit: "Last Commit" };
 
 // Name a terminal by what is RUNNING in it, VSCode-style: `zsh` at a prompt,
 // `node`/`npm`/`vim` while a command is in the foreground. WezTerm's pane title
@@ -63,13 +63,17 @@ function renderFooter() {
   const { agent, diffMode, terminals } = read();
   const attached = agent && agent !== "repo";
   const n = terminals.length;
-  const modeLabel = DIFF_MODE_LABELS[diffMode] ?? DIFF_MODE_LABELS.uncommitted;
+  const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
   const left = attached
     ? `${ESC}1m${agent}${ESC}0m${ESC}2m · ${n} terminal${n === 1 ? "" : "s"}${ESC}0m`
     : `${ESC}2menter an agent to open terminals${ESC}0m`;
-  // The diff-mode indicator doubles as the hint for ⌥[/⌥], which switch the mode
-  // when the diff pane is focused and terminals otherwise.
-  const diff = `${ESC}2mdiff${ESC}0m ${ESC}1m${modeLabel}${ESC}0m ${ESC}2m(⌥[ ⌥] in diff pane)${ESC}0m`;
+  // Both modes are shown with the active one highlighted (reverse video), so the
+  // current range is legible at a glance. It doubles as the hint for ⌥[/⌥], which
+  // switch the mode when the diff pane is focused and terminals otherwise.
+  const opt = (key) => key === active
+    ? `${ESC}7m ${DIFF_MODE_LABELS[key]} ${ESC}0m`
+    : `${ESC}2m${DIFF_MODE_LABELS[key]}${ESC}0m`;
+  const diff = `${ESC}2mDiff mode:${ESC}0m ${opt("uncommitted")}${ESC}2m | ${ESC}0m${opt("lastcommit")}`;
   const keys = [
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
