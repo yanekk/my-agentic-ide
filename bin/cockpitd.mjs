@@ -28,6 +28,11 @@ const execFileAsync = promisify(execFile);
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const PANES = path.join(DIR, "panes.json");
 const FLEET_LOG = path.join(DIR, "fleet.log");
+// State for the terminal-list strip, and the command channel the WezTerm
+// keybindings append to (new/next/prev/close). Both are files: the strip watches
+// TERMS, the daemon tails CMD_FILE.
+const TERMS = path.join(DIR, "terminals.json");
+const CMD_FILE = path.join(DIR, "cmd");
 
 // Auto-reload the diff while the agent writes. `R` in revdiff drops annotations,
 // but revdiff prompts first (we deliberately do NOT pass --no-confirm-reload), so
@@ -230,13 +235,64 @@ const REAP_MS = Number(process.env.COCKPIT_REAP_MS) || 15000;
 // never be enough to take out a shell with someone's build running in it.
 const REAP_STRIKES = 2;
 
-/** key (job id, or REPO_KEY) -> pane id. Every entry is a live PTY. */
-const terminals = new Map([[REPO_KEY, panes.shell]]);
+/**
+ * key (job id, or REPO_KEY) -> { panes: [id,...], cur }. Every id is a live PTY.
+ *
+ * An agent has ONE diff but MANY terminals -- VSCode's terminal-tab model. Only
+ * `cur`'s pane is in the slot at a time; the rest are parked in tabs of their
+ * own, still running. The repo (fleet-list) context keeps a single shell.
+ */
+const terminals = new Map([[REPO_KEY, { panes: [panes.shell], cur: 0 }]]);
 let visibleKey = REPO_KEY;
+/** How many terminals one agent may open. A backstop, not a real ceiling. */
+const MAX_TERMS = 8;
 /** The same, for the diff slot: one live revdiff per agent. */
 const diffs = new Map([[REPO_KEY, panes.diff]]);
 let visibleDiff = REPO_KEY;
 const reapStrikes = new Map();
+
+/** The pane currently shown for `key`, or undefined if it has none live. */
+function curTermId(key) {
+  const t = terminals.get(key);
+  if (!t || !t.panes.length) return undefined;
+  if (t.cur >= t.panes.length) t.cur = t.panes.length - 1;
+  return t.panes[t.cur];
+}
+
+/** Drop pane ids that no longer exist; forget an agent whose last one is gone. */
+function pruneDeadTerminals(live) {
+  for (const [k, t] of terminals) {
+    const before = t.panes.length;
+    t.panes = t.panes.filter((id) => live.has(id));
+    if (t.cur >= t.panes.length) t.cur = Math.max(0, t.panes.length - 1);
+    if (t.panes.length !== before && !t.panes.length && k !== REPO_KEY) terminals.delete(k);
+  }
+}
+
+/** Drop one pane id from an agent's list, keeping `cur` in range. */
+function removeTerminal(entry, id) {
+  const i = entry.panes.indexOf(id);
+  if (i < 0) return;
+  entry.panes.splice(i, 1);
+  if (entry.cur >= entry.panes.length) entry.cur = Math.max(0, entry.panes.length - 1);
+}
+
+/**
+ * Publish the visible agent's terminal list for the strip renderer
+ * (bin/cockpit-strip.mjs), which draws it in the always-present right-edge pane.
+ * Written atomically so the strip never reads a half-file.
+ */
+function writeTerminals(table = paneTable()) {
+  const t = terminals.get(visibleKey);
+  const titleOf = (id) => table?.find((p) => p.pane_id === id)?.title ?? "shell";
+  const list = t ? t.panes.map((id, i) => ({ n: i + 1, active: i === t.cur, title: titleOf(id) })) : [];
+  const agent = visibleKey === REPO_KEY ? "repo" : (attached?.name ?? visibleKey);
+  try {
+    const tmp = `${TERMS}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify({ agent, terminals: list })}\n`);
+    fs.renameSync(tmp, TERMS);
+  } catch { /* the strip just keeps its last frame */ }
+}
 
 function paneTable() {
   const out = wez(["list", "--format", "json"]);
@@ -269,8 +325,49 @@ function parkPane(paneId, label, cockpitTab) {
 }
 
 /**
- * Put `key`'s terminal in the bottom-right slot, creating it at `cwd` the first
- * time. Whatever was there is parked, not killed.
+ * Put a pane into the bottom-right terminal slot, which sits BETWEEN the fleet
+ * pane (left) and the strip (right).
+ *
+ * `anchor` is the pane that currently holds the slot. The incoming pane is split
+ * INTO it at 50%, and the caller disposes of the anchor afterwards, so the
+ * incoming inherits the slot's exact geometry regardless of its neighbours --
+ * the same trick the diff slot uses. When the slot is EMPTY (anchor undefined),
+ * the strip is parked so the split can come off the fleet pane and span the whole
+ * bottom-right region, then the strip is moved back to its edge. All four cases
+ * measured against a headless mux; see spikes/pane-swap.
+ *
+ * `spec` is { moveId } to bring a parked pane back, or { cwd } to spawn a fresh
+ * login shell. Returns the pane id now in the slot, or undefined on failure.
+ */
+function insertIntoSlot(anchor, spec, cockpitTab) {
+  const tail = spec.moveId !== undefined
+    ? ["--move-pane-id", String(spec.moveId)]
+    : ["--cwd", spec.cwd, "--", LOGIN_SHELL, "-l"];
+
+  let out;
+  if (anchor !== undefined) {
+    out = wez(["split-pane", "--right", "--percent", "50", "--pane-id", String(anchor), ...tail]);
+  } else {
+    const strip = panes.strip;
+    if (strip !== undefined) parkPane(strip, "strip", cockpitTab);
+    out = wez(["split-pane", "--right", "--percent", "50", "--pane-id", String(panes.fleet), ...tail]);
+    const gap = Number.parseInt((out ?? "").trim(), 10);
+    if (strip !== undefined && Number.isInteger(gap)) {
+      wez(["split-pane", "--right", "--percent", "20", "--pane-id", String(gap), "--move-pane-id", String(strip)]);
+    }
+  }
+  const id = Number.parseInt((out ?? "").trim(), 10);
+  return Number.isInteger(id) ? id : undefined;
+}
+
+/** Is `id` a live pane sitting in the cockpit tab (i.e. actually in a slot)? */
+function inCockpit(id, table, cockpitTab) {
+  return id !== undefined && table.find((p) => p.pane_id === id)?.tab_id === cockpitTab;
+}
+
+/**
+ * Show `key`'s CURRENT terminal in the bottom-right slot, creating the first one
+ * at `cwd`. Whatever held the slot is parked, not killed.
  */
 async function showTerminal(key, cwd, label) {
   const table = paneTable();
@@ -281,38 +378,112 @@ async function showTerminal(key, cwd, label) {
 
   // Panes die with their window, and this daemon outlives windows. Forget the
   // ghosts before trying to move any of them.
-  for (const [k, id] of terminals) if (!live.has(id)) terminals.delete(k);
+  pruneDeadTerminals(live);
+  if (!terminals.has(key)) terminals.set(key, { panes: [], cur: 0 });
+  const entry = terminals.get(key);
 
-  if (key === visibleKey && terminals.has(key)) return;
+  const outgoing = curTermId(visibleKey);
+  const anchor = inCockpit(outgoing, table, cockpitTab) ? outgoing : undefined;
 
-  const outgoing = terminals.get(visibleKey);
-  if (outgoing !== undefined && visibleKey !== key) {
-    parkPane(outgoing, visibleKey === REPO_KEY ? "repo" : visibleKey, cockpitTab);
+  // Already showing this key's current terminal, and it really is in the slot:
+  // returning types nothing, which is the whole point of parking.
+  if (key === visibleKey && anchor !== undefined) return writeTerminals(table);
+
+  let incoming = curTermId(key);
+  if (incoming !== undefined) {
+    const moved = insertIntoSlot(anchor, { moveId: incoming }, cockpitTab);
+    if (moved === undefined) { removeTerminal(entry, incoming); incoming = undefined; }
+    else log(`restored terminal pane ${incoming} for ${label ?? key}`);
+  }
+  if (incoming === undefined) {
+    incoming = insertIntoSlot(anchor, { cwd }, cockpitTab);
+    if (incoming === undefined) return log(`could not open a terminal for ${label ?? key}`);
+    entry.panes.push(incoming);
+    entry.cur = entry.panes.length - 1;
+    log(`opened terminal pane ${incoming} for ${label ?? key} at ${cwd}`);
   }
 
-  let id = terminals.get(key);
-  if (id !== undefined) {
-    const moved = wez(["split-pane", "--right", "--percent", "50",
-                       "--pane-id", String(panes.fleet), "--move-pane-id", String(id)]);
-    if (moved === null) { terminals.delete(key); id = undefined; }
-    else log(`restored terminal pane ${id} for ${label ?? key}`);
+  if (anchor !== undefined && anchor !== incoming) {
+    parkPane(anchor, visibleKey === REPO_KEY ? "repo" : visibleKey, cockpitTab);
   }
-  if (id === undefined) {
-    const out = wez(["split-pane", "--right", "--percent", "50",
-                     "--pane-id", String(panes.fleet), "--cwd", cwd,
-                     "--", LOGIN_SHELL, "-l"]);
-    const spawned = Number.parseInt((out ?? "").trim(), 10);
-    if (!Number.isInteger(spawned)) return log(`could not open a terminal for ${label ?? key}`);
-    id = spawned;
-    terminals.set(key, id);
-    log(`opened terminal pane ${id} for ${label ?? key} at ${cwd}`);
-  }
-
   visibleKey = key;
   // split-pane activates whatever it put in the slot. Switching agents happens in
   // the fleet view, so that is where the next keystroke belongs.
   wez(["activate-pane", "--pane-id", String(panes.fleet)]);
-  publishPanes({ shell: id });
+  publishPanes({ shell: incoming });
+  writeTerminals();
+}
+
+/**
+ * new / next / prev / close, applied to the VISIBLE agent's terminals. Agents
+ * only: at the fleet list the slot holds the single repo shell, so these are
+ * ignored. Shares the reconcile lock so a keypress can never race a pane swap.
+ */
+async function terminalCommand(verb, attempt = 0) {
+  if (!attached || visibleKey === REPO_KEY) return;
+  // A keystroke must not be lost just because a reconcile happens to be running:
+  // back off and retry rather than dropping it. reconcile holds the lock only for
+  // the length of one pane swap, so a handful of tries covers it.
+  if (reconciling) {
+    if (attempt < 20) setTimeout(() => terminalCommand(verb, attempt + 1), 100);
+    return;
+  }
+  reconciling = true;
+  try {
+    const key = visibleKey;
+    const table = paneTable();
+    if (!table) return;
+    const live = new Set(table.map((p) => p.pane_id));
+    const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+    pruneDeadTerminals(live);
+    const entry = terminals.get(key);
+    if (!entry) return;
+    const current = curTermId(key);
+    const anchor = inCockpit(current, table, cockpitTab) ? current : undefined;
+
+    if (verb === "new") {
+      if (entry.panes.length >= MAX_TERMS) return log(`terminal cap (${MAX_TERMS}) reached for ${key}`);
+      const id = insertIntoSlot(anchor, { cwd: attached.worktree }, cockpitTab);
+      if (id === undefined) return log(`could not open a new terminal for ${key}`);
+      if (anchor !== undefined) parkPane(anchor, key, cockpitTab);
+      entry.panes.push(id);
+      entry.cur = entry.panes.length - 1;
+      log(`opened terminal pane ${id} for ${key} (${entry.panes.length} total)`);
+    } else if (verb === "next" || verb === "prev") {
+      if (entry.panes.length < 2 || anchor === undefined) return;
+      const delta = verb === "next" ? 1 : -1;
+      const incoming = entry.panes[(entry.cur + delta + entry.panes.length) % entry.panes.length];
+      if (insertIntoSlot(anchor, { moveId: incoming }, cockpitTab) === undefined) {
+        return removeTerminal(entry, incoming);
+      }
+      parkPane(anchor, key, cockpitTab);
+      entry.cur = entry.panes.indexOf(incoming);
+      log(`switched to terminal pane ${incoming} for ${key}`);
+    } else if (verb === "close") {
+      if (entry.panes.length < 2) return log(`refusing to close the last terminal for ${key}`);
+      if (anchor === undefined) return;
+      // Show a sibling (the previous one, or the next if this is the first), then
+      // kill the pane being closed -- restoring collapses the split and the
+      // sibling inherits the slot before the closed pane goes.
+      const nextIdx = entry.cur > 0 ? entry.cur - 1 : 1;
+      const incoming = entry.panes[nextIdx];
+      insertIntoSlot(anchor, { moveId: incoming }, cockpitTab);
+      wez(["kill-pane", "--pane-id", String(anchor)]);
+      removeTerminal(entry, anchor);
+      entry.cur = entry.panes.indexOf(incoming);
+      log(`closed terminal pane ${anchor} for ${key} (${entry.panes.length} left)`);
+    } else {
+      return;
+    }
+    // The user is managing terminals, so leave the keystroke focus in the one now
+    // showing rather than bouncing it back to the fleet pane.
+    const shown = curTermId(key);
+    if (shown !== undefined) wez(["activate-pane", "--pane-id", String(shown)]);
+    publishPanes({ shell: shown });
+    writeTerminals();
+  } finally {
+    reconciling = false;
+  }
 }
 
 /**
@@ -321,23 +492,32 @@ async function showTerminal(key, cwd, label) {
  * If the slot's pane is gone -- someone exited the shell revdiff was running in
  * -- a plain `split-pane --top --pane-id <fleet>` does NOT restore it: it splits
  * the fleet pane's own region, so the new pane is half a window wide (59 of 120
- * columns in the probe) because the bottom row is a horizontal split. Parking the
- * terminal leaves the fleet pane alone in the tab, so the split spans the window;
- * the terminal is then moved back. Both ways measured; see
- * spikes/pane-swap/RESULTS.md.
+ * columns in the probe) because the bottom row is a horizontal split. Parking
+ * BOTH the terminal and the strip leaves the fleet pane alone in its row, so the
+ * split spans the window; both are then moved back to their edges. All measured;
+ * see spikes/pane-swap/RESULTS.md.
  *
  * Returns a throwaway placeholder pane holding the slot, for the caller to split
  * into and then kill.
  */
 function rebuildDiffSlot(cockpitTab) {
-  const term = terminals.get(visibleKey);
+  const term = curTermId(visibleKey);
+  const strip = panes.strip;
   if (term !== undefined) parkPane(term, "rebuilding", cockpitTab);
+  if (strip !== undefined) parkPane(strip, "strip", cockpitTab);
   const out = wez(["split-pane", "--top", "--percent", "55",
                    "--pane-id", String(panes.fleet), "--cwd", panes.repo,
                    "--", LOGIN_SHELL, "-l"]);
+  // Restore the bottom row: fleet | terminal | strip. The strip clings to
+  // whichever pane now forms the right edge -- the terminal if there is one,
+  // otherwise the fleet pane.
   if (term !== undefined) {
     wez(["split-pane", "--right", "--percent", "50",
          "--pane-id", String(panes.fleet), "--move-pane-id", String(term)]);
+  }
+  if (strip !== undefined) {
+    wez(["split-pane", "--right", "--percent", "20",
+         "--pane-id", String(term ?? panes.fleet), "--move-pane-id", String(strip)]);
   }
   const id = Number.parseInt((out ?? "").trim(), 10);
   if (!Number.isInteger(id)) {
@@ -436,12 +616,20 @@ async function reapAgents() {
     const strikes = (reapStrikes.get(key) ?? 0) + 1;
     reapStrikes.set(key, strikes);
     if (strikes < REAP_STRIKES) continue;
-    for (const [what, slot] of [["terminal", terminals], ["diff", diffs]]) {
-      const id = slot.get(key);
-      if (id === undefined) continue;
-      wez(["kill-pane", "--pane-id", String(id)]);
-      log(`reaped ${what} pane ${id} — agent ${key} is gone`);
-      slot.delete(key);
+    // An agent has many terminals but one diff; kill every pane it owns.
+    const term = terminals.get(key);
+    if (term) {
+      for (const id of term.panes) {
+        wez(["kill-pane", "--pane-id", String(id)]);
+        log(`reaped terminal pane ${id} — agent ${key} is gone`);
+      }
+      terminals.delete(key);
+    }
+    const d = diffs.get(key);
+    if (d !== undefined) {
+      wez(["kill-pane", "--pane-id", String(d)]);
+      log(`reaped diff pane ${d} — agent ${key} is gone`);
+      diffs.delete(key);
     }
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
@@ -466,13 +654,23 @@ function healMissingPanes() {
   const table = paneTable();
   if (!table) return;
   const live = new Set(table.map((p) => p.pane_id));
-  for (const [what, slot] of [["diff", diffs], ["terminal", terminals]]) {
-    const id = slot.get(attached.jobId);
-    if (id !== undefined && live.has(id)) continue;
-    log(`${what} pane for ${attached.jobId} is gone; rebuilding`);
-    slot.delete(attached.jobId);
+  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+
+  const diff = diffs.get(attached.jobId);
+  if (diff === undefined || !live.has(diff)) {
+    log(`diff pane for ${attached.jobId} is gone; rebuilding`);
+    diffs.delete(attached.jobId);
     attached = null;
     return;
+  }
+  // The terminal slot is healthy as long as this agent's CURRENT terminal is in
+  // it. A dead current with a live sibling still needs a rebuild -- the sibling
+  // is parked, so the slot is empty until it is brought back. Losing a background
+  // terminal (not the visible one) is just pruned, no rebuild needed.
+  pruneDeadTerminals(live);
+  if (!inCockpit(curTermId(attached.jobId), table, cockpitTab)) {
+    log(`terminal pane for ${attached.jobId} is gone; rebuilding`);
+    attached = null;
   }
 }
 
@@ -828,10 +1026,19 @@ async function reconcile() {
 }
 
 log(`cockpitd up · panes ${JSON.stringify(panes)} · auto-reload ${AUTO_RELOAD}`);
+writeTerminals();   // give the strip its first frame (the repo shell)
 
 // The log only nudges; reconcile() decides.
 tail(FLEET_LOG, (line) => {
   if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, 250);
+});
+// Terminal-management gestures. The WezTerm keybindings append one verb per line
+// (see wezterm/cockpit.lua); tailing reuses the same rotation-safe reader as the
+// fleet log, so a keypress that lands mid-file-replace is not lost.
+const TERM_VERBS = new Set(["new", "next", "prev", "close"]);
+tail(CMD_FILE, (line) => {
+  const verb = line.trim();
+  if (TERM_VERBS.has(verb)) terminalCommand(verb);
 });
 setInterval(reconcile, POLL_MS);
 setInterval(reapAgents, REAP_MS);

@@ -5,10 +5,15 @@ Implements `requirements.md` on the architecture settled in `tool-selection-rev2
 ```
 ┌──────────────────────────────────────────────────┐
 │  revdiff — merge-base → working tree, --untracked │  55%
-├─────────────────────────┬────────────────────────┤
-│  claude agents (fleet)  │  THIS agent's terminal  │  45%
-└─────────────────────────┴────────────────────────┘
+├─────────────────────────┬───────────────────┬────┤
+│  claude agents (fleet)  │ THIS agent's term │list│  45%
+└─────────────────────────┴───────────────────┴────┘
 ```
+
+The bottom-right is not one terminal but a *set* — VSCode's terminal-tab model.
+The active one fills the slot; the narrow strip on the right edge lists them all
+and marks it. `⌥t` new, `⌥[`/`⌥]` cycle, `⌥w` close. See [Multiple terminals per
+agent](#multiple-terminals-per-agent).
 
 ## Install
 
@@ -76,7 +81,8 @@ is deliberately cheap.
 1. Enter an agent in the fleet view. The diff pane retargets to that agent's
    worktree and the bottom-right pane becomes *that agent's own terminal* — its
    own shell, history, scrollback and running jobs, opened in the worktree the
-   first time and resumed every time after. No action needed.
+   first time and resumed every time after. `⌥t` opens more terminals for the
+   same agent; the strip on the right edge lists them. No action needed to start.
 2. Read the diff. While you have not annotated anything, it auto-reloads as the
    agent writes.
 3. Annotate with `a`. Type, `Enter`.
@@ -104,11 +110,47 @@ Each of these is a measured finding, not a preference — sources in
 | Long reviews sent as bracketed paste | Over ~10 lines the prompt box collapses them to a `[Pasted text +N lines]` chip. Shorter ones stay expanded and directly editable. |
 | Watchers torn down *before* switching agents | Quitting revdiff flushes its annotations; that write must not be mistaken for a review of the agent being switched to. |
 
+## Multiple terminals per agent
+
+Each agent owns a *list* of terminals, not one — R1's "list of terminals on its
+right edge and a way to add more (VSCode's terminal-tab UX)". Only the active one
+is in the slot; the rest are parked in tabs of their own, still running. A narrow
+**strip** on the right edge (`bin/cockpit-strip.mjs`) lists them and marks the
+active one.
+
+| Gesture | Verb | Effect |
+|---|---|---|
+| `⌥t` | `new`   | Open another terminal for this agent, in its worktree, and show it. |
+| `⌥]` | `next`  | Show the next terminal in the list (wraps). |
+| `⌥[` | `prev`  | Show the previous one (wraps). |
+| `⌥w` | `close` | Close the shown terminal and drop back to a neighbour. The **last** one cannot be closed — the slot must always hold a terminal. |
+
+The keybindings do not move panes themselves. Each appends one verb to
+`~/.claude/cockpit/cmd`; the daemon tails that file (the same rotation-safe reader
+as the fleet log) and does every swap, so every terminal stays tracked and
+parked. A raw `SplitPane` binding — what `⌥t` used to be — makes an untracked pane
+the daemon then shuffles around, which is the old "extra panes are not managed"
+limit, now gone.
+
+Switching terminals uses the **same** move as switching agents: the incoming
+terminal is split *into* the outgoing one and the outgoing is parked afterwards,
+so it inherits the exact slot between the fleet pane and the strip. Splitting off
+the fleet pane (what the single-terminal build did) no longer lands full-width
+once the strip is on the edge. When the slot is momentarily empty — the visible
+terminal was killed — the strip is parked so the replacement can come off the
+fleet pane, then the strip is moved back. All measured; see
+`spikes/pane-swap/live-terminals.sh`.
+
+The strip is **never parked**: it is pure display (it renders `terminals.json`,
+written by the daemon on every change) and clings to the right edge for every
+agent. The one exception is a diff-slot rebuild, which parks the terminal *and*
+the strip so the full-width split can come off the fleet pane alone.
+
 ## Per-agent panes
 
-Each agent gets its own shell **and its own revdiff**, and so does the fleet list
-(cwd = the cockpit repo). Only one of each is on screen at a time, in the two
-slots.
+Each agent gets its own terminals **and its own revdiff**, and so does the fleet
+list (cwd = the cockpit repo). Only the diff and the active terminal are on screen
+at a time, in the two slots; the strip is always present on the terminal's edge.
 
 Switching does **not** open a new shell, `cd` a shared one, or restart revdiff.
 The outgoing pane is moved into a tab of its own and the incoming pane is moved
@@ -257,9 +299,17 @@ switch-back so the framed-screen check has to carry that decision. Making
 `diffPaneStatus` title-only fails exactly those two assertions.
 
 ```bash
-spikes/pane-swap/probe.sh    # what wezterm and revdiff actually do
-spikes/pane-swap/live.sh     # the real daemon, real mux, real geometry
+spikes/pane-swap/probe.sh          # what wezterm and revdiff actually do
+spikes/pane-swap/live.sh           # the real daemon, real mux, real geometry
+spikes/pane-swap/live-terminals.sh # the multiple-terminals feature, end to end
 ```
+
+`live-terminals.sh` builds the layout *with* the strip and drives the real daemon
+through the command channel: it asserts the strip renders and stays on the edge,
+that `⌥t`/`⌥[`/`⌥]`/`⌥w` add/cycle/close terminals, that the active terminal keeps
+its geometry (47 cols beside a 12-col strip and a 59-col fleet pane), that every
+terminal survives a switch to another agent and back, and that the last terminal
+cannot be closed.
 
 The stub cannot see geometry, so `live.sh` drives the **real daemon** against a
 headless `wezterm-mux-server` with two throwaway worktrees and a fake `claude
@@ -365,5 +415,11 @@ one**, the daemon leaves the panes where they are rather than guessing.
   terminal and every agent's revdiff; nothing survives a rebuild. This is the deliberate trade for not
   putting a detached-session multiplexer (`screen`, `dtach`) between you and every
   shell, with its own scrollback, escape key and resize quirks.
-- **Extra panes made with ALT+t are not managed.** They stay where they are while
-  the daemon swaps its own pane in and out around them, which distorts the layout.
+- **A parked terminal that is *not* the active one is only pruned, never
+  rebuilt.** If a background terminal's PTY dies (its shell exited), the daemon
+  drops it from the agent's list on the next reconcile; only the death of the
+  *visible* terminal triggers a slot rebuild. This is intended — a background
+  terminal is expected to come and go.
+- **The strip is ~12 columns**, so a terminal's title is trimmed to its
+  foreground process name (`node`, `zsh`, …). Two terminals running the same
+  program are told apart by their number, not their title.

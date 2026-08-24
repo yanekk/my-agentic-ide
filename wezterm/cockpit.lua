@@ -74,10 +74,19 @@ else
   wezterm.log_error("cockpit: layout script not found; opening a plain shell")
 end
 
--- Splits must name their program explicitly. `default_prog` below launches the
--- cockpit, and a split that inherited it would re-run the layout script and
--- recurse without end.
-local LOGIN_SHELL = { os.getenv("SHELL") or "/bin/zsh", "-l" }
+-- Terminal-list gestures reach cockpitd through a command channel: a key appends
+-- one verb (new/next/prev/close) to ~/.claude/cockpit/cmd, and the daemon tails
+-- it and moves the panes. The daemon is the only thing that touches the layout,
+-- so a manual `SplitPane` here -- which it neither tracks nor parks -- is exactly
+-- what the ALT+t binding used to do wrong. The verbs are fixed literals, so this
+-- shells out to a plain append with nothing to quote.
+local CMD_FILE = HOME .. "/.claude/cockpit/cmd"
+local function cockpit_cmd(verb)
+  return wezterm.action_callback(function()
+    local f = io.open(CMD_FILE, "a")
+    if f then f:write(verb .. "\n"); f:close() end
+  end)
+end
 
 return {
   -- VSCode's default monospace stack on macOS is Menlo, then Monaco. WezTerm
@@ -127,12 +136,13 @@ return {
     -- without disturbing the layout the daemon depends on.
     { key = "z", mods = "ALT", action = act.TogglePaneZoomState },
 
-    -- Another shell beside the existing one, in the same directory.
-    { key = "t", mods = "ALT", action = act.SplitPane {
-        direction = "Right",
-        size = { Percent = 50 },
-        command = { args = LOGIN_SHELL },
-    } },
+    -- Manage the attached agent's terminals (VSCode's terminal-tab gestures).
+    -- These go through the daemon so every terminal is tracked and parked; a
+    -- raw SplitPane would leave an untracked pane the daemon swaps around.
+    { key = "t", mods = "ALT", action = cockpit_cmd("new") },
+    { key = "]", mods = "ALT", action = cockpit_cmd("next") },
+    { key = "[", mods = "ALT", action = cockpit_cmd("prev") },
+    { key = "w", mods = "ALT", action = cockpit_cmd("close") },
 
     -- Resize the diff/bottom split.
     { key = "=", mods = "ALT", action = act.AdjustPaneSize { "Up", 3 } },

@@ -80,14 +80,22 @@ DIFF=$(wezterm cli split-pane --top --percent 55 --pane-id "$FLEET" --cwd "$REPO
 SHELL_PANE=$(wezterm cli split-pane --right --percent 50 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -l)
 
+# The terminal-list strip clings to the right edge of the shell (VSCode's
+# terminal-tab list). It is a pure display pane -- cockpitd writes terminals.json
+# and this renders it -- so the daemon never parks it. Run through a login shell
+# so it inherits Homebrew's PATH and finds node; exec so no shell lingers under
+# it. If node is missing the pane just shows the error, which is fine.
+STRIP=$(wezterm cli split-pane --right --percent 20 --pane-id "$SHELL_PANE" --cwd "$REPO" \
+       -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs'")
+
 # split-pane prints the new pane id; anything else means the layout is not what
 # the daemon will assume, so stop before writing a state file that lies.
-case "$DIFF$SHELL_PANE" in
-    *[!0-9]*|"") die "could not split panes (got diff='$DIFF' shell='$SHELL_PANE')" ;;
+case "$DIFF$SHELL_PANE$STRIP" in
+    *[!0-9]*|"") die "could not split panes (got diff='$DIFF' shell='$SHELL_PANE' strip='$STRIP')" ;;
 esac
 
-printf '{"diff":%s,"fleet":%s,"shell":%s,"repo":"%s"}\n' \
-    "$DIFF" "$FLEET" "$SHELL_PANE" "$REPO" > "$DIR/panes.json"
+printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"repo":"%s"}\n' \
+    "$DIFF" "$FLEET" "$SHELL_PANE" "$STRIP" "$REPO" > "$DIR/panes.json"
 
 # The diff pane shows something useful before any agent is entered.
 wezterm cli send-text --pane-id "$DIFF" --no-paste \
@@ -99,6 +107,9 @@ wezterm cli send-text --pane-id "$DIFF" --no-paste \
 pkill -f "cockpitd.mjs" 2>/dev/null || true
 
 : > "$DIR/fleet.log"
+# Truncate the terminal-command channel so a keypress from a previous window is
+# not replayed into this one.
+: > "$DIR/cmd"
 nohup node "$HERE/cockpitd.mjs" >"$DIR/daemon.log" 2>&1 &
 echo "cockpit: daemon pid $! · panes diff=$DIFF fleet=$FLEET shell=$SHELL_PANE"
 
