@@ -73,21 +73,33 @@ say "  checkout   $REPO"
 
 # --- 1. prerequisites ------------------------------------------------------
 #
-# Checked through a LOGIN shell on purpose. Launched from Finder or Spotlight,
-# WezTerm inherits launchd's minimal PATH and sources the login profile to
-# recover it, so a login shell is the PATH the cockpit will actually run with.
-# A tool that only exists on an interactive-but-not-login PATH would pass a bare
-# `command -v` here and still be missing when it matters.
+# Checked through a LOGIN shell on purpose, and in a SANITIZED environment.
+# Launched from Finder or Spotlight, WezTerm inherits launchd's minimal PATH
+# (/usr/bin:/bin:/usr/sbin:/sbin) and sources the login profile to recover the
+# rest -- that login-shell PATH is what the cockpit actually runs with. Checking
+# through the *current* shell's inherited PATH would hide exactly the failure
+# this is meant to catch: a tool that lives only on the interactive PATH -- an
+# nvm-managed `node`, say, whose setup is in ~/.zshrc, which a non-interactive
+# login shell never sources -- would pass here and then be missing when the
+# window opens. So reset PATH to launchd's minimum first, then reproduce the same
+# prepends bin/cockpit-layout.sh applies, and only then look.
 LOGIN_SHELL="${SHELL:-/bin/zsh}"
-have() { "$LOGIN_SHELL" -lc "command -v -- $1" >/dev/null 2>&1; }
+LAUNCHD_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+# Mirror the safety-net PATH prepend in bin/cockpit-layout.sh -- keep in sync.
+PREPEND='for p in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do case ":$PATH:" in *":$p:"*) ;; *) [ -d "$p" ] && PATH="$p:$PATH";; esac; done; export PATH; '
+# Resolve $1 the way the cockpit will: print its path, or nothing if missing.
+resolve() {
+    env -i HOME="$HOME" USER="${USER:-}" SHELL="$LOGIN_SHELL" TERM="${TERM:-xterm}" \
+        PATH="$LAUNCHD_PATH" "$LOGIN_SHELL" -lc "${PREPEND}command -v -- $1" 2>/dev/null
+}
 
 say ""
-say "${bold}prerequisites${off} ${dim}(as a login shell sees them)${off}"
+say "${bold}prerequisites${off} ${dim}(as the cockpit window will see them)${off}"
 MISSING=0
 check_tool() {
     local tool="$1" hint="$2" path
-    if have "$tool"; then
-        path="$("$LOGIN_SHELL" -lc "command -v -- $tool" 2>/dev/null)"
+    path="$(resolve "$tool")"
+    if [ -n "$path" ]; then
         ok "$(printf '%-8s %s' "$tool" "$path")"
     else
         bad "$(printf '%-8s %s' "$tool" "$hint")"
