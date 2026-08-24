@@ -125,6 +125,36 @@ return {
   window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
   scrollback_lines = 10000,
 
+  -- Copy out of the agent panes. claude's TUI enables mouse reporting, so a plain
+  -- left-drag inside it is delivered to claude (you see *its* highlight) and never
+  -- becomes a WezTerm selection -- Cmd+C then copies nothing, which is why
+  -- claude->claude and claude->terminal copy were dead while terminal->* worked
+  -- (a plain shell reports no mouse, so WezTerm's default selection handles it).
+  --
+  -- These bindings carry mouse_reporting=true, so they fire *instead of* forwarding
+  -- the drag to the app: left-drag now selects over claude too, and releasing
+  -- copies straight to the clipboard (copy-on-select), so no Cmd+C is needed before
+  -- pasting elsewhere. Under no mouse reporting they don't apply, so terminal
+  -- selection keeps its default behaviour. The wheel is untouched, so claude still
+  -- scrolls.
+  mouse_bindings = {
+    { event = { Down = { streak = 1, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.SelectTextAtMouseCursor("Cell") },
+    { event = { Drag = { streak = 1, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.ExtendSelectionToMouseCursor("Cell") },
+    { event = { Up = { streak = 1, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.CompleteSelection("Clipboard") },
+    -- Double/triple-click word- and line-select, also over the mouse-reporting app.
+    { event = { Down = { streak = 2, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.SelectTextAtMouseCursor("Word") },
+    { event = { Up = { streak = 2, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.CompleteSelection("Clipboard") },
+    { event = { Down = { streak = 3, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.SelectTextAtMouseCursor("Line") },
+    { event = { Up = { streak = 3, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.CompleteSelection("Clipboard") },
+  },
+
   keys = {
     -- Move between panes. ALT+arrow, no prefix key to remember.
     { key = "UpArrow",    mods = "ALT", action = act.ActivatePaneDirection("Up") },
