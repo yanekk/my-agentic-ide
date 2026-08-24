@@ -199,5 +199,11 @@ return {
     { key = "LeftArrow",  mods = "CMD", action = act.SendKey { key = "a", mods = "CTRL" } },
     { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "e", mods = "CTRL" } },
     { key = "Backspace",  mods = "CMD", action = act.SendKey { key = "u", mods = "CTRL" } },
+
+    -- Option+Enter inserts a line break instead of WezTerm's default (toggle
+    -- full screen). It sends a bare line-feed -- the same \n that the daemon's
+    -- \r->\n substitution uses to type a review without submitting: Enter still
+    -- sends \r and submits, Option+Enter only opens a new line in the input box.
+    { key = "Enter", mods = "ALT", action = act.SendString("\n") },
   },
 }
