@@ -33,6 +33,9 @@ const FLEET_LOG = path.join(DIR, "fleet.log");
 // TERMS, the daemon tails CMD_FILE.
 const TERMS = path.join(DIR, "terminals.json");
 const CMD_FILE = path.join(DIR, "cmd");
+// The persisted diff-mode preference (see DIFF_MODES below). One line, one of the
+// mode names; rewritten atomically whenever the mode is toggled.
+const DIFF_MODE_FILE = path.join(DIR, "diff-mode");
 
 // Auto-reload the diff while the agent writes. `R` in revdiff drops annotations,
 // but revdiff prompts first (we deliberately do NOT pass --no-confirm-reload), so
@@ -251,6 +254,62 @@ const diffs = new Map([[REPO_KEY, panes.diff]]);
 let visibleDiff = REPO_KEY;
 const reapStrikes = new Map();
 
+// ---------------------------------------------------------------------------
+// Diff mode
+//
+// Every agent's revdiff shows one of two ranges, toggled with ⌥[/⌥] WHILE THE
+// DIFF PANE IS FOCUSED (the same keys cycle terminals otherwise -- see the
+// CMD_FILE tail):
+//
+//   "uncommitted" — revdiff --untracked HEAD: HEAD -> working tree, the agent's
+//                   uncommitted work. Matches what the agent sees from git status.
+//   "lastcommit"  — revdiff HEAD~1 HEAD: just the most recent commit.
+//
+// The choice is GLOBAL and PERSISTED: reopening the cockpit restores the last
+// mode chosen, and every agent's revdiff is (re)launched in it. `diffLaunchedMode`
+// records the mode a parked pane was actually launched with, so returning to an
+// agent relaunches its revdiff only when the mode has changed since -- otherwise
+// the pane comes back untouched, which is the whole point of parking it.
+// ---------------------------------------------------------------------------
+
+const DIFF_MODES = ["uncommitted", "lastcommit"];
+
+function readDiffMode() {
+  try {
+    const v = fs.readFileSync(DIFF_MODE_FILE, "utf8").trim();
+    if (DIFF_MODES.includes(v)) return v;
+  } catch { /* no preference yet */ }
+  return "uncommitted";
+}
+
+let diffMode = readDiffMode();
+const diffLaunchedMode = new Map();
+
+function persistDiffMode() {
+  try {
+    const tmp = `${DIFF_MODE_FILE}.tmp`;
+    fs.writeFileSync(tmp, `${diffMode}\n`);
+    fs.renameSync(tmp, DIFF_MODE_FILE);
+  } catch { /* best-effort; a lost write just defaults back next launch */ }
+}
+
+/**
+ * The revdiff command line for the current mode, writing annotations to
+ * `reviewFile`. `HEAD` is passed symbolically (not resolved to a SHA) so a reload
+ * re-reads it and committing work drops it out of an uncommitted diff.
+ */
+function diffCommand(reviewFile) {
+  const out = ["-o", JSON.stringify(reviewFile)];
+  if (diffMode === "lastcommit") {
+    // HEAD~1 -> HEAD is exactly the most recent commit. No --untracked: this range
+    // has no working tree, so untracked files do not belong to it.
+    return ["revdiff", ...out, "HEAD~1", "HEAD"].join(" ");
+  }
+  // HEAD -> working tree. --untracked is not optional: agents create new files
+  // constantly and plain `git diff` omits them.
+  return ["revdiff", "--untracked", ...out, "HEAD"].join(" ");
+}
+
 /** The pane currently shown for `key`, or undefined if it has none live. */
 function curTermId(key) {
   const t = terminals.get(key);
@@ -296,7 +355,7 @@ function writeTerminals(table = paneTable()) {
   const agent = visibleKey === REPO_KEY ? "repo" : (attached?.name ?? visibleKey);
   try {
     const tmp = `${TERMS}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ agent, terminals: list })}\n`);
+    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode, terminals: list })}\n`);
     fs.renameSync(tmp, TERMS);
   } catch { /* the strip just keeps its last frame */ }
 }
@@ -370,6 +429,21 @@ function insertIntoSlot(anchor, spec, cockpitTab) {
 /** Is `id` a live pane sitting in the cockpit tab (i.e. actually in a slot)? */
 function inCockpit(id, table, cockpitTab) {
   return id !== undefined && table.find((p) => p.pane_id === id)?.tab_id === cockpitTab;
+}
+
+/**
+ * Is the diff pane the focused (active) pane in the cockpit tab right now?
+ *
+ * This is what routes ⌥[/⌥]: they cycle the diff mode when the diff pane holds
+ * focus and terminals otherwise. WezTerm reports one active pane PER TAB, so the
+ * parked panes (each alone in its own tab) each read active too -- only the one in
+ * the cockpit tab counts.
+ */
+function diffPaneFocused(table = paneTable()) {
+  if (!table) return false;
+  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  const active = table.find((p) => p.tab_id === cockpitTab && p.is_active);
+  return active !== undefined && active.pane_id === panes.diff;
 }
 
 /**
@@ -494,6 +568,64 @@ async function terminalCommand(verb, attempt = 0) {
 }
 
 /**
+ * Restart revdiff in `pane` with the current mode's range.
+ *
+ * Switching the range means RESTARTING revdiff -- `R` only reloads the same range
+ * -- so the TUI is quit back to its shell (`q`) and relaunched. Never done while
+ * the annotation editor is open: revdiff reads every keystroke as comment text, so
+ * the `q` and the whole command would land in the comment. On a pane already at a
+ * shell (revdiff was quit with `q`) there is nothing to quit, so skip straight to
+ * the launch.
+ */
+async function relaunchDiff(jobId, pane, worktree, reviewFile) {
+  const status = diffPaneStatus(pane);
+  if (status === "editing") {
+    return log(`not switching diff mode for ${jobId}: annotation editor is open`);
+  }
+  if (status === "running") {
+    sendRaw(pane, "q");                 // quit revdiff back to the shell
+    await sleep(SHELL_SETTLE_MS);       // let the prompt return before we type
+  }
+  launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile)}`);
+  diffLaunchedMode.set(jobId, diffMode);
+  log(`relaunched diff pane ${pane} for ${jobId} in ${diffMode} mode`);
+}
+
+/**
+ * Toggle the diff mode (⌥[/⌥] while the diff pane is focused) and relaunch the
+ * attached agent's revdiff in the new mode. Only meaningful attached to an agent:
+ * the repo diff pane shown at the fleet list is a static placeholder, not a
+ * revdiff. Shares the reconcile lock -- like terminalCommand -- so the relaunch
+ * cannot race a pane swap; a keypress that lands during one backs off and retries.
+ */
+async function diffModeCommand(verb, attempt = 0) {
+  if (!attached || visibleDiff === REPO_KEY) return;
+  if (reconciling) {
+    if (attempt < 20) setTimeout(() => diffModeCommand(verb, attempt + 1), 100);
+    return;
+  }
+  reconciling = true;
+  try {
+    const i = DIFF_MODES.indexOf(diffMode);
+    const dir = verb === "next" ? 1 : -1;
+    const next = DIFF_MODES[(i + dir + DIFF_MODES.length) % DIFF_MODES.length];
+    if (next === diffMode) return;
+    diffMode = next;
+    persistDiffMode();
+    writeTerminals();                   // the footer shows the current mode
+    const jobId = visibleDiff;
+    const pane = diffs.get(jobId);
+    if (pane === undefined || jobId !== attached.jobId) return;
+    await relaunchDiff(jobId, pane, attached.worktree, attached.reviewFile);
+    // The reviewer is reading the diff, so leave focus on it rather than bouncing
+    // back to the fleet pane the way an agent switch does.
+    wez(["activate-pane", "--pane-id", String(pane)]);
+  } finally {
+    reconciling = false;
+  }
+}
+
+/**
  * Rebuild an EMPTY diff slot, full width.
  *
  * If the slot's pane is gone -- someone exited the shell revdiff was running in
@@ -559,7 +691,7 @@ async function showDiff(key, cwd, label) {
 
   const live = new Set(table.map((p) => p.pane_id));
   const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
-  for (const [k, id] of diffs) if (!live.has(id)) diffs.delete(k);
+  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); }
 
   if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
 
@@ -637,6 +769,7 @@ async function reapAgents() {
       wez(["kill-pane", "--pane-id", String(d)]);
       log(`reaped diff pane ${d} — agent ${key} is gone`);
       diffs.delete(key);
+      diffLaunchedMode.delete(key);
     }
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
@@ -895,24 +1028,18 @@ async function onEnter(jobId, knownName) {
   // A restored pane already has revdiff up on this diff, with the file you were
   // reading and any unflushed annotations still there. Typing nothing is the
   // entire point -- so revdiff is only started when there is no revdiff to
-  // return to: a brand-new pane, or one whose revdiff was quit with `q`.
-  if (shown && (shown.spawned || diffPaneStatus(shown.pane) === "shell")) {
-    // Base is HEAD, not a merge-base: the review shows the agent's UNCOMMITTED
-    // work, so a clean working tree shows an empty diff -- it matches what the
-    // agent would see from `git status`. `HEAD` is passed symbolically (not
-    // resolved to a SHA), so a reload re-reads it and committing work drops it
-    // out of the diff rather than pinning it forever.
-    //
-    // --untracked is not optional: agents create new files constantly, and plain
-    // `git diff` does not report them. `revdiff HEAD` diffs HEAD -> WORKING TREE.
-    const cmd = [
-      "revdiff", "--untracked",
-      "-o", JSON.stringify(reviewFile),
-      "HEAD",
-    ].join(" ");
-
-    if (shown.spawned) await sleep(SHELL_SETTLE_MS);   // let the login shell start reading
-    launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${cmd}`);
+  // return to: a brand-new pane, or one whose revdiff was quit with `q`. The one
+  // exception is a mode change while the pane was parked: the diff would come
+  // back in the old range, so it is relaunched in the current mode (see
+  // diffCommand / the DIFF_MODES block for what each range means).
+  if (shown) {
+    if (shown.spawned || diffPaneStatus(shown.pane) === "shell") {
+      if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
+      launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile)}`);
+      diffLaunchedMode.set(jobId, diffMode);
+    } else if (diffLaunchedMode.get(jobId) !== diffMode) {
+      await relaunchDiff(jobId, shown.pane, worktree, reviewFile);
+    }
   }
 
   await showTerminal(jobId, worktree, agent.name);
@@ -1017,7 +1144,11 @@ tail(FLEET_LOG, (line) => {
 const TERM_VERBS = new Set(["new", "next", "prev", "close"]);
 tail(CMD_FILE, (line) => {
   const verb = line.trim();
-  if (TERM_VERBS.has(verb)) terminalCommand(verb);
+  if (!TERM_VERBS.has(verb)) return;
+  // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
+  // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.
+  if ((verb === "next" || verb === "prev") && diffPaneFocused()) diffModeCommand(verb);
+  else terminalCommand(verb);
 });
 setInterval(reconcile, POLL_MS);
 setInterval(reapAgents, REAP_MS);

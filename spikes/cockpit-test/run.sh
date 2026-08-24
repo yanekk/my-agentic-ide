@@ -36,9 +36,13 @@ export NEXTPANE="$T/nextpane"
 export NEXTTAB="$T/nexttab"
 export EDITING="$T/editing"
 export TITLELAG="$T/titlelag"
+# $ACTIVE holds the pane id that `list` should report as is_active (the focused
+# pane), which is how the daemon routes ⌥[/⌥] between diff-mode and terminals.
+export ACTIVE="$T/active"
 : > "$CALLS"
 : > "$EDITING"
 : > "$TITLELAG"
+: > "$ACTIVE"
 echo list > "$FLEETSTATE"
 printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$PANESTATE"   # diff, fleet, repo shell
 echo 31 > "$NEXTPANE"
@@ -104,9 +108,11 @@ case "$sub" in
     fi
     ;;
   list)
-    awk 'BEGIN{ printf "["; while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1 }
+    awk 'BEGIN{ printf "["; while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1
+                while ((getline a < ENVIRON["ACTIVE"]) > 0) active = a }
          { t = ($1 in lag) ? "sh" : $3
-           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"cwd\":\"file:///tmp\",\"is_active\":false}", (NR>1 ? "," : ""), $2, $1, t }
+           act = ($1 == active) ? "true" : "false"
+           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"cwd\":\"file:///tmp\",\"is_active\":%s}", (NR>1 ? "," : ""), $2, $1, t, act }
          END{printf "]\n"}' "$PANESTATE"
     ;;
   split-pane)
@@ -342,6 +348,40 @@ refute "no cd was retyped either"                "cd \"$WT\"" "$CALLS"
 check "second agent's diff parked in turn"       "move-pane-to-new-tab --pane-id 33" "$CALLS"
 : > "$TITLELAG"
 check "second agent's terminal parked in turn"   "move-pane-to-new-tab --pane-id 34" "$CALLS"
+
+echo
+echo "== 5b. ⌥] with the diff pane focused switches the diff MODE, not a terminal =="
+# The same keys cycle terminals when a terminal is focused and diff modes when the
+# diff pane is. Focus is read from the cockpit tab's active pane (is_active).
+: > "$CALLS"
+echo 31 > "$ACTIVE"                       # focus the agent's diff pane (31)
+echo next >> "$T/state/cmd"
+sleep 2
+
+check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
+check "revdiff relaunched in the last-commit range" "revdiff -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
+check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
+check "the preference was persisted"              "lastcommit" "$T/state/diff-mode"
+check "the switch was logged"                     "relaunched diff pane 31 for abc12345 in lastcommit" "$T/daemon.log"
+
+echo
+echo "== 5b'. toggling again returns to the uncommitted range =="
+: > "$CALLS"
+echo prev >> "$T/state/cmd"
+sleep 2
+check "back to HEAD -> working tree"              "revdiff --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+check "preference persisted back to uncommitted"  "uncommitted" "$T/state/diff-mode"
+
+echo
+echo "== 5c. ⌥] with a TERMINAL focused leaves the diff mode alone =="
+# Focus routing must not fire the diff switch when the reviewer is in a terminal.
+: > "$CALLS"
+echo 32 > "$ACTIVE"                       # focus the agent's terminal, not the diff
+echo next >> "$T/state/cmd"
+sleep 2
+refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
+check  "the preference is untouched"              "uncommitted" "$T/state/diff-mode"
+: > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="

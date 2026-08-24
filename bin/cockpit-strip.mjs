@@ -31,8 +31,12 @@ const ESC = "\x1b[";
 
 function read() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
-  catch { return { agent: null, terminals: [] }; }
+  catch { return { agent: null, diffMode: "uncommitted", terminals: [] }; }
 }
+
+// The daemon persists one of these mode names; anything else falls back to the
+// default label rather than showing a raw token.
+const DIFF_MODE_LABELS = { uncommitted: "uncommitted", lastcommit: "last commit" };
 
 // Name a terminal by what is RUNNING in it, VSCode-style: `zsh` at a prompt,
 // `node`/`npm`/`vim` while a command is in the foreground. WezTerm's pane title
@@ -56,12 +60,16 @@ function procOf(tty) {
 
 // --- the footer: one full-width line of keys, always visible ----------------
 function renderFooter() {
-  const { agent, terminals } = read();
+  const { agent, diffMode, terminals } = read();
   const attached = agent && agent !== "repo";
   const n = terminals.length;
+  const modeLabel = DIFF_MODE_LABELS[diffMode] ?? DIFF_MODE_LABELS.uncommitted;
   const left = attached
     ? `${ESC}1m${agent}${ESC}0m${ESC}2m · ${n} terminal${n === 1 ? "" : "s"}${ESC}0m`
     : `${ESC}2menter an agent to open terminals${ESC}0m`;
+  // The diff-mode indicator doubles as the hint for ⌥[/⌥], which switch the mode
+  // when the diff pane is focused and terminals otherwise.
+  const diff = `${ESC}2mdiff${ESC}0m ${ESC}1m${modeLabel}${ESC}0m ${ESC}2m(⌥[ ⌥] in diff pane)${ESC}0m`;
   const keys = [
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
@@ -69,7 +77,7 @@ function renderFooter() {
     `${ESC}2m⌥←↑↓→${ESC}0m move`,
     `${ESC}2m⌥z${ESC}0m zoom`,
   ].join(`${ESC}2m  ·  ${ESC}0m`);
-  process.stdout.write(`${ESC}2J${ESC}H ${left}    ${keys}${ESC}K`);
+  process.stdout.write(`${ESC}2J${ESC}H ${left}    ${keys}    ${diff}${ESC}K`);
 }
 
 // --- the strip: a vertical list of the agent's terminals --------------------

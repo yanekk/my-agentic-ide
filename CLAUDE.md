@@ -25,6 +25,13 @@ running while parked, so all of them resume mid-flight on a return, not just the
 one that was on screen. A thin full-width **footer** along the bottom always shows
 that key legend, so the gestures are discoverable without memorising them.
 
+The diff has **two modes**, toggled with the same `⌥[` / `⌥]` — but only while the
+**diff pane is focused**; focused on a terminal, those keys still cycle terminals.
+`uncommitted` (the default) is `HEAD` → working tree, the agent's uncommitted work;
+`lastcommit` is `HEAD~1` → `HEAD`, just the most recent commit. The choice is one
+global preference, **persisted** to `~/.claude/cockpit/diff-mode`, so reopening the
+cockpit restores it and every agent's revdiff is (re)launched in it.
+
 Host is **WezTerm** — terminal and multiplexer in one, chosen for its pane-
 targeting CLI (`wezterm cli send-text --pane-id N --no-paste`), which is what
 makes typing-without-submitting possible.
@@ -70,8 +77,9 @@ Sources for the measured claims: `docs/cockpit.md`, `spikes/pty-inject/RESULTS.m
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
 panes too), `fleet.log`, `daemon.log`, `review-<jobId>.md`, `terminals.json` (what
-the strip and footer render), and `cmd` (the command channel the terminal
-keybindings append to). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
+the strip and footer render — now carries the current `diffMode` too), `diff-mode`
+(the persisted uncommitted/lastcommit preference), and `cmd` (the command channel
+the terminal keybindings append to). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
 
 ## Things that are true because they were measured
 
@@ -106,6 +114,9 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
 | Parking re-activates the cockpit tab | In the GUI the newly created tab becomes the active one, which would swap the whole cockpit off screen. |
 | Reaping a terminal needs **two** consecutive misses | One failed `claude agents` read must not be enough to kill a shell with someone's build running in it. |
+| `⌥[` / `⌥]` route by **which pane is focused** | The keys append `next`/`prev` to `cmd` unconditionally; the daemon reads the cockpit tab's active pane (`is_active`) and sends them to the diff-mode switch when the **diff** pane holds focus, to the terminal cycler otherwise. `⌥t`/`⌥w` are always terminals. |
+| Switching diff mode **restarts** revdiff (`q` then relaunch) | `R` only reloads the *same* range, so changing the range means quitting revdiff back to its shell and relaunching with the new args. Never while the annotation editor is open — `q` and the whole command would land in the comment (same rule as auto-reload). |
+| A parked diff is relaunched on return **only if the mode changed** | `diffLaunchedMode` records the range a parked pane was launched with. If it still matches the global preference the pane comes back untouched — the whole point of parking. If the mode was toggled while it was away, it is relaunched so every agent honours the one persisted choice. |
 
 ## How agent switching is detected
 
