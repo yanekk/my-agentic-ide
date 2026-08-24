@@ -104,13 +104,15 @@ Each of these is a measured finding, not a preference — sources in
 | Long reviews sent as bracketed paste | Over ~10 lines the prompt box collapses them to a `[Pasted text +N lines]` chip. Shorter ones stay expanded and directly editable. |
 | Watchers torn down *before* switching agents | Quitting revdiff flushes its annotations; that write must not be mistaken for a review of the agent being switched to. |
 
-## Per-agent terminals
+## Per-agent panes
 
-Each agent gets its own shell, and so does the fleet list (cwd = the cockpit
-repo). Only one is on screen at a time, in the bottom-right slot.
+Each agent gets its own shell **and its own revdiff**, and so does the fleet list
+(cwd = the cockpit repo). Only one of each is on screen at a time, in the two
+slots.
 
-Switching does **not** open a new shell or `cd` a shared one. The outgoing pane is
-moved into a tab of its own and the incoming pane is moved back into the slot:
+Switching does **not** open a new shell, `cd` a shared one, or restart revdiff.
+The outgoing pane is moved into a tab of its own and the incoming pane is moved
+back into the slot:
 
 ```
 switch away:   wezterm cli move-pane-to-new-tab --pane-id <outgoing>
@@ -128,10 +130,75 @@ keeps them off screen — activating one would fill the window with a bare shell
 and look exactly like the cockpit had vanished. They are still titled
 (`cockpit: <job id>`), so `wezterm cli list` is readable while debugging.
 
-A terminal is killed only when its agent leaves the fleet, and only after **two**
+A pane is killed only when its agent leaves the fleet, and only after **two**
 consecutive `claude agents --json` reads fail to mention it — one bad read must
-not take out a shell with a build running in it. The repo-root shell is never
+not take out a shell with a build running in it. The repo-root panes are never
 reaped.
+
+### The diff slot swaps in the opposite order
+
+Starting revdiff costs a couple of seconds of git and parsing, and that used to
+be paid on every switch: the top of the cockpit went blank and then redrew. A
+parked revdiff is already sitting on that agent's diff, so returning to an agent
+types **nothing at all** — no `cd`, no `revdiff`, no reparse.
+
+The order of the swap is not a style choice. The terminal is a leaf in the bottom
+row, so it can be parked and then re-split from the fleet pane. The diff pane
+spans the window, so its geometry *is* the slot: park it first and the only thing
+left to split is the fleet pane's half-width region, which brings revdiff back at
+59 of 120 columns. So the incoming pane is split **into** the outgoing one and the
+outgoing one is disposed of afterwards — removing it collapses the split, and the
+incoming pane inherits the whole slot at exactly the original size.
+
+```
+switch:   wezterm cli split-pane --top --percent 50 \
+              --pane-id <outgoing diff> --move-pane-id <incoming>
+          wezterm cli move-pane-to-new-tab --pane-id <outgoing diff>
+```
+
+If the diff pane dies outright there is nothing to split into, and the naive
+rebuild gives that same half-width pane. Parking the *terminal* leaves the fleet
+pane alone in the tab, so `split-pane --top` spans the window again; the terminal
+is then moved back.
+
+That path needs something to trigger it, because the reconcile poll returns early
+while the attached agent is still the one showing — so a pane lost mid-attachment
+(quit revdiff with `q`, then exit its shell) would leave the slot empty until the
+next switch. A check on the reap interval notices the missing pane and forgets
+`attached`, and the next poll rebuilds both slots. It is skipped while a reconcile
+is in flight: attaching creates the two panes one after the other, and a check
+landing in that gap sees a missing terminal and restarts an attach that was
+already half done.
+
+### Parked diffs keep following their worktree
+
+Each agent's worktree watcher stays alive while its diff pane is parked, so the
+pane reloads in the background and is **already current** when it comes back.
+Without that, instant switching would just mean instantly showing a stale diff.
+
+Two things must be true before an `R` is sent, and only the first was needed when
+the pane was rebuilt on every switch:
+
+1. **Nothing flushed yet** — `R` drops annotations, so the diff stops moving the
+   moment you start commenting.
+2. **The annotation editor is not open** — revdiff reads every keystroke as
+   comment text while it is, so `R` would be typed *into* the comment as a literal
+   `R`. On a visible pane you would see that happen; in a parked one you would
+   not. The editor is detected by its footer, `[enter] save`.
+
+With a saved annotation and no editor open, revdiff protects itself: it asks
+`Annotations will be dropped — press y to confirm`, and a second `R` counts as
+"any other key" and cancels. Prompts cannot pile up in a parked pane.
+
+### "Is revdiff still running?" needs two signals
+
+A restored pane must not have the revdiff command retyped into it — in a running
+revdiff every character is a keybinding. WezTerm titles a pane after its
+foreground process, which looks like the answer, but the title **lags** the launch
+by about a second and longer across a move; believing a stale `bash` would type
+`cd … && revdiff …` into a live revdiff. So the screen is consulted too: revdiff
+frames its tree and diff, giving 19 lines that begin with `│` within half a second
+of launch and 0 at a shell prompt. Either signal saying "revdiff" is enough.
 
 ### Measured, on wezterm 20240203
 
@@ -145,6 +212,20 @@ socket, so no window had to be disturbed to find any of this out):
 | Does scrollback survive? | Yes — text written before the park is still in the pane after it returns. |
 | Does killing a parked pane leave an empty tab? | No, `kill-pane` disposes of the tab too. |
 | What does the pane experience? | Resize to the full tab and back: two SIGWINCHes per switch. Line output is unaffected; a full-screen TUI reflows. |
+
+And for the diff slot (`spikes/pane-swap/probe.sh`, same setup):
+
+| Question | Answer |
+|---|---|
+| Park the diff pane, then re-split from the fleet pane? | **59x22** — half a 120-column window, because the bottom row is a horizontal split. |
+| Split the incoming pane in first, then park the outgoing one? | **120x22**, bottom row untouched at 59x17 / 60x17. |
+| Rebuilding an empty slot? | Park the terminal → `split-pane --top` from the fleet pane → move the terminal back. Lands at 120x22 over 59x17 / 60x17. |
+| Does a parked revdiff keep its state? | Yes — selected file, scroll position, annotation count and **unflushed annotations**. `O` on the restored pane wrote an annotation made before it was parked. |
+| Is the screen identical afterwards? | No. The pane is resized to the full tab and back, so revdiff reflows and redraws. Nothing is lost. |
+| Pane title while revdiff runs | `revdiff`, but **lagging**: still `bash` at t+0.5s, `revdiff` from t+1.0s, and stale for longer after a move. Back to `bash` after `q`. |
+| Framed lines on screen (`^│`) | 19 within half a second of launch, 0 at a shell prompt, 19 while a status message covers the status bar, 0 after `q`. |
+| `R` while the annotation editor is open | Typed into the comment: `comment on A` became `comment on AR`. |
+| `R` with a saved annotation, then `R` again | `Annotations will be dropped — press y to confirm` → `Reload canceled`, annotation intact. |
 
 ## Configuration
 
@@ -163,11 +244,28 @@ spikes/cockpit-test/run.sh
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
 throwaway git repos, and drives attach → review → switch → switch back → detach →
-reap. 34 assertions. Beyond the review-injection ones it asserts that entering an
-agent *opens* a terminal in its worktree rather than `cd`-ing a shared one, that
-switching *parks* the outgoing terminal instead of killing it, that switching back
-*moves the same pane in* rather than spawning a second shell, and that a terminal
-is reaped only once its agent has left the fleet.
+reap. 55 assertions. Beyond the review-injection ones it asserts that entering an
+agent *opens* a terminal and a diff pane in its worktree rather than `cd`-ing or
+restarting shared ones, that switching *parks* both outgoing panes instead of
+killing them, that switching back *moves the same panes in* — with **no revdiff
+command retyped**, which is the whole point — that a parked agent's diff still
+reloads when its worktree changes but *not* while its annotation editor is open,
+and that both panes are reaped only once their agent has left the fleet.
+
+The stub models pane **titles** too, and deliberately reports a stale one on the
+switch-back so the framed-screen check has to carry that decision. Making
+`diffPaneStatus` title-only fails exactly those two assertions.
+
+```bash
+spikes/pane-swap/probe.sh    # what wezterm and revdiff actually do
+spikes/pane-swap/live.sh     # the real daemon, real mux, real geometry
+```
+
+The stub cannot see geometry, so `live.sh` drives the **real daemon** against a
+headless `wezterm-mux-server` with two throwaway worktrees and a fake `claude
+agents`, and asserts the sizes: 20 checks that both slots come back at 120x22
+over 59x17 / 60x17 on every switch, that each agent's revdiff keeps drawing while
+parked, and that a return *restores* rather than opens.
 
 One trap the shim has to avoid, written down because it cost a debugging round:
 only `send-text` carries stdin, and reading stdin for the other subcommands hangs
@@ -261,8 +359,10 @@ one**, the daemon leaves the panes where they are rather than guessing.
   you press `O`, so auto-reload's "have you started annotating?" check is based on
   the flushed file. revdiff's own confirmation prompt is the backstop.
 - **One agent at a time**, by design (R6).
-- **Terminals live and die with the window.** Closing the cockpit kills every
-  agent terminal; nothing survives a rebuild. This is the deliberate trade for not
+- **A parked pane is resized to the full tab and back**, so revdiff reflows twice
+  per switch. Nothing is lost, but the redraw is visible.
+- **Panes live and die with the window.** Closing the cockpit kills every agent
+  terminal and every agent's revdiff; nothing survives a rebuild. This is the deliberate trade for not
   putting a detached-session multiplexer (`screen`, `dtach`) between you and every
   shell, with its own scrollback, escape key and resize quirks.
 - **Extra panes made with ALT+t are not managed.** They stay where they are while

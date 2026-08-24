@@ -5,6 +5,13 @@
 # stdin) so the daemon's actual output can be asserted on without a real terminal.
 # Drives a fake fleet log through a full attach -> review -> detach cycle.
 #
+# The shim models pane TITLES as well as the pane tree, because that is how the
+# daemon tells a restored diff pane still has revdiff running in it (WezTerm
+# titles a pane after its foreground process). Sending a command containing
+# `revdiff` to a pane sets its title, exactly as launching it would -- and
+# $TITLELAG names panes whose title should be reported STALE, because WezTerm's
+# really does lag the launch by about a second.
+#
 #   spikes/cockpit-test/run.sh
 set -uo pipefail
 
@@ -16,19 +23,24 @@ trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/state"
 # --- stub wezterm ----------------------------------------------------------
 # Records every call, and emulates enough of the mux to exercise the per-agent
-# terminals: `get-text` renders a fake fleet pane from $FLEETSTATE (which is how
-# the daemon decides what is attached), and `list`/`split-pane`/
+# panes: `get-text` renders a fake fleet pane from $FLEETSTATE (which is how the
+# daemon decides what is attached), and `list`/`split-pane`/
 # `move-pane-to-new-tab`/`kill-pane` operate on a tiny pane table in $PANESTATE
-# (lines: "<pane-id> <tab-id>"). Pane ids are handed out in order, so the
-# assertions below can name them.
+# (lines: "<pane-id> <tab-id> <title>"). Pane ids are handed out in order, so the
+# assertions below can name them. $EDITING holds a pane id whose revdiff should
+# pretend its annotation editor is open.
 export CALLS="$T/calls.log"
 export FLEETSTATE="$T/fleetstate"
 export PANESTATE="$T/panestate"
 export NEXTPANE="$T/nextpane"
 export NEXTTAB="$T/nexttab"
+export EDITING="$T/editing"
+export TITLELAG="$T/titlelag"
 : > "$CALLS"
+: > "$EDITING"
+: > "$TITLELAG"
 echo list > "$FLEETSTATE"
-printf '10 0\n20 0\n30 0\n' > "$PANESTATE"   # diff, fleet, repo shell
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$PANESTATE"   # diff, fleet, repo shell
 echo 31 > "$NEXTPANE"
 echo 1  > "$NEXTTAB"
 
@@ -44,7 +56,10 @@ sub="${2:-}"
   # ONLY send-text carries stdin. Reading it for the others hangs: node's async
   # execFile leaves the stdin pipe open, so `cat` would block until the daemon's
   # 4s timeout on every poll -- which looks exactly like a dead mux.
-  if [ "$sub" = "send-text" ] && [ ! -t 0 ]; then printf 'STDIN:%s\n' "$(cat | sed -e 's/$/\\n/' | tr -d '\n')"; fi
+  if [ "$sub" = "send-text" ] && [ ! -t 0 ]; then
+    payload="$(cat)"
+    printf 'STDIN:%s\n' "$(printf '%s' "$payload" | sed -e 's/$/\\n/' | tr -d '\n')"
+  fi
   printf 'END\n'
 } >> "$CALLS"
 
@@ -56,37 +71,60 @@ flag() {                       # flag <name> <argv...> -> value
   done
 }
 rewrite() { mv "$PANESTATE.tmp" "$PANESTATE"; }
+title() { awk -v p="$1" '$1 == p { print $3 }' "$PANESTATE"; }
+retitle() {
+  awk -v p="$1" -v t="$2" '{ if ($1 == p) print $1, $2, t; else print }' \
+      "$PANESTATE" > "$PANESTATE.tmp"
+  rewrite
+}
 
 case "$sub" in
+  send-text)
+    # Launching revdiff makes it the pane's foreground process, so WezTerm
+    # retitles the pane -- which is the signal the daemon reads back.
+    case "$payload" in *revdiff*) retitle "$(flag --pane-id "$@")" revdiff ;; esac
+    ;;
   get-text)
-    s=$(cat "$FLEETSTATE")
-    if [ "$s" = "list" ]; then
-        printf '  enter to collapse\n❯ describe a task for a new session\n'
+    pane=$(flag --pane-id "$@")
+    if [ "$pane" = "20" ]; then                    # the fleet pane
+      s=$(cat "$FLEETSTATE")
+      if [ "$s" = "list" ]; then
+          printf '  enter to collapse\n❯ describe a task for a new session\n'
+      else
+          printf -- '──────────────────────────── %s ─\n❯ \n' "$s"
+      fi
+    elif [ "$pane" = "$(cat "$EDITING")" ]; then   # revdiff, annotation editor up
+      printf ' 💬 > half a comment\n [enter] save  [esc] cancel\n'
+    elif [ "$(title "$pane")" = revdiff ]; then
+      # revdiff frames the tree and the diff, so every row starts with a rule.
+      for _ in 1 2 3 4 5 6 7 8; do printf '│  M f.txt   ││   1  1   context\n'; done
+      printf ' f.txt | +2/-1 | 2 hunks |  ? help\n'
     else
-        printf -- '──────────────────────────── %s ─\n❯ \n' "$s"
+      printf '$ \n'
     fi
     ;;
   list)
-    awk 'BEGIN{printf "["}
-         { printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"sh\",\"cwd\":\"file:///tmp\",\"is_active\":false}", (NR>1 ? "," : ""), $2, $1 }
+    awk 'BEGIN{ printf "["; while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1 }
+         { t = ($1 in lag) ? "sh" : $3
+           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"cwd\":\"file:///tmp\",\"is_active\":false}", (NR>1 ? "," : ""), $2, $1, t }
          END{printf "]\n"}' "$PANESTATE"
     ;;
   split-pane)
     moved=$(flag --move-pane-id "$@")
     if [ -n "$moved" ]; then                       # bring a parked pane back
-      awk -v p="$moved" '{ if ($1 == p) print $1, 0; else print }' "$PANESTATE" > "$PANESTATE.tmp"
+      awk -v p="$moved" '{ if ($1 == p) print $1, 0, $3; else print }' "$PANESTATE" > "$PANESTATE.tmp"
       rewrite
       printf '%s\n' "$moved"
     else
       id=$(cat "$NEXTPANE"); echo $((id + 1)) > "$NEXTPANE"
-      printf '%s 0\n' "$id" >> "$PANESTATE"
+      printf '%s 0 sh\n' "$id" >> "$PANESTATE"
       printf '%s\n' "$id"
     fi
     ;;
   move-pane-to-new-tab)                            # park
     pane=$(flag --pane-id "$@")
     tab=$(cat "$NEXTTAB"); echo $((tab + 1)) > "$NEXTTAB"
-    awk -v p="$pane" -v t="$tab" '{ if ($1 == p) print $1, t; else print }' "$PANESTATE" > "$PANESTATE.tmp"
+    awk -v p="$pane" -v t="$tab" '{ if ($1 == p) print $1, t, $3; else print }' "$PANESTATE" > "$PANESTATE.tmp"
     rewrite
     printf '%s\n' "$tab"
     ;;
@@ -176,10 +214,13 @@ check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
 check "revdiff invoked with --untracked"         "revdiff --untracked" "$CALLS"
 check "diff range is the merge-base commit"      "$MB" "$CALLS"
 check "annotations routed to a per-job file"     "review-abc12345.md" "$CALLS"
-check "diff pane addressed"                      "--pane-id 10" "$CALLS"
+check "the agent got its OWN diff pane"          "opened diff pane 31" "$T/daemon.log"
+check "revdiff typed into that pane, not the old one" "--pane-id 31 --no-paste" "$CALLS"
+check "repo diff pane parked, not reused"        "move-pane-to-new-tab --pane-id 10" "$CALLS"
+refute "the repo diff pane was not typed into"   "--pane-id 10 --no-paste" "$CALLS"
 check "repo shell parked, not reused"            "move-pane-to-new-tab --pane-id 30" "$CALLS"
 check "a terminal opened in the agent worktree"  "--cwd $WT --" "$CALLS"
-check "opened terminal is pane 31"               "opened terminal pane 31" "$T/daemon.log"
+check "opened terminal is pane 32"               "opened terminal pane 32" "$T/daemon.log"
 refute "repo shell was not cd'd into the worktree" "--pane-id 30 --no-paste" "$CALLS"
 
 echo
@@ -244,22 +285,64 @@ check "followed to the second agent's worktree"  "cd \"$WT2\"" "$CALLS"
 check "resolved it by the name in the header"    "enter def67890" "$T/daemon.log"
 check "review file re-keyed to the new job"      "review-def67890.md" "$CALLS"
 refute "did not stay on the first worktree"      "cd \"$WT\" " "$CALLS"
-check "first agent's terminal parked, not killed" "move-pane-to-new-tab --pane-id 31" "$CALLS"
+check "first agent's diff parked, not killed"    "move-pane-to-new-tab --pane-id 31" "$CALLS"
+check "first agent's terminal parked, not killed" "move-pane-to-new-tab --pane-id 32" "$CALLS"
+check "second agent got its own diff pane"       "opened diff pane 33" "$T/daemon.log"
 check "second agent got its own terminal"        "--cwd $WT2 --" "$CALLS"
 refute "nothing was killed on a switch"          "kill-pane" "$CALLS"
 
 echo
-echo "== 5. switching BACK restores the same terminal (the whole point) =="
-# The pane is moved, never respawned: whatever was running in it is still
-# running, and its scrollback comes back with it.
+echo "== 4b. the PARKED agent's diff keeps following its worktree =="
+# This is what stops a restored pane from being a snapshot of whenever you last
+# looked at it: the first agent's watcher is still running, so its revdiff
+# reloads while it sits in a background tab.
 : > "$CALLS"
+: > "$T/state/review-abc12345.md"          # nothing flushed, so reloading is allowed
+echo "more work by the agent" >> "$WT/tracked.txt"
+sleep 3
+
+check "a reload was sent"                        'STDIN:R\n' "$CALLS"
+check "...to the first agent's PARKED pane"      "send-text --pane-id 31 --no-paste" "$CALLS"
+refute "...and not to the visible one"           "send-text --pane-id 33 --no-paste" "$CALLS"
+
+echo
+echo "== 4c. nothing is typed into a pane whose annotation editor is open =="
+# revdiff reads every keystroke as comment text while the editor is up, so an
+# auto-reload R would be typed INTO the comment -- unseen, in a parked pane.
+: > "$CALLS"
+echo 31 > "$EDITING"
+echo "yet more work" >> "$WT/tracked.txt"
+sleep 3
+
+refute "no reload while a comment is half-typed" "send-text --pane-id 31 --no-paste" "$CALLS"
+check  "and the daemon said why"                 "annotation editor is open" "$T/daemon.log"
+: > "$EDITING"
+
+echo
+echo "== 5. switching BACK restores both panes (the whole point) =="
+# The panes are moved, never respawned: whatever was running is still running,
+# revdiff still has the diff parsed, and scrollback comes back with them.
+#
+# The restored pane's TITLE is reported stale here on purpose. WezTerm's lags a
+# launch by about a second and longer across a move, and believing it would
+# retype the whole revdiff command into a running revdiff, where every character
+# is a keybinding. The framed screen is what has to carry the decision.
+: > "$CALLS"
+echo 31 > "$TITLELAG"
 echo "test agent" > "$FLEETSTATE"
 sleep 3
 
-check "the original pane is moved back in"       "--move-pane-id 31" "$CALLS"
-check "daemon says restored, not opened"         "restored terminal pane 31" "$T/daemon.log"
+check "the agent's diff pane is moved back in"   "--move-pane-id 31" "$CALLS"
+check "the agent's terminal is moved back in"    "--move-pane-id 32" "$CALLS"
+check "daemon says restored, not opened (diff)"  "restored diff pane 31" "$T/daemon.log"
+check "daemon says restored, not opened (term)"  "restored terminal pane 32" "$T/daemon.log"
 refute "no second shell spawned for that agent"  "--cwd $WT --" "$CALLS"
-check "second agent's terminal parked in turn"   "move-pane-to-new-tab --pane-id 32" "$CALLS"
+# The reason switching back is instant: nothing is retyped and no diff reparsed.
+refute "revdiff was NOT restarted on return"     "revdiff --untracked" "$CALLS"
+refute "no cd was retyped either"                "cd \"$WT\"" "$CALLS"
+check "second agent's diff parked in turn"       "move-pane-to-new-tab --pane-id 33" "$CALLS"
+: > "$TITLELAG"
+check "second agent's terminal parked in turn"   "move-pane-to-new-tab --pane-id 34" "$CALLS"
 
 echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
@@ -267,11 +350,12 @@ echo "== 6. back to the list: the repo shell returns, agents keep running =="
 echo list > "$FLEETSTATE"
 sleep 3
 
+check "repo diff pane moved back into the slot"  "--move-pane-id 10" "$CALLS"
 check "repo shell moved back into the slot"      "--move-pane-id 30" "$CALLS"
-refute "no agent terminal was killed on detach"  "kill-pane" "$CALLS"
+refute "no agent pane was killed on detach"      "kill-pane" "$CALLS"
 
 echo
-echo "== 7. an agent that leaves the fleet has its terminal reaped =="
+echo "== 7. an agent that leaves the fleet has BOTH its panes reaped =="
 # Two consecutive misses are required, so one bad read cannot kill a shell.
 : > "$CALLS"
 cat > "$AGENTS_JSON" <<JSON
@@ -280,10 +364,35 @@ cat > "$AGENTS_JSON" <<JSON
 JSON
 sleep 3
 
-check "the vanished agent's pane was killed"     "kill-pane --pane-id 32" "$CALLS"
+check "the vanished agent's terminal was killed" "kill-pane --pane-id 34" "$CALLS"
+check "the vanished agent's diff pane too"       "kill-pane --pane-id 33" "$CALLS"
 check "reaping was logged with the job id"       "agent def67890 is gone" "$T/daemon.log"
-refute "the surviving agent kept its terminal"   "kill-pane --pane-id 31" "$CALLS"
+refute "the surviving agent kept its terminal"   "kill-pane --pane-id 32" "$CALLS"
+refute "the surviving agent kept its diff pane"  "kill-pane --pane-id 31" "$CALLS"
 refute "the repo shell is never reaped"          "kill-pane --pane-id 30" "$CALLS"
+refute "the repo diff pane is never reaped"      "kill-pane --pane-id 10" "$CALLS"
+
+echo
+echo "== 8. a diff pane that dies is rebuilt, at full width =="
+# Quit revdiff with `q`, exit the shell, and the pane is gone. Nothing else
+# repairs it: the reconcile poll returns early while the same agent is still
+# showing, so the slot would sit empty until the next switch.
+echo "test agent" > "$FLEETSTATE"
+sleep 3
+: > "$CALLS"
+awk '$1 != 31' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+sleep 4
+
+check "the loss was noticed"                     "diff pane for abc12345 is gone" "$T/daemon.log"
+check "the slot was rebuilt"                     "rebuilt the diff slot" "$T/daemon.log"
+# Full width is only possible with the fleet pane alone in the tab, so the
+# terminal has to step out of the way and come back.
+check "the terminal stepped aside for the rebuild" "move-pane-to-new-tab --pane-id 32" "$CALLS"
+check "and was moved back, not respawned"        "--move-pane-id 32" "$CALLS"
+check "the full-width split came off the fleet pane" "--top --percent 55 --pane-id 20" "$CALLS"
+check "the placeholder was killed, not parked"   "kill-pane" "$CALLS"
+check "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log"
+check "revdiff started in it"                    "revdiff --untracked" "$CALLS"
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

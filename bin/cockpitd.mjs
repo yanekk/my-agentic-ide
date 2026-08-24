@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // cockpitd — follow the `claude agents` fleet view and keep the cockpit in sync.
 //
-// Watches for attach/detach in the fleet view. On each attach it retargets the
-// diff pane at that agent's worktree and swaps the bottom-right slot to that
-// agent's OWN terminal -- every agent keeps a private shell that keeps running
-// while you are elsewhere, so switching away and back resumes it mid-flight
-// rather than starting over. When you flush review annotations (`O` in revdiff),
+// Watches for attach/detach in the fleet view. On each attach it swaps BOTH
+// slots to that agent's own panes: its own revdiff on its own worktree, and its
+// own terminal. Every agent keeps both alive -- they keep running while you are
+// elsewhere, so switching away and back resumes them mid-flight rather than
+// starting over. Nothing is re-typed and no diff is re-parsed on a return, which
+// is what makes switching instant. When you flush review annotations (`O`),
 // it types them into the agent's prompt box and leaves them there UNSENT for you
 // to edit and send.
 //
@@ -131,28 +132,77 @@ function sendRaw(paneId, text, { paste = false } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** revdiff's annotation editor replaces the status bar with its own footer. */
+const EDITOR_MARKER = "[enter] save";
 /**
- * Run a shell command in a pane that may currently be showing revdiff.
- *
- * `q` quits revdiff if it is running; if it is not, `q` is a stray character on
- * the shell prompt, which the following ctrl-U clears. So this is safe in both
- * states without having to track which one we are in.
+ * revdiff frames its file tree and diff, so every row of its screen begins with
+ * a box-drawing rule. A shell prompt does not produce anything like this many.
  */
-async function runInPane(paneId, cmd) {
-  sendRaw(paneId, "q");
-  await sleep(350);
+const FRAMED_LINES = /^│/gm;
+const FRAMED_ENOUGH = 5;
+/** How long a freshly spawned login shell gets before we type into it. */
+const SHELL_SETTLE_MS = 400;
+
+/**
+ * What is in a diff pane right now.
+ *
+ *   "absent"  -- the pane is gone
+ *   "shell"   -- a shell prompt: revdiff is not running (someone pressed `q`)
+ *   "editing" -- revdiff is up with its ANNOTATION EDITOR OPEN
+ *   "running" -- revdiff is up and otherwise idle
+ *
+ * "editing" is why this function exists. While the editor is open revdiff treats
+ * every keystroke as comment text, so an auto-reload `R` is typed INTO the
+ * comment as a literal "R". That is survivable on a pane you are looking at; a
+ * parked pane would silently collect stray letters in a half-written comment.
+ *
+ * Two independent signals say revdiff is running, and EITHER is enough, because
+ * the obvious one is not trustworthy on its own: WezTerm titles a pane after its
+ * foreground process, but the title lags the launch by about a second -- longer
+ * for a pane that has just been moved between tabs. Believing a stale "bash"
+ * would retype the whole revdiff command into a running revdiff, where every
+ * character is a keybinding. So the screen is consulted too, and it answers
+ * immediately: measured 19 framed lines within half a second of launch, 0 at a
+ * shell prompt, 19 again while a transient status message covers the status bar,
+ * and back to 0 once revdiff is quit with `q`.
+ */
+function diffPaneStatus(paneId, table = paneTable()) {
+  const pane = table?.find((p) => p.pane_id === paneId);
+  if (!pane) return "absent";
+  const text = wez(["get-text", "--pane-id", String(paneId)]) ?? "";
+  if (text.includes(EDITOR_MARKER)) return "editing";
+  const framed = (text.match(FRAMED_LINES) ?? []).length >= FRAMED_ENOUGH;
+  return framed || /revdiff/.test(pane.title ?? "") ? "running" : "shell";
+}
+
+/**
+ * Start revdiff in a pane sitting at a shell prompt.
+ *
+ * ctrl-U first, because a restored pane may have stray characters on its prompt
+ * -- the `q` that quit revdiff, for one. No `q` is sent: callers only reach here
+ * when revdiff is *not* running, and a `q` into a running revdiff with the
+ * annotation editor open would land in the comment.
+ */
+function launchInPane(paneId, cmd) {
   sendRaw(paneId, "\x15");          // ctrl-U: clear the line
   sendRaw(paneId, `${cmd}\n`);
 }
 
 // ---------------------------------------------------------------------------
-// Per-agent terminals
+// Per-agent panes
 //
-// The bottom-right slot shows ONE pane at a time, but every agent keeps its own
-// live shell. Switching agents moves the outgoing pane into a tab of its own and
-// moves the incoming one back into the slot. WezTerm never tears the PTY down,
-// so a `sleep 60` started before a switch has ~30s left when you come back 30s
-// later -- and scrollback, cwd, history and any running job come back with it.
+// Each of the two slots -- the full-width diff on top, the terminal bottom-right
+// -- shows ONE pane at a time, but every agent keeps its own live pane in both.
+// Switching agents moves the outgoing pane into a tab of its own and moves the
+// incoming one back into the slot. WezTerm never tears the PTY down, so a
+// `sleep 60` started before a switch has ~30s left when you come back 30s later
+// -- and scrollback, cwd, history and any running job come back with it.
+//
+// The diff slot works the same way and for a sharper reason: starting revdiff
+// costs a couple of seconds of git and parsing, which used to be paid on EVERY
+// switch. A parked revdiff is already sitting on that agent's diff, with its
+// selected file, scroll position and unflushed annotations intact, so returning
+// to an agent types nothing at all.
 //
 // Measured on wezterm 20240203 against a headless mux server (so no window was
 // disturbed to find this out):
@@ -183,6 +233,9 @@ const REAP_STRIKES = 2;
 /** key (job id, or REPO_KEY) -> pane id. Every entry is a live PTY. */
 const terminals = new Map([[REPO_KEY, panes.shell]]);
 let visibleKey = REPO_KEY;
+/** The same, for the diff slot: one live revdiff per agent. */
+const diffs = new Map([[REPO_KEY, panes.diff]]);
+let visibleDiff = REPO_KEY;
 const reapStrikes = new Map();
 
 function paneTable() {
@@ -191,14 +244,28 @@ function paneTable() {
   try { return JSON.parse(out); } catch { return null; }
 }
 
-/** Keep panes.json honest: the visible shell pane id changes on every switch. */
-function publishShellPane(paneId) {
-  panes.shell = paneId;
+/** Keep panes.json honest: both visible pane ids change on every switch. */
+function publishPanes(patch) {
+  Object.assign(panes, patch);
   try {
     const tmp = `${PANES}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(panes)}\n`);
     fs.renameSync(tmp, PANES);
   } catch { /* the daemon's own copy is what matters; the file is for humans */ }
+}
+
+/**
+ * Move a pane out of the cockpit tab, keeping its PTY -- and everything running
+ * in it -- alive.
+ */
+function parkPane(paneId, label, cockpitTab) {
+  wez(["move-pane-to-new-tab", "--pane-id", String(paneId)]);
+  // Titled purely so `wezterm cli list` is readable while debugging -- the tab
+  // bar is off.
+  wez(["set-tab-title", "--pane-id", String(paneId), `cockpit: ${label}`]);
+  // In the GUI the new tab becomes the active one, which would swap the whole
+  // cockpit off screen. Put it back.
+  if (cockpitTab !== undefined) wez(["activate-tab", "--tab-id", String(cockpitTab)]);
 }
 
 /**
@@ -220,14 +287,7 @@ async function showTerminal(key, cwd, label) {
 
   const outgoing = terminals.get(visibleKey);
   if (outgoing !== undefined && visibleKey !== key) {
-    wez(["move-pane-to-new-tab", "--pane-id", String(outgoing)]);
-    // Titled purely so `wezterm cli list` is readable while debugging -- the tab
-    // bar is off.
-    wez(["set-tab-title", "--pane-id", String(outgoing),
-         visibleKey === REPO_KEY ? "cockpit: repo" : `cockpit: ${visibleKey}`]);
-    // In the GUI the new tab becomes the active one, which would swap the whole
-    // cockpit off screen. Put it back.
-    if (cockpitTab !== undefined) wez(["activate-tab", "--tab-id", String(cockpitTab)]);
+    parkPane(outgoing, visibleKey === REPO_KEY ? "repo" : visibleKey, cockpitTab);
   }
 
   let id = terminals.get(key);
@@ -252,16 +312,119 @@ async function showTerminal(key, cwd, label) {
   // split-pane activates whatever it put in the slot. Switching agents happens in
   // the fleet view, so that is where the next keystroke belongs.
   wez(["activate-pane", "--pane-id", String(panes.fleet)]);
-  publishShellPane(id);
+  publishPanes({ shell: id });
 }
 
 /**
- * Kill terminals whose agent is gone from the fleet. Without this they
- * accumulate for the life of the window, pointing at worktrees that no longer
- * exist, with no way to reach them (their agent is no longer in the list).
+ * Rebuild an EMPTY diff slot, full width.
+ *
+ * If the slot's pane is gone -- someone exited the shell revdiff was running in
+ * -- a plain `split-pane --top --pane-id <fleet>` does NOT restore it: it splits
+ * the fleet pane's own region, so the new pane is half a window wide (59 of 120
+ * columns in the probe) because the bottom row is a horizontal split. Parking the
+ * terminal leaves the fleet pane alone in the tab, so the split spans the window;
+ * the terminal is then moved back. Both ways measured; see
+ * spikes/pane-swap/RESULTS.md.
+ *
+ * Returns a throwaway placeholder pane holding the slot, for the caller to split
+ * into and then kill.
  */
-async function reapTerminals() {
-  const candidates = [...terminals.keys()].filter((k) => k !== REPO_KEY && k !== visibleKey);
+function rebuildDiffSlot(cockpitTab) {
+  const term = terminals.get(visibleKey);
+  if (term !== undefined) parkPane(term, "rebuilding", cockpitTab);
+  const out = wez(["split-pane", "--top", "--percent", "55",
+                   "--pane-id", String(panes.fleet), "--cwd", panes.repo,
+                   "--", LOGIN_SHELL, "-l"]);
+  if (term !== undefined) {
+    wez(["split-pane", "--right", "--percent", "50",
+         "--pane-id", String(panes.fleet), "--move-pane-id", String(term)]);
+  }
+  const id = Number.parseInt((out ?? "").trim(), 10);
+  if (!Number.isInteger(id)) {
+    log("could not rebuild the diff slot");
+    return null;
+  }
+  log(`rebuilt the diff slot (placeholder pane ${id})`);
+  return id;
+}
+
+/**
+ * Put `key`'s diff pane in the full-width top slot, creating it at `cwd` the
+ * first time. Whatever was there is parked, not killed.
+ *
+ * The ORDER is the opposite of the terminal slot's, and it is not a style
+ * choice. The diff pane spans the window, so its geometry lives in the pane it
+ * occupies: park it first and there is nothing left to split but the fleet
+ * pane's half-width region. So the incoming pane is split INTO the outgoing one
+ * (`--percent 50` of the slot) and the outgoing one is disposed of afterwards;
+ * removing it collapses the split and the incoming pane inherits the whole slot,
+ * at exactly the original size. Measured both ways -- getting this backwards
+ * brings revdiff back at half width.
+ *
+ * Returns { pane, spawned } so the caller knows whether anything needs typing.
+ */
+async function showDiff(key, cwd, label) {
+  const table = paneTable();
+  if (!table) {
+    log("cannot read the pane list; leaving the diff alone");
+    return null;
+  }
+
+  const live = new Set(table.map((p) => p.pane_id));
+  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  for (const [k, id] of diffs) if (!live.has(id)) diffs.delete(k);
+
+  if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
+
+  let anchor = diffs.get(visibleDiff);
+  const throwaway = anchor === undefined;
+  if (throwaway) {
+    anchor = rebuildDiffSlot(cockpitTab);
+    if (anchor === null) return null;
+  }
+
+  let pane = diffs.get(key);
+  if (pane !== undefined) {
+    const moved = wez(["split-pane", "--top", "--percent", "50",
+                       "--pane-id", String(anchor), "--move-pane-id", String(pane)]);
+    if (moved === null) { diffs.delete(key); pane = undefined; }
+  }
+  let spawned = false;
+  if (pane === undefined) {
+    const out = wez(["split-pane", "--top", "--percent", "50",
+                     "--pane-id", String(anchor), "--cwd", cwd, "--", LOGIN_SHELL, "-l"]);
+    const id = Number.parseInt((out ?? "").trim(), 10);
+    if (!Number.isInteger(id)) {
+      log(`could not open a diff pane for ${label ?? key}`);
+      return null;
+    }
+    pane = id;
+    spawned = true;
+    diffs.set(key, pane);
+  }
+
+  if (throwaway) wez(["kill-pane", "--pane-id", String(anchor)]);
+  else parkPane(anchor, `diff ${visibleDiff === REPO_KEY ? "repo" : visibleDiff}`, cockpitTab);
+
+  visibleDiff = key;
+  // split-pane activates whatever it put in the slot. Switching agents happens in
+  // the fleet view, so that is where the next keystroke belongs.
+  wez(["activate-pane", "--pane-id", String(panes.fleet)]);
+  publishPanes({ diff: pane });
+  log(spawned ? `opened diff pane ${pane} for ${label ?? key} at ${cwd}`
+              : `restored diff pane ${pane} for ${label ?? key}`);
+  return { pane, spawned };
+}
+
+/**
+ * Kill the panes of agents that are gone from the fleet, in both slots, and stop
+ * following their worktrees. Without this they accumulate for the life of the
+ * window, pointing at worktrees that no longer exist, with no way to reach them
+ * (their agent is no longer in the list).
+ */
+async function reapAgents() {
+  const candidates = [...new Set([...terminals.keys(), ...diffs.keys()])]
+    .filter((k) => k !== REPO_KEY && k !== visibleKey && k !== visibleDiff);
   if (!candidates.length) return;
 
   let list;
@@ -273,10 +436,43 @@ async function reapTerminals() {
     const strikes = (reapStrikes.get(key) ?? 0) + 1;
     reapStrikes.set(key, strikes);
     if (strikes < REAP_STRIKES) continue;
-    wez(["kill-pane", "--pane-id", String(terminals.get(key))]);
-    log(`reaped terminal pane ${terminals.get(key)} — agent ${key} is gone`);
-    terminals.delete(key);
+    for (const [what, slot] of [["terminal", terminals], ["diff", diffs]]) {
+      const id = slot.get(key);
+      if (id === undefined) continue;
+      wez(["kill-pane", "--pane-id", String(id)]);
+      log(`reaped ${what} pane ${id} — agent ${key} is gone`);
+      slot.delete(key);
+    }
+    stopWorktreeWatch(key);
     reapStrikes.delete(key);
+  }
+}
+
+/**
+ * Notice that the attached agent has lost a pane, and rebuild it.
+ *
+ * A pane can go away under us -- quit revdiff with `q`, then exit the shell it
+ * was running in. Nothing else would repair it: the reconcile poll returns early
+ * while the attached agent is still the one showing, so the slot would sit empty
+ * until the next switch. Forgetting `attached` is enough; the next poll sees a
+ * newly attached agent and rebuilds both slots.
+ *
+ * Skipped while a reconcile is in flight: attaching creates the two panes one
+ * after the other, and a check landing in that gap sees a missing terminal and
+ * restarts an attach that was already half done.
+ */
+function healMissingPanes() {
+  if (!attached || reconciling) return;
+  const table = paneTable();
+  if (!table) return;
+  const live = new Set(table.map((p) => p.pane_id));
+  for (const [what, slot] of [["diff", diffs], ["terminal", terminals]]) {
+    const id = slot.get(attached.jobId);
+    if (id !== undefined && live.has(id)) continue;
+    log(`${what} pane for ${attached.jobId} is gone; rebuilding`);
+    slot.delete(attached.jobId);
+    attached = null;
+    return;
   }
 }
 
@@ -361,11 +557,30 @@ function tail(file, onLine) {
  * into it there would spawn one instead of commenting. Verified; see RESULTS.md.
  */
 let attached = null;          // { jobId, worktree, reviewFile }
-let watchers = [];            // torn down on every switch
+let watchers = [];            // annotation watch: torn down on every switch
 
 function stopWatchers() {
   for (const w of watchers) { try { w.close(); } catch {} }
   watchers = [];
+}
+
+/**
+ * Worktree watches, one per agent, kept ALIVE while that agent's diff pane is
+ * parked.
+ *
+ * This is what makes a restored pane current rather than a snapshot of whenever
+ * you last looked at it. The agent keeps writing while you are elsewhere, so
+ * without this the whole point of parking the pane would be undone: it would come
+ * back instantly and out of date. Reloading in the background costs one `R` per
+ * quiet second of agent writes, in a pane nobody is looking at.
+ */
+const worktreeWatches = new Map();      // jobId -> fs.FSWatcher
+
+function stopWorktreeWatch(jobId) {
+  const w = worktreeWatches.get(jobId);
+  if (!w) return;
+  try { w.close(); } catch {}
+  worktreeWatches.delete(jobId);
 }
 
 /** Compose the annotations into the prompt we type into the agent. */
@@ -439,22 +654,46 @@ function watchAnnotations(file) {
   watchers.push(w);
 }
 
-function watchWorktree(worktree, reviewFile) {
-  if (!AUTO_RELOAD) return;
+/**
+ * Ask an agent's revdiff to reload -- visible or parked, it is the same pane.
+ *
+ * Two things must be true before `R` is sent, and only one of them was needed
+ * back when the diff pane was rebuilt on every switch:
+ *
+ * 1. **Nothing flushed yet.** `R` drops annotations, so the diff has to stop
+ *    moving the moment you start commenting.
+ * 2. **The annotation editor is not open.** revdiff reads every keystroke as
+ *    comment text while it is, so `R` would be typed into the comment as a
+ *    literal "R" -- unnoticed, in a pane that is not on screen.
+ *
+ * With a *saved* annotation and no editor open, `R` is safe by revdiff's own
+ * doing: it asks "Annotations will be dropped -- press y to confirm", a second
+ * `R` counts as "any other key" and cancels, and the annotation survives. So
+ * prompts cannot pile up in a parked pane. Measured.
+ */
+function reloadDiff(jobId, reviewFile) {
+  const pane = diffs.get(jobId);
+  if (pane === undefined) return;
+
+  let pending = "";
+  try { pending = fs.readFileSync(reviewFile, "utf8"); } catch {}
+  if (pending.trim()) return;
+
+  const status = diffPaneStatus(pane);
+  if (status === "editing") return log(`not reloading ${jobId}: annotation editor is open`);
+  if (status !== "running") return;
+  sendRaw(pane, "R");
+}
+
+function watchWorktree(jobId, worktree, reviewFile) {
+  if (!AUTO_RELOAD || worktreeWatches.has(jobId)) return;
   let timer = null;
   const w = fs.watch(worktree, { recursive: true }, (_e, name) => {
     if (!name || name.startsWith(".git/") || name.includes("node_modules")) return;
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      // Only refresh while nothing has been flushed for review. Once you start
-      // commenting, the diff should stop moving under you.
-      let pending = "";
-      try { pending = fs.readFileSync(reviewFile, "utf8"); } catch {}
-      if (pending.trim()) return;
-      sendRaw(panes.diff, "R");
-    }, RELOAD_DEBOUNCE_MS);
+    timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
   });
-  watchers.push(w);
+  worktreeWatches.set(jobId, w);
 }
 
 async function onEnter(jobId, knownName) {
@@ -477,31 +716,42 @@ async function onEnter(jobId, knownName) {
   attached = { jobId, worktree, reviewFile, name: knownName ?? agent.name };
   log(`enter ${jobId} "${agent.name}" → ${worktree}`);
 
-  const base = mergeBase(worktree);
-  if (!base) log(`warning: no merge base found in ${worktree}, showing working tree`);
+  const shown = await showDiff(jobId, worktree, agent.name);
+  // A restored pane already has revdiff up on this diff, with the file you were
+  // reading and any unflushed annotations still there. Typing nothing is the
+  // entire point -- so revdiff is only started when there is no revdiff to
+  // return to: a brand-new pane, or one whose revdiff was quit with `q`.
+  if (shown && (shown.spawned || diffPaneStatus(shown.pane) === "shell")) {
+    const base = mergeBase(worktree);
+    if (!base) log(`warning: no merge base found in ${worktree}, showing working tree`);
 
-  // --untracked is not optional: agents create new files constantly, and plain
-  // `git diff` does not report them. A single base argument diffs base ->
-  // WORKING TREE, which is what includes uncommitted work.
-  const cmd = [
-    "revdiff", "--untracked",
-    "-o", JSON.stringify(reviewFile),
-    base ?? "",
-  ].filter(Boolean).join(" ");
+    // --untracked is not optional: agents create new files constantly, and plain
+    // `git diff` does not report them. A single base argument diffs base ->
+    // WORKING TREE, which is what includes uncommitted work.
+    const cmd = [
+      "revdiff", "--untracked",
+      "-o", JSON.stringify(reviewFile),
+      base ?? "",
+    ].filter(Boolean).join(" ");
 
-  await runInPane(panes.diff, `cd ${JSON.stringify(worktree)} && ${cmd}`);
+    if (shown.spawned) await sleep(SHELL_SETTLE_MS);   // let the login shell start reading
+    launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${cmd}`);
+  }
+
   await showTerminal(jobId, worktree, agent.name);
 
   watchAnnotations(reviewFile);
-  watchWorktree(worktree, reviewFile);
+  watchWorktree(jobId, worktree, reviewFile);
 }
 
 async function onExit() {
   if (attached) log(`exit ${attached.jobId} → fleet list`);
   stopWatchers();
   attached = null;              // blocks injection while the list is showing
-  // The agent's own terminal is parked, not closed: whatever is running in it
-  // keeps running, and entering that agent again brings it back mid-flight.
+  // Both of the agent's panes are parked, not closed: whatever is running keeps
+  // running, its revdiff keeps following its worktree, and entering that agent
+  // again brings both back mid-flight.
+  await showDiff(REPO_KEY, panes.repo, "repo");
   await showTerminal(REPO_KEY, panes.repo, "repo");
 }
 
@@ -584,11 +834,17 @@ tail(FLEET_LOG, (line) => {
   if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, 250);
 });
 setInterval(reconcile, POLL_MS);
-setInterval(reapTerminals, REAP_MS);
+setInterval(reapAgents, REAP_MS);
+setInterval(healMissingPanes, REAP_MS);
 reconcile();
 
-process.on("SIGINT", () => { stopWatchers(); process.exit(0); });
-process.on("SIGTERM", () => { stopWatchers(); process.exit(0); });
+const shutdown = () => {
+  stopWatchers();
+  for (const jobId of [...worktreeWatches.keys()]) stopWorktreeWatch(jobId);
+  process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 // Stay alive. This runs unattended behind a terminal window; dying silently means
 // the panes simply stop following and nothing says why.

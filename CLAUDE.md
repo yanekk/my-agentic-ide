@@ -1,9 +1,10 @@
 # agentic-ide
 
 A terminal cockpit for reviewing what `claude agents` produce. Entering an agent
-in the fleet view switches the diff to that agent's worktree and swaps in that
-agent's **own terminal** — a private shell per agent that keeps running while you
-are elsewhere, so switching away and back resumes it mid-flight. Review comments
+in the fleet view swaps in that agent's **own two panes** — its own revdiff on its
+own worktree, and its own private shell. Both keep running while you are
+elsewhere, so switching away and back resumes them mid-flight: nothing is retyped
+and no diff is reparsed, which is what makes a return instant. Review comments
 come back as a prompt typed into the agent's input box, left **unsent** so the
 wording can be edited first.
 
@@ -47,10 +48,14 @@ bin/install.sh          per-machine setup: prerequisites, config.lua, the symlin
 bin/cockpit-layout.sh   splits panes, records ids, starts daemon, execs fleet view
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (20 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (55 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
+spikes/pane-swap/       headless-mux probe for swapping the full-width diff pane
 docs/cockpit.md         how it works and why; read before changing the daemon
 ```
+
+Sources for the measured claims: `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md`
+(injection, per-agent terminals) and `spikes/pane-swap/RESULTS.md` (the diff slot).
 
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json`, `fleet.log`, `daemon.log`,
@@ -59,7 +64,8 @@ file that is *not* regenerated), `panes.json`, `fleet.log`, `daemon.log`,
 ## Things that are true because they were measured
 
 Do not "simplify" these away — each was found by getting it wrong first. Sources
-in `docs/cockpit.md` and `spikes/pty-inject/RESULTS.md`.
+in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
+`spikes/pane-swap/RESULTS.md`.
 
 | | |
 |---|---|
@@ -74,6 +80,12 @@ in `docs/cockpit.md` and `spikes/pty-inject/RESULTS.md`.
 | Splits name their program explicitly | They would otherwise inherit `default_prog` and re-run the layout script forever. |
 | The checkout's path is recorded, not derived | A symlinked `~/.wezterm.lua` makes `wezterm.config_file` report the **symlink**, so the config cannot locate its own repo. It used to guess `~/src/agentic-ide`, which is wrong for any other clone name or projects root. `bin/install.sh` writes both paths to `~/.claude/cockpit/config.lua`; the old guesses remain as fallbacks so an un-installed checkout still runs. |
 | Layout failures `exec` a shell, never exit | As `default_prog` it is the window's only pane; exiting closes the window and takes the error message with it. |
+| Agent **diffs** are moved too, never restarted | Starting revdiff costs seconds of git and parsing, which used to be paid on every switch — the top of the cockpit went blank and redrew. A parked revdiff comes back with its selected file, scroll position and unflushed annotations, so a return types nothing at all. |
+| The diff slot swaps in the **opposite order** to the terminal slot | The diff pane spans the window, so its geometry *is* the slot. Park it first and the only thing left to split is the fleet pane's half-width region — revdiff comes back at 59 of 120 columns. Split the incoming pane *into* the outgoing one and dispose of the outgoing one afterwards; the split collapses and the incoming pane inherits the full slot. |
+| Rebuilding an empty diff slot parks the **terminal** first | Same reason. With the fleet pane alone in the tab, `split-pane --top` spans the window; the terminal is then moved back. |
+| Parked diffs keep their worktree watcher | Otherwise instant switching would just mean instantly showing a stale diff. The pane reloads in the background and is current when it returns. |
+| Never send `R` while the annotation editor is open | revdiff reads every keystroke as comment text, so `R` lands *in* the comment (`comment on A` → `comment on AR`). Detected by its footer, `[enter] save`. On a visible pane you would see it; in a parked one you would not. |
+| "Is revdiff running" takes **two** signals | The pane title becomes `revdiff` but lags the launch by ~1s, longer after a move. Believing a stale `bash` retypes the whole command into a live revdiff, where every character is a keybinding. So the framed screen (19 lines starting with `│`, 0 at a prompt) is counted too; either signal is enough. |
 | Agent terminals are **moved**, never respawned | `move-pane-to-new-tab` parks the outgoing pane and `split-pane --move-pane-id` brings the incoming one back. WezTerm never tears the PTY down, so a `sleep 60` left running has ~30s left when you return 30s later. Measured: a 1/s counter accrued 21 ticks while its pane sat parked. |
 | The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
 | Parking re-activates the cockpit tab | In the GUI the newly created tab becomes the active one, which would swap the whole cockpit off screen. |
@@ -95,11 +107,13 @@ something was attached, never *which*.
 
 - Agent names must be unique to resolve from the pane header; ambiguity is logged
   and the panes are left alone rather than pointed at a guess.
-- Agent terminals live and die with the cockpit **window**. Closing it kills every
-  one of them; nothing survives a rebuild. (Deliberate — the alternative is a
-  detached-session multiplexer between you and every shell.)
+- Agent panes live and die with the cockpit **window**. Closing it kills every
+  agent terminal and every agent's revdiff; nothing survives a rebuild.
+  (Deliberate — the alternative is a detached-session multiplexer between you and
+  every shell.)
 - A parked pane is resized to the full tab and back, so it takes two SIGWINCHes
-  per switch. Line-oriented output does not care; a full-screen TUI reflows.
+  per switch. Line-oriented output does not care; revdiff reflows and redraws —
+  nothing is lost, but the redraw is visible.
 - Unflushed annotations are invisible to the daemon, so auto-reload's "have you
   started commenting?" check is based on the flushed file.
 - One agent at a time, by design.
