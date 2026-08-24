@@ -438,6 +438,10 @@ one**, the daemon leaves the panes where they are rather than guessing.
   drops it from the agent's list on the next reconcile; only the death of the
   *visible* terminal triggers a slot rebuild. This is intended — a background
   terminal is expected to come and go.
-- **The strip is ~12 columns**, so a terminal's title is trimmed to its
-  foreground process name (`node`, `zsh`, …). Two terminals running the same
-  program are told apart by their number, not their title.
+- **Each terminal is named by its foreground process** (`zsh` at a prompt,
+  `node`/`npm`/`vim` while a command runs), not by the pane title — that only
+  reflects the shell's prompt string (usually the cwd), which makes a useless
+  name. The strip resolves the process from the tty (`ps -t`) on every repaint,
+  so the label tracks the running command live. Two terminals running the same
+  program are told apart by their number. The strip is ~12 columns, so a long
+  process name is clipped.

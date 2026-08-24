@@ -21,6 +21,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
@@ -33,10 +34,24 @@ function read() {
   catch { return { agent: null, terminals: [] }; }
 }
 
-// A terminal's title is its foreground process ("-zsh", "node", a full path);
-// trim it to something that fits a ~12-column strip.
-function short(title) {
-  return (title || "sh").replace(/^-/, "").split(/[/ ]/).pop().slice(0, 8) || "sh";
+// Name a terminal by what is RUNNING in it, VSCode-style: `zsh` at a prompt,
+// `node`/`npm`/`vim` while a command is in the foreground. WezTerm's pane title
+// only reflects the shell's prompt string (usually the cwd), so we ask the OS
+// instead: `ps -t <tty>` lists the tty's processes, and the foreground one is the
+// process group with `+` in its state. Resolved on every repaint, so it tracks
+// the running command live. Falls back to the number alone if ps says nothing.
+function procOf(tty) {
+  if (!tty) return null;
+  try {
+    const out = execFileSync("ps", ["-t", tty, "-o", "stat=,comm="],
+                             { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] });
+    let comm = null;
+    for (const line of out.split("\n")) {
+      const m = line.trim().match(/^(\S+)\s+(.+)$/);
+      if (m && m[1].includes("+")) comm = m[2];       // last foreground-group line wins
+    }
+    return comm ? comm.replace(/^-/, "").split("/").pop() : null;
+  } catch { return null; }
 }
 
 // --- the footer: one full-width line of keys, always visible ----------------
@@ -71,7 +86,9 @@ function renderStrip() {
   if (!terminals.length) {
     out += row(" (none)", false);
   } else {
-    for (const t of terminals) out += row(`${t.active ? "▶" : " "}${t.n} ${short(t.title)}`, t.active);
+    for (const t of terminals) {
+      out += row(`${t.active ? "▶" : " "}${t.n} ${procOf(t.tty) ?? "sh"}`, t.active);
+    }
   }
   process.stdout.write(out);
 }

@@ -126,6 +126,13 @@ want "strip still alive on the edge"  "yes" "$(alive "$STRIP")"
 want "strip still in the cockpit tab" "$(tabof "$FLEET")" "$(tabof "$STRIP")"
 want "the terminal list shows 1"      "1" "$(nterms)"
 gt   "the active terminal has width"  0   "$(cols "$TA1")"
+# The strip names a terminal by its foreground process, not the prompt title.
+want "strip names the idle shell"     "yes" \
+     "$(cli get-text --pane-id "$STRIP" | grep -qE 'zsh|bash|sh' && echo yes || echo no)"
+cli send-text --pane-id "$TA1" --no-paste $'sleep 40\n'
+want "strip relabels to the running command" "yes" "$(pane_has "$STRIP" sleep)"
+cli send-text --pane-id "$TA1" --no-paste $'\003'   # ctrl-C, back to the shell
+sleep 1
 
 echo
 echo "== ALT+t: a second terminal, shown, strip still present =="

@@ -284,8 +284,15 @@ function removeTerminal(entry, id) {
  */
 function writeTerminals(table = paneTable()) {
   const t = terminals.get(visibleKey);
-  const titleOf = (id) => table?.find((p) => p.pane_id === id)?.title ?? "shell";
-  const list = t ? t.panes.map((id, i) => ({ n: i + 1, active: i === t.cur, title: titleOf(id) })) : [];
+  // The pane title is just whatever the shell's prompt sets it to (usually the
+  // cwd), not what is running -- useless as a terminal name. The strip labels
+  // each terminal by its foreground PROCESS instead (VSCode-style: zsh, node,
+  // npm...), which it resolves from the tty on every repaint so it stays live.
+  const ttyOf = (id) => {
+    const tn = table?.find((p) => p.pane_id === id)?.tty_name;
+    return tn ? tn.replace(/^\/dev\//, "") : null;
+  };
+  const list = t ? t.panes.map((id, i) => ({ n: i + 1, active: i === t.cur, tty: ttyOf(id) })) : [];
   const agent = visibleKey === REPO_KEY ? "repo" : (attached?.name ?? visibleKey);
   try {
     const tmp = `${TERMS}.tmp`;
