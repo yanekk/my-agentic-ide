@@ -64,6 +64,7 @@ bin/install.sh          per-machine setup: prerequisites, config.lua, the symlin
 bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daemon
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
+bin/cockpit-welcome.mjs renders the diff pane's welcome screen (shown at the fleet list)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (55 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves

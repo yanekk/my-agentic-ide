@@ -83,11 +83,14 @@ LOGIN_SHELL="${SHELL:-/bin/zsh}"
 FOOTER=$(wezterm cli split-pane --bottom --cells 1 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs' footer")
 
-# Top pane, full width, for revdiff. Splitting from the fleet pane leaves the
-# fleet pane as the bottom 58% -- the agent/terminal section, sized to dominate
-# the review surface below the diff.
+# Top pane, full width. While no agent is attached it shows the welcome screen
+# (cockpit-welcome.mjs); entering an agent parks it and swaps in that agent's
+# revdiff. Run through a login shell so it inherits Homebrew's PATH and finds
+# node, then exec the renderer so no shell lingers under it -- the same recipe
+# as the strip and footer, which lets the daemon own this as the REPO_KEY diff
+# pane without ever launching revdiff into it.
 DIFF=$(wezterm cli split-pane --top --percent 42 --pane-id "$FLEET" --cwd "$REPO" \
-       -- "$LOGIN_SHELL" -l)
+       -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-welcome.mjs'")
 
 # Bottom-right shell, scoped to the repo until an agent is entered.
 SHELL_PANE=$(wezterm cli split-pane --right --percent 50 --pane-id "$FLEET" --cwd "$REPO" \
@@ -111,9 +114,8 @@ esac
 printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"foot":%s,"repo":"%s"}\n' \
     "$DIFF" "$FLEET" "$SHELL_PANE" "$STRIP" "$FOOTER" "$REPO" > "$DIR/panes.json"
 
-# The diff pane shows something useful before any agent is entered.
-wezterm cli send-text --pane-id "$DIFF" --no-paste \
-    $'clear \&\& echo "cockpit ready — enter an agent in the fleet view"\n'
+# The diff pane runs the welcome renderer (see the split above), so nothing is
+# typed into it here.
 
 # Exactly one daemon, whichever window started it. Re-running this script is the
 # normal way to rebuild the cockpit, so a stale daemon holding stale pane ids
