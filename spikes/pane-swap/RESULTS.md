@@ -75,3 +75,50 @@ visible, but transient messages replace it, so the frame is what gets counted.
 | `R` with a **saved** annotation | revdiff asks: `Annotations will be dropped — press y to confirm, any other key to cancel`. |
 | A **second** `R` while that prompt is up | Counts as "any other key": `Reload canceled`, annotation intact. So background reloads cannot pile up prompts in a parked pane. |
 | `\n` vs `\r` in the annotation editor | The same distinction as the prompt box: `[enter] save` means `\r`. Sending `\n` inserts a newline and leaves the editor **open**, so everything typed afterwards lands in the comment. |
+
+## The footer's height, and why it would not stay at one line
+
+Run `spikes/pane-swap/footer-height.sh`. It builds the whole layout — fleet,
+footer, diff, terminal, strip — in the same headless mux and records every pane's
+rows through each swap.
+
+Pane swaps are **not** the cause. Footer rows on a 40-row window, split with
+`--percent 5`:
+
+| After | Footer |
+|---|---|
+| the layout | 2 |
+| one diff swap (split into the outgoing pane, park it) | 2 |
+| two diff swaps (the original back in the slot) | 2 |
+| a terminal swap | 2 |
+| a full diff-slot rebuild (park terminal + strip, split off the fleet pane, move both back) | 2 |
+
+What is wrong is the 2. WezTerm has no fixed-size pane: `--percent 5` asks for a
+**share** of the window, and the share is re-applied on every window resize and
+font-size change, so a one-line legend does not stay one line. `--cells 1` gives
+exactly one row at layout time; keeping it there is a separate problem.
+
+### Correcting it: `adjust-pane-size --pane-id` is ignored
+
+wezterm 20240203 resizes whatever pane is **active**, whatever `--pane-id` says.
+Measured on a footer grown to 10 rows, with the fleet pane focused:
+
+| | |
+|---|---|
+| `adjust-pane-size --pane-id <foot> --amount 8 Down` | Footer **unchanged at 10**. The *bottom row* — fleet, terminal and strip — was squashed 8 → **1** instead: it resized the active pane. |
+| `activate-pane <foot>`, `adjust-pane-size --amount 8 Down`, `activate-pane <previous>` | Footer **10 → 2**, focus back where it started. |
+| the same with `--amount 20` (over-shrink) | Clamped: **2 → 1**, and from 1 row it stays 1 and nothing else moves. So the amount need not be exact. |
+
+Only the footer's own boundary moves either way — the fleet/diff boundary is
+untouched — so this does not encroach on the daemon's ownership of pane swaps.
+`--pane-id` is passed anyway: ignored today, correct if a later wezterm honours it.
+
+### End to end
+
+With `bin/cockpit-strip.mjs footer` actually running in the pane (same headless
+mux, the real script), inflating the footer from 1 row to 9 and sampling every
+100ms: still 9 at 100ms and 200ms, back to **1 at 300ms** and steady there, with
+the legend repainted. A second
+drift to a different height is corrected the same way; a drift to a height
+already attempted is not retried, so a correction that cannot work never borrows
+focus more than once.

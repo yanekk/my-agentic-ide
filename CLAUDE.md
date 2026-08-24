@@ -68,12 +68,14 @@ bin/cockpit-welcome.mjs renders the diff pane's welcome screen (shown at the fle
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (55 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
-spikes/pane-swap/       headless-mux probe for swapping the full-width diff pane
+spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
+                        and why the footer would not stay one line high
 docs/cockpit.md         how it works and why; read before changing the daemon
 ```
 
 Sources for the measured claims: `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md`
-(injection, per-agent terminals) and `spikes/pane-swap/RESULTS.md` (the diff slot).
+(injection, per-agent terminals) and `spikes/pane-swap/RESULTS.md` (the diff slot,
+the footer's height).
 
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
@@ -112,6 +114,9 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | Terminal gestures go through the **daemon**, never a raw split | `⌥t`/`⌥[`/`⌥]`/`⌥w` append a verb to `~/.claude/cockpit/cmd`; the daemon owns every pane swap. A direct `SplitPane` keybinding (what `⌥t` used to be) makes an untracked pane the daemon then shuffles around it. |
 | Closing the **last** terminal is refused | The slot must always hold a terminal; `⌥w` on a lone terminal is a no-op, logged. |
 | The key legend is a **footer pane**, not a status bar | WezTerm's status bar lives in the tab bar, which is off (parked terminals live in tabs). So the legend is a thin full-width pane split off the bottom *first*, while the fleet pane still fills the window — every later split happens above it and leaves it untouched. Pure display; the daemon never manages it. |
+| The footer is split with `--cells 1`, and **pins itself back** to one row | WezTerm has no fixed-size pane: `--percent` asks for a *share* of the window, re-applied on every resize and font-size change, so the one-line legend crept taller until it ate rows of the fleet view. The pane swaps were ruled out first — diff swap, terminal swap and a full slot rebuild all leave its height alone. `--cells 1` starts it right; `cockpit-strip.mjs` puts it back when it drifts. |
+| Shrinking the footer means **borrowing focus**, because `adjust-pane-size --pane-id` is ignored | wezterm 20240203 resizes whatever pane is *active*. Aimed at the footer from elsewhere it squashed the **bottom row** — fleet, terminal, strip — to one line instead. So the footer focuses itself, shrinks, and hands focus straight back to the pane that had it. Over-shrinking is clamped, and only its own boundary moves, so the daemon still owns every pane swap. |
+| Each drift height is corrected **once** | Focus is borrowed for ~100ms per attempt. A drift that cannot be fixed (no `wezterm` on PATH, a pane at its minimum) must not steal focus again on every 2s tick — only a *new* height is worth another go. Debounced 250ms so a window drag is corrected once, at the size it settles at. |
 | The tab bar is **off** (`enable_tab_bar = false`) | Parked terminals live in tabs of the cockpit window. Clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished. |
 | Parking re-activates the cockpit tab | In the GUI the newly created tab becomes the active one, which would swap the whole cockpit off screen. |
 | Reaping a terminal needs **two** consecutive misses | One failed `claude agents` read must not be enough to kill a shell with someone's build running in it. |

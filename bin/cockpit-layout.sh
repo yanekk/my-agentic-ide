@@ -78,8 +78,13 @@ LOGIN_SHELL="${SHELL:-/bin/zsh}"
 # window, so it spans the full width; every later split happens in the region
 # above it and leaves it untouched (measured). It renders terminals.json in
 # `footer` mode -- pure display, so the daemon never parks or manages it.
+#
 # Sized in CELLS, not percent: the legend is a single line, so a percentage grows
-# it to 3-4 rows of dead space on a tall window. `--cells 1` pins it to one row.
+# it to 3-4 rows of dead space on a tall window. `--cells 1` starts it at one
+# row -- but it does not KEEP it there. WezTerm has no fixed-size pane: the split
+# is stored as a share of the window and re-applied on every resize and font-size
+# change, so the bar drifts taller again. cockpit-strip.mjs pins itself back
+# whenever it notices; see the note there.
 FOOTER=$(wezterm cli split-pane --bottom --cells 1 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs' footer")
 

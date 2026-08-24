@@ -10,11 +10,13 @@
 //                                         the gestures are always discoverable.
 //
 // Both are PURE DISPLAY: they never run a shell command and never move a pane, so
-// cockpitd can own them as fixed panes it never parks. The daemon writes
-// ~/.claude/cockpit/terminals.json on every change (which agent, which terminals,
-// which is active); both modes repaint from it. The keybindings that add/switch/
-// close terminals live in wezterm/cockpit.lua and reach the daemon through its
-// command channel -- nothing here talks to WezTerm.
+// cockpitd can own them as fixed panes it never parks. The one thing the footer
+// does touch is its OWN height -- see pinHeight() -- and nothing else's.
+//
+// The daemon writes ~/.claude/cockpit/terminals.json on every change (which
+// agent, which terminals, which is active); both modes repaint from it. The
+// keybindings that add/switch/close terminals live in wezterm/cockpit.lua and
+// reach the daemon through its command channel.
 //
 // Started for you by bin/cockpit-layout.sh.
 
@@ -56,6 +58,65 @@ function procOf(tty) {
     }
     return comm ? comm.replace(/^-/, "").split("/").pop() : null;
   } catch { return null; }
+}
+
+// --- keeping the footer exactly one row tall --------------------------------
+// WezTerm sizes panes as a SHARE of the window, so the one-line legend does not
+// stay one line: every window resize and every font-size change rescales it, and
+// the rounding creeps upwards until the legend is eating several rows of the
+// fleet view. bin/cockpit-layout.sh splits it with `--cells 1` so it starts
+// right; this puts it back whenever it drifts.
+//
+// Measured (spikes/pane-swap): `adjust-pane-size --pane-id` is IGNORED by
+// wezterm 20240203 -- it resizes whatever pane is ACTIVE, so aiming it at the
+// footer from elsewhere squashes the *fleet* row to one line instead. The only
+// thing that works is to focus the footer, shrink it, and hand focus straight
+// back. Over-shrinking is clamped, and the footer's own boundary is the only one
+// that moves, so the daemon still owns every pane swap. `--pane-id` is passed
+// anyway: harmless today, correct if a later wezterm honours it.
+const SELF = Number.parseInt(process.env.WEZTERM_PANE ?? "", 10);
+
+function wez(args) {
+  try {
+    return execFileSync("wezterm", ["cli", ...args],
+                        { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
+  } catch { return null; }
+}
+
+// The row count of the last correction we tried. Focus is borrowed for ~100ms
+// per attempt, so a drift that cannot be fixed (no wezterm cli, a pane at its
+// minimum) must not be retried on every tick -- only a NEW height is worth
+// another go.
+let pinned = 0;
+
+function pinHeight() {
+  const rows = process.stdout.rows || 1;
+  if (rows <= 1) { pinned = 0; return; }        // right size: arm for the next drift
+  if (rows === pinned || !Number.isInteger(SELF)) return;
+  pinned = rows;
+
+  const out = wez(["list", "--format", "json"]);
+  if (out === null) return;
+  let table;
+  try { table = JSON.parse(out); } catch { return; }
+  const me = table.find((p) => p.pane_id === SELF);
+  if (!me) return;
+  // WezTerm reports one active pane per TAB, so only this tab's counts.
+  const active = table.find((p) => p.tab_id === me.tab_id && p.is_active);
+
+  const borrow = active !== undefined && active.pane_id !== SELF;
+  if (borrow) wez(["activate-pane", "--pane-id", String(SELF)]);
+  wez(["adjust-pane-size", "--pane-id", String(SELF), "--amount", String(rows - 1), "Down"]);
+  if (borrow) wez(["activate-pane", "--pane-id", String(active.pane_id)]);
+  render();                                     // repaint over anything echoed
+}
+
+// A window drag fires a resize per frame; correct the size it settles at.
+let pinTimer = null;
+function schedulePin() {
+  if (!FOOTER) return;
+  clearTimeout(pinTimer);
+  pinTimer = setTimeout(pinHeight, 250);
 }
 
 // --- the footer: one full-width line of keys, always visible ----------------
@@ -112,8 +173,9 @@ render();
 // Watch the state DIR (not the file): the daemon replaces terminals.json
 // atomically, so a file watch would go deaf after the first rename.
 try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json") render(); }); } catch {}
-process.stdout.on("resize", render);
-setInterval(render, 2000);                            // belt-and-braces if a watch is missed
+process.stdout.on("resize", () => { render(); schedulePin(); });
+setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
+schedulePin();                                        // the pane may open already oversized
 
 const bye = () => { process.stdout.write(`${ESC}?25h`); process.exit(0); };
 process.on("SIGINT", bye);

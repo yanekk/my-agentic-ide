@@ -171,6 +171,41 @@ it also shows the attached agent's name and terminal count. Pure display, never
 parked, never managed by the daemon (`panes.json` records its id as `foot` only
 for debugging).
 
+#### Keeping it one line tall
+
+WezTerm has no fixed-size pane: every pane holds a **share** of the window, and
+that share is re-applied on every window resize and every font-size change. Split
+with `--percent 5` the legend was 2 rows on a 40-row window to begin with, and it
+crept taller from there — a one-line legend that had grown to eat several rows of
+the fleet view. So the split is `--cells 1`, and the footer puts itself back
+whenever it notices it is taller than one row.
+
+Correcting it is more awkward than it sounds, because `adjust-pane-size
+--pane-id` is **ignored** by wezterm 20240203: it resizes whatever pane is
+*active*. Aiming it at the footer from elsewhere squashed the bottom row —
+fleet, terminal and strip — to a single line instead (measured). What works is
+to focus the footer, shrink it, and hand focus straight back to the pane that
+had it:
+
+```
+wezterm cli activate-pane     --pane-id <foot>
+wezterm cli adjust-pane-size  --amount <rows-1> Down     # over-shrinking is clamped
+wezterm cli activate-pane     --pane-id <previously active>
+```
+
+`cockpit-strip.mjs` does this itself, in `footer` mode only. It is the one thing
+either display pane touches besides its own screen, and it only ever moves its
+own boundary — the daemon still owns every pane swap. The correction is driven by
+SIGWINCH (`process.stdout.rows`), debounced 250ms so a window drag is corrected
+once at the size it settles at, and each drift height is attempted **once**:
+focus is borrowed for ~100ms per attempt, so a drift that cannot be fixed (no
+`wezterm` on PATH, a pane already at its minimum) must not be retried on every
+tick. Measured settling time from a 9-row drift back to 1: ~300ms.
+
+Pane swaps were ruled out as a cause first: parking and restoring the diff pane,
+the terminal, and a full diff-slot rebuild all leave the footer's height exactly
+where it was (`spikes/pane-swap/RESULTS.md`).
+
 ## Per-agent panes
 
 Each agent gets its own terminals **and its own revdiff**, and so does the fleet
