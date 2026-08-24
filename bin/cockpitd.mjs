@@ -644,7 +644,7 @@ function rebuildDiffSlot(cockpitTab) {
   const strip = panes.strip;
   if (term !== undefined) parkPane(term, "rebuilding", cockpitTab);
   if (strip !== undefined) parkPane(strip, "strip", cockpitTab);
-  const out = wez(["split-pane", "--top", "--percent", "55",
+  const out = wez(["split-pane", "--top", "--percent", "42",
                    "--pane-id", String(panes.fleet), "--cwd", panes.repo,
                    "--", LOGIN_SHELL, "-l"]);
   // Restore the bottom row: fleet | terminal | strip. The strip clings to

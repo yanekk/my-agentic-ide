@@ -428,7 +428,7 @@ check "the slot was rebuilt"                     "rebuilt the diff slot" "$T/dae
 # terminal has to step out of the way and come back.
 check "the terminal stepped aside for the rebuild" "move-pane-to-new-tab --pane-id 32" "$CALLS"
 check "and was moved back, not respawned"        "--move-pane-id 32" "$CALLS"
-check "the full-width split came off the fleet pane" "--top --percent 55 --pane-id 20" "$CALLS"
+check "the full-width split came off the fleet pane" "--top --percent 42 --pane-id 20" "$CALLS"
 check "the placeholder was killed, not parked"   "kill-pane" "$CALLS"
 check "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log"
 check "revdiff started in it"                    "revdiff --untracked" "$CALLS"

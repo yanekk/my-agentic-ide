@@ -10,11 +10,11 @@ wording can be edited first.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  revdiff — the attached agent's diff              │  55%
+│  revdiff — the attached agent's diff              │  42%
 ├─────────────────────────┬───────────────────┬────┤
-│  claude agents (fleet)  │ shell @ worktree  │list│  45%
+│  claude agents (fleet)  │ shell @ worktree  │list│  58%
 ├─────────────────────────┴───────────────────┴────┤
-│  ⌥t new · ⌥[ ⌥] switch · ⌥w close   (key legend)  │  footer
+│  ⌥t new · ⌥[ ⌥] switch · ⌥w close   (key legend)  │  1 row
 └──────────────────────────────────────────────────┘
 ```
 

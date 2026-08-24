@@ -2,10 +2,12 @@
 # Build the cockpit layout in WezTerm and start the follow daemon.
 #
 #   ┌──────────────────────────────────────────────┐
-#   │  revdiff  (diff pane)                        │  55%
+#   │  revdiff  (diff pane)                        │  42%
 #   ├──────────────────────┬───────────────────────┤
-#   │ claude agents        │ shell @ worktree      │  45%
-#   └──────────────────────┴───────────────────────┘
+#   │ claude agents        │ shell @ worktree      │  58%
+#   ├──────────────────────┴───────────────────────┤
+#   │  key legend (footer)                         │  1 row
+#   └──────────────────────────────────────────────┘
 #
 # Run this from inside a WezTerm pane. That pane becomes the fleet pane, so the
 # script ends by exec'ing `claude agents` into it.
@@ -76,12 +78,15 @@ LOGIN_SHELL="${SHELL:-/bin/zsh}"
 # window, so it spans the full width; every later split happens in the region
 # above it and leaves it untouched (measured). It renders terminals.json in
 # `footer` mode -- pure display, so the daemon never parks or manages it.
-FOOTER=$(wezterm cli split-pane --bottom --percent 5 --pane-id "$FLEET" --cwd "$REPO" \
+# Sized in CELLS, not percent: the legend is a single line, so a percentage grows
+# it to 3-4 rows of dead space on a tall window. `--cells 1` pins it to one row.
+FOOTER=$(wezterm cli split-pane --bottom --cells 1 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs' footer")
 
 # Top pane, full width, for revdiff. Splitting from the fleet pane leaves the
-# fleet pane as the bottom 45%.
-DIFF=$(wezterm cli split-pane --top --percent 55 --pane-id "$FLEET" --cwd "$REPO" \
+# fleet pane as the bottom 58% -- the agent/terminal section, sized to dominate
+# the review surface below the diff.
+DIFF=$(wezterm cli split-pane --top --percent 42 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -l)
 
 # Bottom-right shell, scoped to the repo until an agent is entered.
