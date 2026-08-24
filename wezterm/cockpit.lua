@@ -147,5 +147,14 @@ return {
     -- Resize the diff/bottom split.
     { key = "=", mods = "ALT", action = act.AdjustPaneSize { "Up", 3 } },
     { key = "-", mods = "ALT", action = act.AdjustPaneSize { "Down", 3 } },
+
+    -- Word-wise editing in the shell/agent line editor. macOS sends nothing
+    -- useful for CMD+arrows, so map them to the readline/zsh word motions every
+    -- shell understands: ESC-b / ESC-f jump a space-separated word, C-w rubs one
+    -- out. SendKey rather than SendString so WezTerm emits them into whichever
+    -- pane has focus -- these are window-global, so they reach every terminal.
+    { key = "LeftArrow",  mods = "CMD", action = act.SendKey { key = "b", mods = "ALT" } },
+    { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "f", mods = "ALT" } },
+    { key = "Backspace",  mods = "CMD", action = act.SendKey { key = "w", mods = "CTRL" } },
   },
 }
