@@ -156,11 +156,13 @@ return {
   },
 
   keys = {
-    -- Move between panes. ALT+arrow, no prefix key to remember.
-    { key = "UpArrow",    mods = "ALT", action = act.ActivatePaneDirection("Up") },
-    { key = "DownArrow",  mods = "ALT", action = act.ActivatePaneDirection("Down") },
-    { key = "LeftArrow",  mods = "ALT", action = act.ActivatePaneDirection("Left") },
-    { key = "RightArrow", mods = "ALT", action = act.ActivatePaneDirection("Right") },
+    -- Move between panes. CMD+ALT+arrow, directional. This used to be plain
+    -- ALT+arrow, but on macOS ALT+arrow is the word-motion gesture (below), so
+    -- pane switching moved up a modifier to leave Option free for the line editor.
+    { key = "UpArrow",    mods = "CMD|ALT", action = act.ActivatePaneDirection("Up") },
+    { key = "DownArrow",  mods = "CMD|ALT", action = act.ActivatePaneDirection("Down") },
+    { key = "LeftArrow",  mods = "CMD|ALT", action = act.ActivatePaneDirection("Left") },
+    { key = "RightArrow", mods = "CMD|ALT", action = act.ActivatePaneDirection("Right") },
 
     -- Zoom the focused pane full-window and back. Useful for reading a big diff
     -- without disturbing the layout the daemon depends on.
@@ -178,13 +180,24 @@ return {
     { key = "=", mods = "ALT", action = act.AdjustPaneSize { "Up", 3 } },
     { key = "-", mods = "ALT", action = act.AdjustPaneSize { "Down", 3 } },
 
-    -- Word-wise editing in the shell/agent line editor. macOS sends nothing
-    -- useful for CMD+arrows, so map them to the readline/zsh word motions every
-    -- shell understands: ESC-b / ESC-f jump a space-separated word, C-w rubs one
-    -- out. SendKey rather than SendString so WezTerm emits them into whichever
-    -- pane has focus -- these are window-global, so they reach every terminal.
-    { key = "LeftArrow",  mods = "CMD", action = act.SendKey { key = "b", mods = "ALT" } },
-    { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "f", mods = "ALT" } },
-    { key = "Backspace",  mods = "CMD", action = act.SendKey { key = "w", mods = "CTRL" } },
+    -- Line-editor motions that mirror macOS text fields, translated to the
+    -- readline/zsh control keys every shell's line editor understands. SendKey
+    -- (not SendString) so WezTerm emits them into whichever pane has focus, and
+    -- these are window-global so they reach every terminal and the agent input.
+    --
+    --   Option+arrow  word-by-word     ESC-b / ESC-f  (backward/forward-word)
+    --   Option+Delete  delete a word   C-w            (unix-word-rubout, space-delimited)
+    --   Cmd+arrow  line start/end      C-a / C-e      (beginning/end-of-line)
+    --   Cmd+Delete  erase to line start  C-u          (backward-kill-line)
+    --
+    -- Word *motion* stops at punctuation (readline's word chars), not purely at
+    -- spaces; deletion (C-w) is space-delimited. Rebind in ~/.zshrc for stricter
+    -- space-only motion -- the shell owns that, WezTerm only forwards the keys.
+    { key = "LeftArrow",  mods = "ALT", action = act.SendKey { key = "b", mods = "ALT" } },
+    { key = "RightArrow", mods = "ALT", action = act.SendKey { key = "f", mods = "ALT" } },
+    { key = "Backspace",  mods = "ALT", action = act.SendKey { key = "w", mods = "CTRL" } },
+    { key = "LeftArrow",  mods = "CMD", action = act.SendKey { key = "a", mods = "CTRL" } },
+    { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "e", mods = "CTRL" } },
+    { key = "Backspace",  mods = "CMD", action = act.SendKey { key = "u", mods = "CTRL" } },
   },
 }
