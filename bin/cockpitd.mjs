@@ -37,9 +37,6 @@ const FLEET_LOG = path.join(DIR, "fleet.log");
 // TERMS, the daemon tails CMD_FILE.
 const TERMS = path.join(DIR, "terminals.json");
 const CMD_FILE = path.join(DIR, "cmd");
-// The persisted diff-mode preference (see DIFF_MODES below). One line, one of the
-// mode names; rewritten atomically whenever the mode is toggled.
-const DIFF_MODE_FILE = path.join(DIR, "diff-mode");
 // The per-agent custom ref store (jobId -> branch/SHA), and the script + result
 // file behind the "custom" mode's ASCII prompt (see the Diff mode block below).
 const CUSTOM_REFS_FILE = path.join(DIR, "custom-refs.json");
@@ -291,26 +288,26 @@ const reapStrikes = new Map();
 //                   in `customRef`, so the prompt comes back pre-filled and each
 //                   agent keeps its own base.
 //
-// The mode choice is GLOBAL and PERSISTED; the custom ref is PER-AGENT and
-// persisted too (CUSTOM_REFS_FILE). Reopening the cockpit restores the last mode,
-// and every agent's revdiff is (re)launched in it. `diffLaunchedMode` /
-// `diffLaunchedRef` record the mode and ref a parked pane was actually launched
-// with, so returning to an agent relaunches its revdiff only when either changed
-// since -- otherwise the pane comes back untouched, which is the whole point of
-// parking it.
+// The mode is PER AGENT and SESSION-ONLY: each agent has its own, kept in
+// memory (`diffModeByAgent`, jobId -> mode) and NOT persisted, so a brand-new
+// agent -- and every agent after a cockpit rebuild -- starts at the default,
+// `uncommitted`. Toggling the mode on one agent never touches another's. Only the
+// custom base ref is persisted (per agent, CUSTOM_REFS_FILE), so re-entering
+// custom pre-fills the last ref even though the mode itself resets. `diffLaunched
+// Mode`/`diffLaunchedRef` record what a parked pane was actually launched with, so
+// returning to an agent relaunches only when its own mode or ref changed since --
+// which, because the mode is per-agent and can only change while attached, means
+// a parked pane essentially always comes back untouched.
 // ---------------------------------------------------------------------------
 
 const DIFF_MODES = ["uncommitted", "lastcommit", "custom"];
+const DEFAULT_DIFF_MODE = "uncommitted";
 
-function readDiffMode() {
-  try {
-    const v = fs.readFileSync(DIFF_MODE_FILE, "utf8").trim();
-    if (DIFF_MODES.includes(v)) return v;
-  } catch { /* no preference yet */ }
-  return "uncommitted";
-}
+// jobId -> mode. Absent means the default: a new agent is never carried into
+// another agent's mode.
+const diffModeByAgent = new Map();
+const modeOf = (jobId) => diffModeByAgent.get(jobId) ?? DEFAULT_DIFF_MODE;
 
-let diffMode = readDiffMode();
 const diffLaunchedMode = new Map();
 const diffLaunchedRef = new Map();
 // When each agent's revdiff was last (re)launched. revdiff takes about a second
@@ -340,25 +337,17 @@ function persistCustomRefs() {
 // revdiff and type over it, and so ⌥[/⌥] are swallowed until the prompt resolves.
 // The mode we came from, kept so a cancelled prompt can revert to it.
 let customPromptOpen = false;
-let modeBeforeCustom = "uncommitted";
-
-function persistDiffMode() {
-  try {
-    const tmp = `${DIFF_MODE_FILE}.tmp`;
-    fs.writeFileSync(tmp, `${diffMode}\n`);
-    fs.renameSync(tmp, DIFF_MODE_FILE);
-  } catch { /* best-effort; a lost write just defaults back next launch */ }
-}
+let modeBeforeCustom = DEFAULT_DIFF_MODE;
 
 /**
- * The revdiff command line for the current mode, writing annotations to
- * `reviewFile`. `HEAD` is passed symbolically (not resolved to a SHA) so a reload
- * re-reads it and committing work drops it out of an uncommitted diff; `ref` (the
- * custom base) is passed the same way for the same reason. In custom mode with no
- * ref yet it degenerates to the uncommitted range -- defensive only, since the
- * launch paths open the prompt instead of calling this without a ref.
+ * The revdiff command line for `mode`, writing annotations to `reviewFile`.
+ * `HEAD` is passed symbolically (not resolved to a SHA) so a reload re-reads it
+ * and committing work drops it out of an uncommitted diff; `ref` (the custom base)
+ * is passed the same way for the same reason. In custom mode with no ref yet it
+ * degenerates to the uncommitted range -- defensive only, since the launch paths
+ * open the prompt instead of calling this without a ref.
  */
-function diffCommand(reviewFile, ref) {
+function diffCommand(reviewFile, mode, ref) {
   const out = ["-o", JSON.stringify(reviewFile)];
   // --wrap: long lines wrap in the diff view instead of being clipped at the pane
   // edge. The diff slot is only ~half the window wide when a terminal shares the
@@ -369,12 +358,12 @@ function diffCommand(reviewFile, ref) {
   // human gesture, and the daemon reinstates revdiff on the same diff the moment
   // the pane drops to a shell (see healQuitDiff) -- so Q reads as "clear all
   // annotations and keep reviewing", never as an empty pane left behind.
-  if (diffMode === "lastcommit") {
+  if (mode === "lastcommit") {
     // HEAD~1 -> HEAD is exactly the most recent commit. No --untracked: this range
     // has no working tree, so untracked files do not belong to it.
     return ["revdiff", "--wrap", "--no-confirm-discard", ...out, "HEAD~1", "HEAD"].join(" ");
   }
-  if (diffMode === "custom" && ref) {
+  if (mode === "custom" && ref) {
     // <ref> -> working tree: the agent's work relative to a base it names. Same
     // shape as uncommitted (--untracked, symbolic ref), just a different base.
     return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, JSON.stringify(ref)].join(" ");
@@ -506,12 +495,13 @@ function writeTerminals(table = paneTable()) {
   };
   const list = t ? t.panes.map((id, i) => ({ n: i + 1, active: i === t.cur, tty: ttyOf(id) })) : [];
   const agent = visibleKey === REPO_KEY ? "repo" : (attached?.name ?? visibleKey);
-  // The footer shows the custom base next to the mode, so surface the visible
-  // agent's ref (null at the repo/list, where custom does not apply).
+  // The footer shows the visible agent's OWN mode and (in custom) its base ref
+  // (the default mode at the repo/list, where neither really applies).
+  const dmode = visibleKey === REPO_KEY ? DEFAULT_DIFF_MODE : modeOf(visibleKey);
   const cref = visibleKey === REPO_KEY ? null : (customRef.get(visibleKey) ?? null);
   try {
     const tmp = `${TERMS}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode, customRef: cref, terminals: list })}\n`);
+    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode: dmode, customRef: cref, terminals: list })}\n`);
     fs.renameSync(tmp, TERMS);
   } catch { /* the strip just keeps its last frame */ }
 }
@@ -744,12 +734,13 @@ async function relaunchDiff(jobId, pane, worktree, reviewFile) {
     sendRaw(pane, "q");                 // quit revdiff back to the shell
     await sleep(SHELL_SETTLE_MS);       // let the prompt return before we type
   }
+  const mode = modeOf(jobId);
   const ref = customRef.get(jobId);
-  launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, ref)}`);
-  diffLaunchedMode.set(jobId, diffMode);
+  launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, mode, ref)}`);
+  diffLaunchedMode.set(jobId, mode);
   diffLaunchedRef.set(jobId, ref);
   diffLaunchedAt.set(jobId, Date.now());
-  log(`relaunched diff pane ${pane} for ${jobId} in ${diffMode} mode${diffMode === "custom" ? ` (${ref})` : ""}`);
+  log(`relaunched diff pane ${pane} for ${jobId} in ${mode} mode${mode === "custom" ? ` (${ref})` : ""}`);
 }
 
 /**
@@ -767,17 +758,17 @@ async function diffModeCommand(verb, attempt = 0) {
   }
   reconciling = true;
   try {
-    const from = diffMode;
-    const i = DIFF_MODES.indexOf(diffMode);
-    const dir = verb === "next" ? 1 : -1;
-    const next = DIFF_MODES[(i + dir + DIFF_MODES.length) % DIFF_MODES.length];
-    if (next === diffMode) return;
-    diffMode = next;
-    persistDiffMode();
-    writeTerminals();                   // the footer shows the current mode
     const jobId = visibleDiff;
     const pane = diffs.get(jobId);
     if (pane === undefined || jobId !== attached.jobId) return;
+    // Cycle THIS agent's own mode; another agent's is untouched.
+    const from = modeOf(jobId);
+    const i = DIFF_MODES.indexOf(from);
+    const dir = verb === "next" ? 1 : -1;
+    const next = DIFF_MODES[(i + dir + DIFF_MODES.length) % DIFF_MODES.length];
+    if (next === from) return;
+    diffModeByAgent.set(jobId, next);
+    writeTerminals();                   // the footer shows the current mode
     if (next === "custom") {
       // Cycling INTO custom always asks for the range (pre-filled with this
       // agent's last ref); revdiff is only relaunched once the prompt resolves.
@@ -850,15 +841,15 @@ async function resolveCustomPrompt(kind, attempt = 0) {
     if (kind === "ok" && payload && payload.ref) {
       customRef.set(jobId, payload.ref);
       persistCustomRefs();
-      // diffMode is already "custom" (persisted when we cycled in).
+      // This agent's mode is already "custom" (set when we cycled in).
     } else {
-      diffMode = modeBeforeCustom;
-      persistDiffMode();
-      log(`custom range cancelled for ${jobId}; reverted to ${diffMode}`);
+      diffModeByAgent.set(jobId, modeBeforeCustom);
+      log(`custom range cancelled for ${jobId}; reverted to ${modeBeforeCustom}`);
     }
+    const mode = modeOf(jobId);
     const ref = customRef.get(jobId);
-    launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, ref)}`);
-    diffLaunchedMode.set(jobId, diffMode);
+    launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, mode, ref)}`);
+    diffLaunchedMode.set(jobId, mode);
     diffLaunchedRef.set(jobId, ref);
     diffLaunchedAt.set(jobId, Date.now());
     writeTerminals();                   // refresh the footer's mode + ref
@@ -935,7 +926,7 @@ async function showDiff(key, cwd, label) {
 
   const live = new Set(table.map((p) => p.pane_id));
   const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
-  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedAt.delete(k); }
+  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedAt.delete(k); diffModeByAgent.delete(k); }
 
   if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
 
@@ -1016,6 +1007,7 @@ async function reapAgents() {
       diffLaunchedMode.delete(key);
       diffLaunchedRef.delete(key);
       diffLaunchedAt.delete(key);
+      diffModeByAgent.delete(key);
     }
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
@@ -1087,9 +1079,10 @@ function healQuitDiff() {
   reconciling = true;
   try {
     if (diffPaneStatus(pane) !== "shell") return; // re-check under the lock
+    const mode = modeOf(attached.jobId);
     const ref = customRef.get(attached.jobId);
-    launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, ref)}`);
-    diffLaunchedMode.set(attached.jobId, diffMode);
+    launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, mode, ref)}`);
+    diffLaunchedMode.set(attached.jobId, mode);
     diffLaunchedRef.set(attached.jobId, ref);
     diffLaunchedAt.set(attached.jobId, Date.now());
     log(`revdiff was quit in ${attached.jobId}; reinstated it`);
@@ -1318,25 +1311,27 @@ async function onEnter(jobId, knownName) {
   // back in the old range, so it is relaunched in the current mode (see
   // diffCommand / the DIFF_MODES block for what each range means).
   if (shown) {
+    const mode = modeOf(jobId);           // a new agent gets the default, never another agent's mode
     const ref = customRef.get(jobId);
     if (shown.spawned || diffPaneStatus(shown.pane) === "shell") {
       if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
-      if (diffMode === "custom" && !ref) {
-        // Global mode is custom but this agent has never named a base: ask for one
-        // rather than launch revdiff against nothing. (Switching agents is not
-        // "entering the mode", so an agent that already has a ref is NOT prompted.)
-        modeBeforeCustom = "uncommitted";
+      if (mode === "custom" && !ref) {
+        // This agent is in custom but has never named a base: ask for one rather
+        // than launch revdiff against nothing. (Defensive -- confirming custom
+        // always stores a ref, so this only bites a mode set with none.)
+        modeBeforeCustom = DEFAULT_DIFF_MODE;
         await openCustomPrompt(jobId, shown.pane, worktree);
       } else {
-        launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, ref)}`);
-        diffLaunchedMode.set(jobId, diffMode);
+        launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, mode, ref)}`);
+        diffLaunchedMode.set(jobId, mode);
         diffLaunchedRef.set(jobId, ref);
         diffLaunchedAt.set(jobId, Date.now());
       }
-    } else if (diffLaunchedMode.get(jobId) !== diffMode ||
-               (diffMode === "custom" && diffLaunchedRef.get(jobId) !== ref)) {
-      // The mode (or, in custom, this agent's ref) changed while the pane was
-      // parked, so the diff would come back in the wrong range -- relaunch it.
+    } else if (diffLaunchedMode.get(jobId) !== mode ||
+               (mode === "custom" && diffLaunchedRef.get(jobId) !== ref)) {
+      // This agent's own mode/ref changed while the pane was parked, so the diff
+      // would come back in the wrong range -- relaunch it. (With per-agent modes
+      // this rarely fires: an agent's mode can only change while it is attached.)
       await relaunchDiff(jobId, shown.pane, worktree, reviewFile);
     }
   }

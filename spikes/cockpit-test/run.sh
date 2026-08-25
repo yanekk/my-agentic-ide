@@ -384,7 +384,7 @@ sleep 2
 check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
 check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
-check "the preference was persisted"              "lastcommit" "$T/state/diff-mode"
+check "this agent's mode is now last-commit"      '"diffMode":"lastcommit"' "$T/state/terminals.json"
 check "the switch was logged"                     "relaunched diff pane 31 for abc12345 in lastcommit" "$T/daemon.log"
 
 echo
@@ -393,7 +393,7 @@ echo "== 5b'. toggling again returns to the uncommitted range =="
 echo prev >> "$T/state/cmd"
 sleep 2
 check "back to HEAD -> working tree"              "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
-check "preference persisted back to uncommitted"  "uncommitted" "$T/state/diff-mode"
+check "this agent's mode is back to uncommitted"  '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 echo
 echo "== 5c. ⌥] with a TERMINAL focused leaves the diff mode alone =="
@@ -403,7 +403,7 @@ echo 32 > "$ACTIVE"                       # focus the agent's terminal, not the 
 echo next >> "$T/state/cmd"
 sleep 2
 refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
-check  "the preference is untouched"              "uncommitted" "$T/state/diff-mode"
+check  "the mode is untouched"                    '"diffMode":"uncommitted"' "$T/state/terminals.json"
 : > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo
@@ -418,7 +418,7 @@ sleep 2
 check "the running revdiff was quit first"        "STDIN:q\n" "$CALLS"
 check "the custom-range prompt was launched"      "cockpit-custom-prompt.mjs" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
-check "custom mode was persisted"                 "custom" "$T/state/diff-mode"
+check "this agent's mode is now custom"           '"diffMode":"custom"' "$T/state/terminals.json"
 refute "revdiff is NOT relaunched yet"            "revdiff --wrap" "$CALLS"
 
 echo
@@ -447,8 +447,35 @@ check "the prompt opened again"                   "cockpit-custom-prompt.mjs" "$
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
 sleep 2
-check "cancel reverted to the prior mode"         "uncommitted" "$T/state/diff-mode"
+check "cancel reverted to the prior mode"         '"diffMode":"uncommitted"' "$T/state/terminals.json"
 check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+
+echo
+echo "== 5e. the diff mode is PER AGENT: a new agent is never carried into another's mode =="
+# Put this agent in last-commit, switch to the OTHER agent, and it must come up
+# in the uncommitted default -- not inherit last-commit. (Its parked revdiff was
+# launched uncommitted and comes back untouched.)
+echo 31 > "$ACTIVE"                       # focus abc12345's diff pane
+echo next >> "$T/state/cmd"               # uncommitted -> last-commit for abc12345 only
+sleep 2
+check "this agent went to last-commit"            '"diffMode":"lastcommit"' "$T/state/terminals.json"
+: > "$CALLS"; : > "$ACTIVE"
+echo "second agent" > "$FLEETSTATE"       # switch to def67890
+sleep 3
+check "the OTHER agent shows the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
+refute "it did NOT inherit last-commit"           "HEAD~1 HEAD" "$CALLS"
+
+echo
+echo "== 5e'. switching back leaves abc12345 in its own last-commit, then reset =="
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"         # back to abc12345
+sleep 3
+check "abc12345 kept its own last-commit mode"    '"diffMode":"lastcommit"' "$T/state/terminals.json"
+# Reset to the uncommitted default so the later sections see the default range.
+echo 31 > "$ACTIVE"
+echo prev >> "$T/state/cmd"               # last-commit -> uncommitted
+sleep 2
+check "reset to the uncommitted default"          '"diffMode":"uncommitted"' "$T/state/terminals.json"
 : > "$ACTIVE"                             # unfocus for the remaining sections; back at the uncommitted default
 
 echo

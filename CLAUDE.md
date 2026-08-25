@@ -33,10 +33,12 @@ arbitrary branch/SHA → working tree (`revdiff --untracked <ref>`, the same sha
 `uncommitted` against a base you name). Cycling **into** `custom` pops an ASCII
 "modal" (drawn in the diff pane by `cockpit-custom-prompt.mjs`) that asks for the
 ref every time, **pre-filled** with that agent's last one; a ref git cannot resolve
-re-shows the prompt with an error. The mode is one global preference, **persisted**
-to `~/.claude/cockpit/diff-mode`; the custom ref is remembered **per agent**,
-persisted to `~/.claude/cockpit/custom-refs.json`. Reopening the cockpit restores
-both and every agent's revdiff is (re)launched accordingly.
+re-shows the prompt with an error. The mode is **per agent** and **session-only**:
+each agent has its own, kept in memory, and a brand-new agent — and every agent
+after a cockpit rebuild — starts at the `uncommitted` default. Toggling one agent's
+mode never touches another's. Only the custom **ref** is persisted (per agent, to
+`~/.claude/cockpit/custom-refs.json`), so re-entering `custom` pre-fills the last
+branch/SHA even though the mode itself resets.
 
 Host is **WezTerm** — terminal and multiplexer in one, chosen for its pane-
 targeting CLI (`wezterm cli send-text --pane-id N --no-paste`), which is what
@@ -87,10 +89,11 @@ the footer's height).
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
 panes too), `fleet.log`, `daemon.log`, `review-<jobId>.md`, `terminals.json` (what
-the strip and footer render — now carries the current `diffMode` and, in custom
-mode, the visible agent's `customRef`), `diff-mode`
-(the persisted uncommitted/lastcommit/custom preference), `custom-refs.json` (the
-per-agent branch/SHA for custom mode), `custom-ref-pending` (the handoff file the
+the strip and footer render — carries the visible agent's own `diffMode` and, in
+custom mode, its `customRef`), `custom-refs.json` (the
+per-agent branch/SHA for custom mode — the *only* persisted diff state; the mode
+itself is per-agent and in-memory, so there is no `diff-mode` file any more),
+`custom-ref-pending` (the handoff file the
 custom prompt writes and the daemon reads), and `cmd` (the command channel
 the terminal keybindings append to — the custom prompt appends `custom-ok`/
 `custom-cancel` here too). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
@@ -134,7 +137,8 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | Reaping a terminal needs **two** consecutive misses | One failed `claude agents` read must not be enough to kill a shell with someone's build running in it. |
 | `⌥[` / `⌥]` route by **which pane is focused** | The keys append `next`/`prev` to `cmd` unconditionally; the daemon reads the cockpit tab's active pane (`is_active`) and sends them to the diff-mode switch when the **diff** pane holds focus, to the terminal cycler otherwise. `⌥t`/`⌥w` are always terminals. |
 | Switching diff mode **restarts** revdiff (`q` then relaunch) | `R` only reloads the *same* range, so changing the range means quitting revdiff back to its shell and relaunching with the new args. Never while the annotation editor is open — `q` and the whole command would land in the comment (same rule as auto-reload). |
-| A parked diff is relaunched on return **only if the mode changed** | `diffLaunchedMode` records the range a parked pane was launched with. If it still matches the global preference the pane comes back untouched — the whole point of parking. If the mode was toggled while it was away, it is relaunched so every agent honours the one persisted choice. In `custom` mode the **ref** is compared too (`diffLaunchedRef`): the global mode is one word (`custom`) but each agent's base differs, so a parked pane whose ref no longer matches its stored `customRef` is relaunched even though the mode word is unchanged. |
+| The diff mode is **per agent**, in-memory, defaulting to `uncommitted` | `diffModeByAgent` (jobId → mode) holds each agent's own choice; absent means the default, so a brand-new agent — and every agent after a cockpit rebuild — opens in `uncommitted` and is never carried into whatever mode another agent was left in. There is no global `diff-mode` file. Only the custom **ref** persists (`custom-refs.json`), so re-entering `custom` pre-fills the last branch/SHA even though the mode resets. |
+| A parked diff is relaunched on return **only if its own mode/ref changed** | `diffLaunchedMode`/`diffLaunchedRef` record what a parked pane was launched with. Because the mode is per-agent and can only change while the agent is *attached*, a parked pane's stored mode/ref cannot drift under it — so it essentially always comes back untouched, which is the whole point of parking. The comparison stays as a correctness backstop. |
 | The custom prompt is a **script in the diff pane**, handing back through `cmd` | There is no channel for free-form user text: `cmd` carries only fixed verbs and the daemon otherwise only ever *writes* into panes. So `custom` mode quits revdiff and types `cockpit-custom-prompt.mjs` into the same pane; the prompt reads the ref off its own TTY, validates it with `git rev-parse` against the agent's worktree, then appends `custom-ok`/`custom-cancel` to `cmd` for the daemon to relaunch revdiff. |
 | While the prompt is open, `healQuitDiff` is **suppressed** and `⌥[`/`⌥]` are swallowed | The prompt is a plain node process, so `diffPaneStatus` reads it as a bare `shell` — indistinguishable from a quit revdiff. Without the `customPromptOpen` guard the 1s healer (and any further mode-cycle keypress) would type revdiff *over* the live prompt, where every character is an editor keystroke. The prompt owns the pane until it resolves; Enter confirms, Esc cancels back to the previous mode. |
 | Cycling **into** custom always re-prompts; switching **agents** does not | Answer to "ask me each time": the prompt fires on the `⌥[`/`⌥]` transition *into* `custom`, pre-filled with the agent's stored ref. Attaching to a different agent while already in `custom` is not "entering the mode" — it reuses that agent's stored ref silently, and only prompts if the agent has none yet (it cannot diff against nothing). |
