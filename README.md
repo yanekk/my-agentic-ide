@@ -22,39 +22,16 @@ the cursor already there.
 I stopped writing the code. The agents write it; my job is to read what came
 back and say what's wrong with it.
 
-That turned VSCode into mostly dead weight. The extension host, the language
-servers, the debugger, the refactoring engine, IntelliSense, the test explorer,
-the source control graph, the marketplace — all of it exists to help a person
-*type code into a file*. I don't do that any more. What I kept using was a diff
-view, a terminal, and a place to type a sentence back to Claude. Everything else
-was chrome I was paying for in startup time, RAM, proportional-font UI and a
-sidebar full of things I never clicked.
+That made most of VSCode dead weight — LSPs, debugger, refactoring, extensions
+all serve typing code into a file. And it couldn't show the one thing I wanted:
+its window is bound to a folder, the agents work in worktrees, so their changes
+landed outside the tree it had open and source control stayed empty. Reviewing
+meant commit, push, read the diff on BitBucket — committed work only, through a
+remote, to see files on the same disk. Then hand-copy the comment back into the
+terminal.
 
-And the diff — the one part of it I still wanted — was the part VSCode couldn't
-actually give me. A VSCode window is bound to a folder, and that folder was the
-main checkout; the agents work in git worktrees, so everything they wrote landed
-outside the tree the window was open on. The source control panel had nothing to
-show. The only dependable way to see an agent's changes was to have it commit and
-push, and then read the diff on BitBucket — a trip out through a remote to look
-at work sitting on the same disk, and even then a diff of *committed* work only,
-which is the wrong thing to be reading when the whole point is to catch something
-before it lands. So the cockpit's diff pane belongs to the attached agent's
-worktree and shows uncommitted work by default: nothing has to be committed,
-pushed or opened in a browser to be reviewed.
-
-The other half of it is that even where there is a diff on screen, it and the
-agent live in different worlds. The diff is a tab; the agent is a terminal
-somewhere below it; getting a comment from one to the other means selecting text, copying
-it, clicking into the terminal, pasting, and retyping the file and line number
-you just lost. That round trip is the *entire* job, repeated a few hundred times
-a day, and it was the slowest part of the day.
-
-I tried the heavier answer first (Conductor, 2026-08-23) and it went the wrong
-way: more app, its own harness, not monospaced, not keyboard-first. So this went
-the other way — strip the surface down to exactly the two activities that remain
-(**read the diff**, **comment back**) and make the path between them one
-keystroke. It is deliberately **not an IDE**: no editing, no LSP, no debugger,
-no extensions. `docs/requirements.md` records the interview this came out of.
+So: read the diff, comment back, one keystroke between them. Not an IDE.
+`docs/requirements.md` has the interview behind it.
 
 ## The three panes
 
