@@ -143,4 +143,26 @@ wezterm cli activate-pane --pane-id "$FLEET" 2>/dev/null || true
 # Set COCKPIT_ALL_AGENTS=1 for the unfiltered fleet.
 FLEET_ARGS=(--debug-file "$DIR/fleet.log")
 [ -n "${COCKPIT_ALL_AGENTS:-}" ] || FLEET_ARGS+=(--cwd "$REPO")
-exec claude agents "${FLEET_ARGS[@]}"
+
+# `Esc` in the fleet view quits `claude agents`. If this were `exec claude agents`
+# that exit would end the fleet pane's process and, since it is a pane in a larger
+# tab, close the pane -- the whole cockpit layout breaks and the daemon is left
+# targeting a pane id that no longer exists. So DON'T exec: run it in a loop that
+# relaunches on every exit, keeping this same pane (and its id) alive so a stray
+# `Esc` just puts the fleet list right back. Quitting the cockpit is done by
+# closing the window (agents die with it), not by exiting the fleet view.
+#
+# Guard against a tight spin: if `claude agents` keeps dying immediately (e.g. a
+# broken binary), stop relaunching after a few fast exits and drop to a shell so
+# the failure is visible on screen rather than a pane that flickers forever.
+fast_exits=0
+while true; do
+    start=$SECONDS
+    claude agents "${FLEET_ARGS[@]}"
+    if [ $(( SECONDS - start )) -lt 2 ]; then
+        fast_exits=$(( fast_exits + 1 ))
+        [ "$fast_exits" -ge 5 ] && die "claude agents exited immediately 5 times in a row"
+    else
+        fast_exits=0
+    fi
+done
