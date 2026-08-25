@@ -118,21 +118,6 @@ brings up the fleet. Re-opening the window is the rebuild path, and deliberately
 cheap — the agents are daemon-backed and survive it, their terminals and diffs
 do not.
 
-## Layout of the repo
-
-```
-bin/       install.sh (setup), cockpit-layout.sh (panes), cockpitd.mjs (the
-           daemon), plus the strip / welcome / note / custom-prompt renderers
-wezterm/   window config; default_prog is the layout script
-spikes/    integration tests (run.sh) and the PTY / pane-swap probes
-docs/      requirements.md — what this had to do, and why VSCode didn't
-           cockpit.md — how it works and why; read before changing the daemon
-```
-
-State lives in `~/.claude/cockpit/` — `config.lua` (the one file not
-regenerated), the pane/terminal/notes JSON, the `cmd` channel the keybindings
-append to, and the logs. Debug with `tail -f ~/.claude/cockpit/daemon.log`.
-
 ## Known limits
 
 - Agent names must be unique to resolve from the fleet pane's header; ambiguity
