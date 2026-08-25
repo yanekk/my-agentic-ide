@@ -142,6 +142,7 @@ function renderFooter() {
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
     `${ESC}1m⌥w${ESC}0m close`,
+    `${ESC}1m⇧O${ESC}0m shell`,
     `${ESC}2m⌥←↑↓→${ESC}0m move`,
     `${ESC}2m⌥z${ESC}0m zoom`,
   ].join(`${ESC}2m  ·  ${ESC}0m`);

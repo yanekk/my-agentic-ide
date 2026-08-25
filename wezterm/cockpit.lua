@@ -176,6 +176,12 @@ return {
     { key = "[", mods = "ALT", action = cockpit_cmd("prev") },
     { key = "w", mods = "ALT", action = cockpit_cmd("close") },
 
+    -- Jump focus from the diff pane down to the shell. revdiff owns plain O
+    -- (send review) as a pane passthrough; WezTerm intercepts Shift+O before the
+    -- pane sees it, so this fires only for us and leaves O untouched. The daemon
+    -- gates it on the diff pane being focused, so on a terminal it's a no-op.
+    { key = "O", mods = "SHIFT", action = cockpit_cmd("focus-term") },
+
     -- Resize the diff/bottom split.
     { key = "=", mods = "ALT", action = act.AdjustPaneSize { "Up", 3 } },
     { key = "-", mods = "ALT", action = act.AdjustPaneSize { "Down", 3 } },

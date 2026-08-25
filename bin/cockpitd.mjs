@@ -1446,6 +1446,13 @@ tail(CMD_FILE, (line) => {
   // The custom-range prompt hands its answer back through this same channel.
   if (verb === "custom-ok") { resolveCustomPrompt("ok"); return; }
   if (verb === "custom-cancel") { resolveCustomPrompt("cancel"); return; }
+  // Shift+O on the diff pane hands focus to the shell; a no-op elsewhere.
+  if (verb === "focus-term") {
+    if (diffPaneFocused() && panes.shell !== undefined) {
+      wez(["activate-pane", "--pane-id", String(panes.shell)]);
+    }
+    return;
+  }
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
   // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.

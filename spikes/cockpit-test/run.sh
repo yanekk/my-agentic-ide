@@ -404,6 +404,24 @@ echo next >> "$T/state/cmd"
 sleep 2
 refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
 check  "the mode is untouched"                    '"diffMode":"uncommitted"' "$T/state/terminals.json"
+
+echo
+echo "== 5c'. Shift+O on the diff pane hands focus to the shell =="
+# revdiff owns plain O (send review); Shift+O is intercepted by WezTerm and
+# routed here so the reviewer can jump straight down to the terminal.
+: > "$CALLS"
+echo 31 > "$ACTIVE"                       # focus the agent's diff pane
+echo focus-term >> "$T/state/cmd"
+sleep 2
+check "focus moved to the shell pane"             "activate-pane --pane-id 32" "$CALLS"
+
+echo
+echo "== 5c''. Shift+O with a TERMINAL focused is a no-op =="
+: > "$CALLS"
+echo 32 > "$ACTIVE"                       # already in the terminal
+echo focus-term >> "$T/state/cmd"
+sleep 2
+refute "no focus change fired"                    "activate-pane --pane-id 32" "$CALLS"
 : > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo
