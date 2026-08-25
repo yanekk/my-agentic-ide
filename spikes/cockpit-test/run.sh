@@ -406,22 +406,29 @@ refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
 check  "the mode is untouched"                    '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 echo
-echo "== 5c'. Shift+O on the diff pane hands focus to the shell =="
-# revdiff owns plain O (send review); Shift+O is intercepted by WezTerm and
-# routed here so the reviewer can jump straight down to the terminal.
+echo "== 5c'. a revdiff flush (O) jumps focus to the agent's Claude pane =="
+# revdiff's flush key IS O, so it can no longer be a WezTerm binding (that stole
+# the key and stopped the flush). Instead --post-flush-command appends focus-claude
+# after a successful flush, and the daemon activates the fleet/Claude pane (20) --
+# where injectReview has just typed the review. No focus gate: only a real flush
+# emits this.
 : > "$CALLS"
-echo 31 > "$ACTIVE"                       # focus the agent's diff pane
-echo focus-term >> "$T/state/cmd"
+echo 32 > "$ACTIVE"                       # even from the terminal (the verb only ever comes from revdiff)
+echo focus-claude >> "$T/state/cmd"
 sleep 2
-check "focus moved to the shell pane"             "activate-pane --pane-id 32" "$CALLS"
+check "focus moved to the Claude (fleet) pane"    "activate-pane --pane-id 20" "$CALLS"
+refute "did NOT focus the shell pane"             "activate-pane --pane-id 32" "$CALLS"
 
 echo
-echo "== 5c''. Shift+O with a TERMINAL focused is a no-op =="
+echo "== 5c''. revdiff is launched with the focus-claude post-flush command =="
+# The flush->focus jump rides on revdiff's own --post-flush-command, not a keybind.
 : > "$CALLS"
-echo 32 > "$ACTIVE"                       # already in the terminal
-echo focus-term >> "$T/state/cmd"
+echo 31 > "$ACTIVE"                       # focus the diff pane
+echo next >> "$T/state/cmd"               # uncommitted -> last-commit forces a relaunch
 sleep 2
-refute "no focus change fired"                    "activate-pane --pane-id 32" "$CALLS"
+check "revdiff carries the post-flush hook"       "--post-flush-command \"echo focus-claude >> $T/state/cmd\"" "$CALLS"
+echo prev >> "$T/state/cmd"               # back to uncommitted, restoring state for later sections
+sleep 2
 : > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo

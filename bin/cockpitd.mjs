@@ -349,6 +349,16 @@ let modeBeforeCustom = DEFAULT_DIFF_MODE;
  */
 function diffCommand(reviewFile, mode, ref) {
   const out = ["-o", JSON.stringify(reviewFile)];
+  // After a *successful* O flush, revdiff runs this (via `sh -c`), appending the
+  // focus-claude verb to the cmd channel. The daemon then jumps focus down to the
+  // agent's Claude pane -- where the review just flushed was injected as an unsent
+  // prompt -- so the single O both sends the review and lands the reviewer where
+  // they can edit and submit it. This replaces the old WezTerm Shift+O binding,
+  // which could not work: Shift+O IS revdiff's flush key, so intercepting it
+  // stopped the flush entirely. Appended AFTER the positional range (revdiff's
+  // flag parser accepts trailing options) so the exact-range assertions elsewhere
+  // keep matching.
+  const postFlush = ["--post-flush-command", JSON.stringify(`echo focus-claude >> ${CMD_FILE}`)];
   // --wrap: long lines wrap in the diff view instead of being clipped at the pane
   // edge. The diff slot is only ~half the window wide when a terminal shares the
   // row, so without it wide code and long prose scroll off horizontally.
@@ -361,16 +371,16 @@ function diffCommand(reviewFile, mode, ref) {
   if (mode === "lastcommit") {
     // HEAD~1 -> HEAD is exactly the most recent commit. No --untracked: this range
     // has no working tree, so untracked files do not belong to it.
-    return ["revdiff", "--wrap", "--no-confirm-discard", ...out, "HEAD~1", "HEAD"].join(" ");
+    return ["revdiff", "--wrap", "--no-confirm-discard", ...out, "HEAD~1", "HEAD", ...postFlush].join(" ");
   }
   if (mode === "custom" && ref) {
     // <ref> -> working tree: the agent's work relative to a base it names. Same
     // shape as uncommitted (--untracked, symbolic ref), just a different base.
-    return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, JSON.stringify(ref)].join(" ");
+    return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, JSON.stringify(ref), ...postFlush].join(" ");
   }
   // HEAD -> working tree. --untracked is not optional: agents create new files
   // constantly and plain `git diff` omits them.
-  return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, "HEAD"].join(" ");
+  return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, "HEAD", ...postFlush].join(" ");
 }
 
 /** The pane currently shown for `key`, or undefined if it has none live. */
@@ -1446,10 +1456,15 @@ tail(CMD_FILE, (line) => {
   // The custom-range prompt hands its answer back through this same channel.
   if (verb === "custom-ok") { resolveCustomPrompt("ok"); return; }
   if (verb === "custom-cancel") { resolveCustomPrompt("cancel"); return; }
-  // Shift+O on the diff pane hands focus to the shell; a no-op elsewhere.
-  if (verb === "focus-term") {
-    if (diffPaneFocused() && panes.shell !== undefined) {
-      wez(["activate-pane", "--pane-id", String(panes.shell)]);
+  // A successful revdiff flush (O) fires --post-flush-command, which appends this
+  // verb. Jump focus to the agent's Claude pane, where injectReview has just typed
+  // the flushed review as an unsent prompt, so the reviewer can edit and send it.
+  // Only revdiff emits this, and only from the diff pane on a real flush, so no
+  // focus gate is needed -- unlike the old shell-focused version, this lands in
+  // panes.fleet (the Claude session), not panes.shell (the terminal).
+  if (verb === "focus-claude") {
+    if (panes.fleet !== undefined) {
+      wez(["activate-pane", "--pane-id", String(panes.fleet)]);
     }
     return;
   }
