@@ -295,6 +295,12 @@ function readDiffMode() {
 
 let diffMode = readDiffMode();
 const diffLaunchedMode = new Map();
+// When each agent's revdiff was last (re)launched. revdiff takes about a second
+// to draw its frame, and until it does the pane still looks like a shell -- so
+// healQuitDiff must not mistake a just-launched revdiff for a quit one and type
+// the command in again, where every character is a keybinding.
+const diffLaunchedAt = new Map();
+const DIFF_RELAUNCH_COOLDOWN_MS = 3000;
 
 function persistDiffMode() {
   try {
@@ -314,14 +320,20 @@ function diffCommand(reviewFile) {
   // --wrap: long lines wrap in the diff view instead of being clipped at the pane
   // edge. The diff slot is only ~half the window wide when a terminal shares the
   // row, so without it wide code and long prose scroll off horizontally.
+  // --no-confirm-discard: Shift+Q discards every annotation and quits in one
+  // stroke, with no "press y to confirm". Unlike --no-confirm-reload (which we
+  // deliberately do NOT pass, because R fires automatically), Q is an explicit
+  // human gesture, and the daemon reinstates revdiff on the same diff the moment
+  // the pane drops to a shell (see healQuitDiff) -- so Q reads as "clear all
+  // annotations and keep reviewing", never as an empty pane left behind.
   if (diffMode === "lastcommit") {
     // HEAD~1 -> HEAD is exactly the most recent commit. No --untracked: this range
     // has no working tree, so untracked files do not belong to it.
-    return ["revdiff", "--wrap", ...out, "HEAD~1", "HEAD"].join(" ");
+    return ["revdiff", "--wrap", "--no-confirm-discard", ...out, "HEAD~1", "HEAD"].join(" ");
   }
   // HEAD -> working tree. --untracked is not optional: agents create new files
   // constantly and plain `git diff` omits them.
-  return ["revdiff", "--wrap", "--untracked", ...out, "HEAD"].join(" ");
+  return ["revdiff", "--wrap", "--no-confirm-discard", "--untracked", ...out, "HEAD"].join(" ");
 }
 
 /** The pane currently shown for `key`, or undefined if it has none live. */
@@ -683,6 +695,7 @@ async function relaunchDiff(jobId, pane, worktree, reviewFile) {
   }
   launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile)}`);
   diffLaunchedMode.set(jobId, diffMode);
+  diffLaunchedAt.set(jobId, Date.now());
   log(`relaunched diff pane ${pane} for ${jobId} in ${diffMode} mode`);
 }
 
@@ -786,7 +799,7 @@ async function showDiff(key, cwd, label) {
 
   const live = new Set(table.map((p) => p.pane_id));
   const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
-  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); }
+  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedAt.delete(k); }
 
   if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
 
@@ -865,6 +878,7 @@ async function reapAgents() {
       log(`reaped diff pane ${d} — agent ${key} is gone`);
       diffs.delete(key);
       diffLaunchedMode.delete(key);
+      diffLaunchedAt.delete(key);
     }
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
@@ -906,6 +920,41 @@ function healMissingPanes() {
   if (!inCockpit(curTermId(attached.jobId), table, cockpitTab)) {
     log(`terminal pane for ${attached.jobId} is gone; rebuilding`);
     attached = null;
+  }
+}
+
+/**
+ * Reinstate revdiff after the reviewer quits it (Shift+Q discards annotations,
+ * lowercase q just quits), so the diff pane is never left sitting at a bare
+ * shell.
+ *
+ * Only the ATTACHED agent's diff pane, and only when it has actually dropped to a
+ * shell -- "editing"/"running"/"absent" are left alone (a gone pane is
+ * healMissingPanes' job). The cooldown is the whole subtlety: revdiff takes about
+ * a second to paint its frame, and until it does the pane looks exactly like a
+ * shell, so relaunching inside that window would type the command into a starting
+ * revdiff where every keystroke is a binding. Both the read and the relaunch run
+ * synchronously under the reconcile lock, so this cannot race a pane swap or a
+ * mode toggle.
+ */
+function healQuitDiff() {
+  if (!attached || reconciling) return;
+  const pane = diffs.get(attached.jobId);
+  if (pane === undefined) return;                 // no pane yet, or gone: not ours to fix
+  if (Date.now() - (diffLaunchedAt.get(attached.jobId) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) return;
+  const table = paneTable();
+  if (!table) return;
+  if (diffPaneStatus(pane, table) !== "shell") return;
+
+  reconciling = true;
+  try {
+    if (diffPaneStatus(pane) !== "shell") return; // re-check under the lock
+    launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile)}`);
+    diffLaunchedMode.set(attached.jobId, diffMode);
+    diffLaunchedAt.set(attached.jobId, Date.now());
+    log(`revdiff was quit in ${attached.jobId}; reinstated it`);
+  } finally {
+    reconciling = false;
   }
 }
 
@@ -1132,6 +1181,7 @@ async function onEnter(jobId, knownName) {
       if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
       launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile)}`);
       diffLaunchedMode.set(jobId, diffMode);
+      diffLaunchedAt.set(jobId, Date.now());
     } else if (diffLaunchedMode.get(jobId) !== diffMode) {
       await relaunchDiff(jobId, shown.pane, worktree, reviewFile);
     }
@@ -1253,6 +1303,10 @@ tail(CMD_FILE, (line) => {
 setInterval(reconcile, POLL_MS);
 setInterval(reapAgents, REAP_MS);
 setInterval(healMissingPanes, REAP_MS);
+// Faster than the reap poll: a quit revdiff should come back promptly, not after
+// a reap interval. The cooldown in healQuitDiff keeps this from firing during a
+// launch's draw lag.
+setInterval(healQuitDiff, 1000);
 reconcile();
 
 const shutdown = () => {

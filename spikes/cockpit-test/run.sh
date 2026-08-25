@@ -239,8 +239,8 @@ echo '[DEBUG] [FV-attach] respawnJob abc12345: ok=false alive=true' >> "$T/state
 sleep 3
 
 check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
-check "revdiff invoked with --wrap --untracked"  "revdiff --wrap --untracked" "$CALLS"
-check "diff range is HEAD -> working tree"       "revdiff --wrap --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+check "revdiff invoked with --wrap --untracked"  "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
+check "diff range is HEAD -> working tree"       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "annotations routed to a per-job file"     "review-abc12345.md" "$CALLS"
 check "the agent got its OWN diff pane"          "opened diff pane 31" "$T/daemon.log"
 check "revdiff typed into that pane, not the old one" "--pane-id 31 --no-paste" "$CALLS"
@@ -366,7 +366,7 @@ check "daemon says restored, not opened (diff)"  "restored diff pane 31" "$T/dae
 check "daemon says restored, not opened (term)"  "restored terminal pane 32" "$T/daemon.log"
 refute "no second shell spawned for that agent"  "--cwd $WT --" "$CALLS"
 # The reason switching back is instant: nothing is retyped and no diff reparsed.
-refute "revdiff was NOT restarted on return"     "revdiff --wrap --untracked" "$CALLS"
+refute "revdiff was NOT restarted on return"     "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
 refute "no cd was retyped either"                "cd \"$WT\"" "$CALLS"
 check "second agent's diff parked in turn"       "move-pane-to-new-tab --pane-id 33" "$CALLS"
 : > "$TITLELAG"
@@ -382,7 +382,7 @@ echo next >> "$T/state/cmd"
 sleep 2
 
 check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
-check "revdiff relaunched in the last-commit range" "revdiff --wrap -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
+check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
 check "the preference was persisted"              "lastcommit" "$T/state/diff-mode"
 check "the switch was logged"                     "relaunched diff pane 31 for abc12345 in lastcommit" "$T/daemon.log"
@@ -392,7 +392,7 @@ echo "== 5b'. toggling again returns to the uncommitted range =="
 : > "$CALLS"
 echo prev >> "$T/state/cmd"
 sleep 2
-check "back to HEAD -> working tree"              "revdiff --wrap --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+check "back to HEAD -> working tree"              "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "preference persisted back to uncommitted"  "uncommitted" "$T/state/diff-mode"
 
 echo
@@ -454,7 +454,7 @@ check "and was moved back, not respawned"        "--move-pane-id 32" "$CALLS"
 check "the full-width split came off the fleet pane" "--top --percent 42 --pane-id 20" "$CALLS"
 check "the placeholder was killed, not parked"   "kill-pane" "$CALLS"
 check "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log"
-check "revdiff started in it"                    "revdiff --wrap --untracked" "$CALLS"
+check "revdiff started in it"                    "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
 
 echo
 echo "== 9. an agent that changed directory drags its idle, untouched terminal along =="
@@ -497,6 +497,23 @@ echo "test agent" > "$FLEETSTATE"; sleep 3
 check  "the daemon refused because it was busy"   "busy at" "$T/daemon.log"
 refute "the busy shell was NOT cd'd"              'cd "'"$MOVED2"'"\n' "$CALLS"
 : > "$PSBUSY"
+
+echo
+echo "== 10. quitting revdiff is reinstated, never left as a bare shell =="
+# Shift+Q discards every annotation and quits (no confirm, thanks to
+# --no-confirm-discard); lowercase q just quits. Either way the daemon brings
+# revdiff back on the same diff so the top pane is not left at an empty shell.
+DP=$(grep -oE '"diff":[0-9]+' "$T/state/panes.json" | grep -oE '[0-9]+')
+: > "$CALLS"
+# Simulate the quit: the pane falls back to a shell prompt (title no longer
+# revdiff), exactly what the daemon sees the moment revdiff exits.
+awk -v p="$DP" '{ if ($1 == p) print $1, $2, "sh"; else print }' "$PANESTATE" > "$PANESTATE.q" \
+    && mv "$PANESTATE.q" "$PANESTATE"
+sleep 3
+
+check "the quit was noticed and revdiff reinstated" "reinstated it" "$T/daemon.log"
+check "revdiff relaunched in the same diff pane"     "send-text --pane-id $DP" "$CALLS"
+check "...on the current range"                      "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

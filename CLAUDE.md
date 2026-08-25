@@ -66,7 +66,7 @@ bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
 bin/cockpit-welcome.mjs renders the diff pane's welcome screen (shown at the fleet list)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (77 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (80 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -99,6 +99,7 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | Watch the review file's **directory** | revdiff flushes atomically (write temp + rename), so the path gets a new inode each time and a file watch goes deaf after one flush. |
 | Reviews trigger on mtime+size, not content | `O` is an explicit "send this" gesture, so pressing it twice must inject twice even if nothing changed. |
 | `--no-confirm-reload` deliberately **not** passed | So an auto-reload with unflushed annotations prompts instead of silently discarding them. |
+| `--no-confirm-discard` **is** passed, and a quit revdiff is reinstated | Opposite call to `--no-confirm-reload`, for the opposite reason: `R` fires *automatically*, so it must prompt; Shift+Q (`discard_quit`) is an *explicit human* "throw all annotations away" gesture, so the confirm is just friction. To stop Q from leaving the diff pane at a bare shell, `healQuitDiff` watches the attached agent's diff pane and relaunches revdiff on the same range the moment it drops to a shell — so Q reads as "clear all annotations and keep reviewing". Cooldown-guarded (`DIFF_RELAUNCH_COOLDOWN_MS`): revdiff looks like a shell for ~1s while it paints, and relaunching in that gap would type the command into a starting revdiff where every key is a binding. |
 | Splits name their program explicitly | They would otherwise inherit `default_prog` and re-run the layout script forever. |
 | The checkout's path is recorded, not derived | A symlinked `~/.wezterm.lua` makes `wezterm.config_file` report the **symlink**, so the config cannot locate its own repo. It used to guess `~/src/agentic-ide`, which is wrong for any other clone name or projects root. `bin/install.sh` writes both paths to `~/.claude/cockpit/config.lua`; the old guesses remain as fallbacks so an un-installed checkout still runs. |
 | Layout failures `exec` a shell, never exit | As `default_prog` it is the window's only pane; exiting closes the window and takes the error message with it. |
