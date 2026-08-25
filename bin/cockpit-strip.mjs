@@ -145,7 +145,7 @@ function renderFooter() {
     `${ESC}1mO${ESC}0m send→claude`,
     `${ESC}2m⌥←↑↓→${ESC}0m move`,
     `${ESC}2m⌥z${ESC}0m zoom`,
-    `${ESC}2m⇧drag${ESC}0m copy`,
+    `${ESC}2mdrag${ESC}0m copy`,
   ].join(`${ESC}2m  ·  ${ESC}0m`);
   process.stdout.write(`${ESC}2J${ESC}H ${left}    ${keys}    ${diff}${ESC}K`);
 }

@@ -125,43 +125,49 @@ return {
   window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
   scrollback_lines = 10000,
 
-  -- The mouse belongs to the app; SHIFT takes it back.
+  -- claude keeps the CLICK; WezTerm takes the DRAG.
   --
-  -- claude's TUI (and revdiff) turn on mouse reporting, so by default every click
-  -- inside them is delivered to the app -- which is the whole reason claude's
-  -- clickable UI is clickable. Overriding the left button under
-  -- `mouse_reporting = true` (an earlier stab at copy-on-select) took that away
-  -- wholesale: WezTerm answered Down/Drag/Up itself and the app saw no click at
-  -- all, so nothing in the Claude pane responded to the mouse any more. Stock
-  -- WezTerm ships an *empty* mouse_reporting binding table for exactly this
-  -- reason -- `wezterm --config-file /dev/null show-keys` prints no such section
-  -- -- so the fix is to put nothing back into it.
+  -- Both halves of claude -- the fleet view and an agent session -- and revdiff
+  -- too turn on full mouse reporting (measured: `?1000h ?1002h ?1003h ?1006h`,
+  -- motion included). So by default the press, every drag and the release are
+  -- all handed to the app, WezTerm makes no selection of its own, and a drag
+  -- over the Claude pane leaves the clipboard empty however it looks on screen.
   --
-  -- Selecting text over a mouse-reporting app goes through WezTerm's own escape
-  -- hatch instead: hold SHIFT and the event is *not* reported to the app and is
-  -- handled as an ordinary terminal selection. So Shift+drag selects over claude,
-  -- and the bindings below make the release copy straight to the clipboard --
-  -- copy-on-select, no Cmd+C -- with double/triple-click selecting a word/line.
-  -- They are spelled out rather than left to the defaults so the same gesture
-  -- means the same thing in a plain shell as over claude: one rule, "hold Shift
-  -- to select", in every pane. The cost is WezTerm's default Shift+click-extends-
-  -- the-selection, which this deliberately replaces with start-a-new-selection.
-  bypass_mouse_reporting_modifiers = "SHIFT",
+  -- Binding all three of Down/Drag/Up under `mouse_reporting = true` -- the first
+  -- attempt at copy-on-select -- bought the copy at the price of everything else:
+  -- WezTerm answered the *press* too, claude never saw a click, and nothing in
+  -- the pane was clickable any more.
+  --
+  -- Splitting the gesture gets both. Only `Drag` and `Up` are taken here; `Down`
+  -- is deliberately absent, so the press still reaches claude and its UI stays
+  -- clickable. Keeping the release costs nothing: claude's mouse decoder labels
+  -- each event `press` or `release` and then only ever tests for `press` -- the
+  -- release WezTerm keeps is one claude would have dropped.
+  --
+  -- `ClearSelection` on the release is not tidiness, it is the anchor. WezTerm
+  -- normally sets the selection's origin in the Down handler; with no Down
+  -- binding, `extend_selection_at_mouse_cursor` falls back to
+  -- `origin.unwrap_or(<cursor>)`, so the first drag event anchors the selection
+  -- -- but only if no origin is left over. Without the clear, the *next* drag
+  -- would rubber-band from where the previous one started. The visible cost is
+  -- that the highlight goes away as you let go, just after the text lands on the
+  -- clipboard.
+  --
+  -- Shift is still the full escape hatch (WezTerm's own
+  -- bypass_mouse_reporting_modifiers, left at its SHIFT default): held, the
+  -- event is not reported to the app *and* the modifier is stripped before the
+  -- binding lookup, so Shift+drag is handled by the stock bindings as an
+  -- ordinary terminal selection -- highlight and all -- in every pane. That is
+  -- also what still gives word- and line-select (Shift+double/triple-click) over
+  -- claude, which are left to the defaults rather than stealing more presses.
   mouse_bindings = {
-    { event = { Down = { streak = 1, button = "Left" } }, mods = "SHIFT",
-      action = act.SelectTextAtMouseCursor("Cell") },
-    { event = { Drag = { streak = 1, button = "Left" } }, mods = "SHIFT",
-      action = act.ExtendSelectionToMouseCursor("Cell") },
-    { event = { Up = { streak = 1, button = "Left" } }, mods = "SHIFT",
-      action = act.CompleteSelection("ClipboardAndPrimarySelection") },
-    { event = { Down = { streak = 2, button = "Left" } }, mods = "SHIFT",
-      action = act.SelectTextAtMouseCursor("Word") },
-    { event = { Up = { streak = 2, button = "Left" } }, mods = "SHIFT",
-      action = act.CompleteSelection("ClipboardAndPrimarySelection") },
-    { event = { Down = { streak = 3, button = "Left" } }, mods = "SHIFT",
-      action = act.SelectTextAtMouseCursor("Line") },
-    { event = { Up = { streak = 3, button = "Left" } }, mods = "SHIFT",
-      action = act.CompleteSelection("ClipboardAndPrimarySelection") },
+    { event = { Drag = { streak = 1, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.ExtendSelectionToMouseCursor("Cell") },
+    { event = { Up = { streak = 1, button = "Left" } }, mods = "NONE",
+      mouse_reporting = true, action = act.Multiple {
+        act.CompleteSelection("ClipboardAndPrimarySelection"),
+        act.ClearSelection,
+      } },
   },
 
   keys = {
