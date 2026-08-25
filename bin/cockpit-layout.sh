@@ -3,6 +3,8 @@
 #
 #   ┌──────────────────────────────────────────────┐
 #   │  revdiff  (diff pane)                        │  42%
+#   │  ...or, with no agent attached, the welcome  │
+#   │  screen and the NOTES column beside it       │
 #   ├──────────────────────┬───────────────────────┤
 #   │ claude agents        │ shell @ worktree      │  58%
 #   ├──────────────────────┴───────────────────────┤
@@ -53,6 +55,27 @@ command -v claude  >/dev/null || die "claude not on PATH"
 mkdir -p "$DIR"
 FLEET="$WEZTERM_PANE"
 
+# --- the `note` command -----------------------------------------------------
+# Notes are added from any cockpit terminal and from nowhere else. There is no
+# install step and nothing lands on your normal PATH: the command is a symlink in
+# a directory only the cockpit's own shells ever see. Re-linked on every rebuild,
+# which is also how a moved or renamed checkout repairs itself.
+COCKPIT_BIN="$DIR/bin"
+mkdir -p "$COCKPIT_BIN"
+ln -sf "$HERE/cockpit-note.mjs" "$COCKPIT_BIN/note"
+
+# Exported HERE, before anything is spawned, so it reaches (a) the daemon started
+# below, which passes it on to every terminal it opens, and (b) `claude agents` at
+# the foot of this script -- so the AGENTS inherit it too and can leave notes of
+# their own, which is the point of letting them have it.
+#
+# Panes split by `wezterm cli` do NOT inherit any of this: they are spawned by the
+# mux SERVER, which has its own environment from whenever WezTerm started, not by
+# this script. So every split that needs the command names the env explicitly (see
+# the shell split below, and insertIntoSlot in cockpitd.mjs).
+export COCKPIT_BIN COCKPIT_REPO="$REPO"
+export PATH="$COCKPIT_BIN:$PATH"
+
 # Everything here runs through `wezterm cli`, which reaches the GUI through a
 # socket symlinked at default-org.wezfurlong.wezterm. If WezTerm was killed rather
 # than quit, that symlink is left pointing at a dead instance and every cli call
@@ -97,9 +120,11 @@ FOOTER=$(wezterm cli split-pane --bottom --cells 1 --pane-id "$FLEET" --cwd "$RE
 DIFF=$(wezterm cli split-pane --top --percent 42 --pane-id "$FLEET" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-welcome.mjs'")
 
-# Bottom-right shell, scoped to the repo until an agent is entered.
+# Bottom-right shell, scoped to the repo until an agent is entered. Spawned
+# through `env` because the mux server, not this script, is its parent -- that is
+# what puts the cockpit's `note` on its PATH (see the export above).
 SHELL_PANE=$(wezterm cli split-pane --right --percent 50 --pane-id "$FLEET" --cwd "$REPO" \
-       -- "$LOGIN_SHELL" -l)
+       -- /usr/bin/env "COCKPIT_REPO=$REPO" "PATH=$PATH" "$LOGIN_SHELL" -l)
 
 # The terminal-list strip clings to the right edge of the shell (VSCode's
 # terminal-tab list). It is a pure display pane -- cockpitd writes terminals.json

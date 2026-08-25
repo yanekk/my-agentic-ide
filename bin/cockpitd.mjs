@@ -238,6 +238,28 @@ function launchInPane(paneId, cmd) {
 /** Key for the shell shown while the fleet LIST is up: cwd = the cockpit repo. */
 const REPO_KEY = "__repo__";
 const LOGIN_SHELL = process.env.SHELL || "/bin/zsh";
+/**
+ * How a terminal is spawned: a login shell, with the cockpit's own bin directory
+ * on PATH so the `note` command exists in it.
+ *
+ * It has to be said out loud rather than inherited. `wezterm cli split-pane`
+ * spawns from the mux SERVER -- whose environment dates from whenever WezTerm
+ * started -- not from this daemon, so nothing the layout script exported reaches
+ * a new pane on its own. `env` carries it across. COCKPIT_REPO comes with it
+ * because an agent terminal sits in a WORKTREE, where `git rev-parse` would
+ * answer with the worktree path and file the notes under a second repo.
+ *
+ * The daemon's own PATH already has the bin directory (the layout script exported
+ * it before starting us), so it is filtered out before being prepended -- an
+ * inherited copy would otherwise be re-added on every terminal.
+ */
+const COCKPIT_BIN = path.join(DIR, "bin");
+function spawnTerminal(cwd) {
+  const rest = (process.env.PATH ?? "").split(":").filter((p) => p && p !== COCKPIT_BIN);
+  return ["--cwd", cwd, "--", "/usr/bin/env",
+          `COCKPIT_REPO=${panes.repo}`, `PATH=${[COCKPIT_BIN, ...rest].join(":")}`,
+          LOGIN_SHELL, "-l"];
+}
 // Tests drive this down so two strikes take seconds rather than half a minute.
 const REAP_MS = Number(process.env.COCKPIT_REAP_MS) || 15000;
 // Two consecutive misses before killing. One failed `claude agents` read must
@@ -564,7 +586,7 @@ function parkPane(paneId, label, cockpitTab) {
 function insertIntoSlot(anchor, spec, cockpitTab) {
   const tail = spec.moveId !== undefined
     ? ["--move-pane-id", String(spec.moveId)]
-    : ["--cwd", spec.cwd, "--", LOGIN_SHELL, "-l"];
+    : spawnTerminal(spec.cwd);
 
   let out;
   if (anchor !== undefined) {

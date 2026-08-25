@@ -18,6 +18,30 @@ wording can be edited first.
 └──────────────────────────────────────────────────┘
 ```
 
+With **no agent attached** that top pane is split down the middle instead: the
+cockpit's greeting on the left, a **notes list** on the right, newest first.
+Entering an agent parks the whole pane and revdiff comes back at full width, so
+nothing about the agent view changes.
+
+```
+┌──────────────────────┬───────────────────────────┐
+│                      │ NOTES                  4  │
+│  agentic-ide         │ ───────────────────────── │
+│  cockpit             │ 5c4f  2h   rebase before… │
+│                      │ 0665  Mon  skipped the f… │
+│                      │ … +7 more · note ls       │
+├────────────────┬─────┴──────────────────────┬────┤
+│ claude agents  │ shell @ repo               │list│
+└────────────────┴────────────────────────────┴────┘
+```
+
+Notes are added from **`note`**, which exists in every cockpit terminal and
+nowhere else: `note "rebase before the PR"` adds, bare `note` lists, `note edit
+a3f9` / `note rm a3f9` change and remove. Each has a **stable short id** (any
+unique prefix resolves), a date and an author. The agents inherit the command
+too, so an agent can leave you a note — those carry its name, so a note you were
+handed never reads like one you wrote.
+
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
 another, `⌥[` / `⌥]` cycle, `⌥w` closes. Every terminal of every agent keeps
@@ -72,10 +96,13 @@ bin/install.sh          per-machine setup: prerequisites, config.lua, the symlin
 bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daemon
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
-bin/cockpit-welcome.mjs renders the diff pane's welcome screen (shown at the fleet list)
+bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes column
+bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
+bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (80 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (82 assertions)
+spikes/notes-test/      the `note` command and the notes column (39 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -94,7 +121,11 @@ custom mode, its `customRef`), `custom-refs.json` (the
 per-agent branch/SHA for custom mode — the *only* persisted diff state; the mode
 itself is per-agent and in-memory, so there is no `diff-mode` file any more),
 `custom-ref-pending` (the handoff file the
-custom prompt writes and the daemon reads), and `cmd` (the command channel
+custom prompt writes and the daemon reads), `notes.json` (the notes, keyed by repo
+root — never in the repo, where they would land in the agent's own diff) with its
+`notes.lock`, `bin/note` (a symlink to `cockpit-note.mjs`, relinked on every
+rebuild — the whole of how the command is "inside the cockpit only"), and `cmd`
+(the command channel
 the terminal keybindings append to — the custom prompt appends `custom-ok`/
 `custom-cancel` here too). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
 
@@ -143,6 +174,15 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | The custom prompt is a **script in the diff pane**, handing back through `cmd` | There is no channel for free-form user text: `cmd` carries only fixed verbs and the daemon otherwise only ever *writes* into panes. So `custom` mode quits revdiff and types `cockpit-custom-prompt.mjs` into the same pane; the prompt reads the ref off its own TTY, validates it with `git rev-parse` against the agent's worktree, then appends `custom-ok`/`custom-cancel` to `cmd` for the daemon to relaunch revdiff. |
 | While the prompt is open, `healQuitDiff` is **suppressed** and `⌥[`/`⌥]` are swallowed | The prompt is a plain node process, so `diffPaneStatus` reads it as a bare `shell` — indistinguishable from a quit revdiff. Without the `customPromptOpen` guard the 1s healer (and any further mode-cycle keypress) would type revdiff *over* the live prompt, where every character is an editor keystroke. The prompt owns the pane until it resolves; Enter confirms, Esc cancels back to the previous mode. |
 | Cycling **into** custom always re-prompts; switching **agents** does not | Answer to "ask me each time": the prompt fires on the `⌥[`/`⌥]` transition *into* `custom`, pre-filled with the agent's stored ref. Attaching to a different agent while already in `custom` is not "entering the mode" — it reuses that agent's stored ref silently, and only prompts if the agent has none yet (it cannot diff against nothing). |
+| The notes column is **drawn**, not a second pane | The diff slot swaps by parking *exactly one* pane and splitting the incoming one into it. A real notes pane up there would make every agent switch a two-pane dance — for a list nothing ever types into. `cockpit-welcome.mjs` draws both halves in the one pane it already owns, so attaching still parks one pane and revdiff still returns at full width: **the agent view is unchanged**. |
+| `note` is published by a **symlink in a directory only cockpit shells have on PATH** | "Available inside the cockpit but not outside" needs no wrapper, no shell function and no edit to your `~/.zshrc`: `~/.claude/cockpit/bin/note` points at `cockpit-note.mjs`, and only shells the cockpit spawns get that directory. Outside a cockpit window `note` is simply not a command. Relinked on every rebuild, so a moved checkout repairs itself. |
+| Terminals are spawned through `/usr/bin/env`, because a split **inherits nothing** | `wezterm cli split-pane` spawns from the **mux server**, whose environment dates from whenever WezTerm started — not from the layout script or the daemon. So nothing either of them exports reaches a new pane; `PATH` and `COCKPIT_REPO` are named on the command line instead. `env` *execs* the shell rather than wrapping it, so `ps` still reports `zsh` and the idle-terminal check is untouched. |
+| `COCKPIT_REPO` travels with every terminal | An agent terminal sits in a **worktree**, where `git rev-parse --show-toplevel` answers with the worktree path — which would file that agent's notes under a second, phantom repo. The env var is the only thing that knows the cockpit's actual root from inside a worktree. |
+| Notes live in `~/.claude/cockpit`, **never in the repo** | A checked-in notes file appears in `revdiff --untracked HEAD` — the very diff the agent is being reviewed on — so every note you wrote would become a change the agent thinks it has to explain. |
+| The note id is **minted at creation**, not hashed from the text | The id is the handle you retype off the screen (`note rm a3f9`). A content hash would change on every edit, so the hash you just read would be stale the moment you used it. Any unique **prefix** resolves, and an ambiguous one is refused rather than guessed. |
+| Every note write takes a **lock** | The agents share the file with you. Two `note add`s landing together would otherwise both read the same list and the second would write the first away. Stale locks are broken at 5s so a process killed mid-write cannot wedge it forever. |
+| An agent's note carries the agent's **name**, from `CLAUDECODE` + `terminals.json` | Being handed a note must not read like something you wrote. `CLAUDECODE` is the only reliable "an agent is running this" marker — `CLAUDE_CODE_AGENT` holds the agent *type* (`claude`), not the name in the fleet list, which comes from `terminals.json` instead. |
+| The column says how much it is **hiding** | It is a summary in half a pane; stopping silently at the fold would read as "that is all of them". An overrun ends in `… +N more · note ls`. |
 | A terminal is `cd`'d forward when its agent **changed directory**, but only if **idle and untouched** | An agent's `cwd` migrates — it can start in the checkout and later create and enter a worktree — but a terminal is spawned once and thereafter only moved between tabs, never re-`cd`'d, so it freezes at the old directory (revdiff self-heals via its relaunch/reload path; a shell has none). `termSpawnCwd` records where each shell was put; on return, if the agent has moved and the shell is still sitting at its spawn cwd (untouched — checked against WezTerm's reported `cwd`) **and** idle (foreground process is the login shell, via `ps -t`), a `cd` is typed in. A shell the user navigated or one with a job running is left alone — a stray `cd` mid-command is worse than a stale prompt. |
 
 ## How agent switching is detected

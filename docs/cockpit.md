@@ -212,6 +212,96 @@ Pane swaps were ruled out as a cause first: parking and restoring the diff pane,
 the terminal, and a full diff-slot rebuild all leave the footer's height exactly
 where it was (`spikes/pane-swap/RESULTS.md`).
 
+## Notes
+
+The fleet view's top pane is split down the middle: the cockpit's greeting on the
+left, a **notes list** on the right, newest first.
+
+```
+┌──────────────────────┬───────────────────────────────────────────┐
+│                      │ NOTES                                  4  │
+│                      │ ───────────────────────────────────────── │
+│                      │ 5c4f  2h    rebase before opening the PR  │
+│  agentic-ide         │ 0665  Mon   skipped the flaky test  — tidy│
+│  cockpit             │ d29d  Aug 3 check the footer at 120 cols  │
+│                      │ … +7 more · note ls                       │
+└──────────────────────┴───────────────────────────────────────────┘
+```
+
+Notes are added, edited and removed with **`note`**, from any cockpit terminal:
+
+```bash
+note "rebase before opening the PR"    # add — the short form
+note add flaky test in run.sh:212      # add — quotes optional
+note                                   # list, newest first
+note show a3f9                         # one note, in full
+note edit a3f9 [new text]              # replace it; without text, $EDITOR
+note rm a3f9                           # remove it
+```
+
+A note is **one line** of text, a **stable short id**, a date and an author. The
+id is minted at creation and survives edits, so a hash read off the pane keeps
+working; any unique **prefix** resolves, so the four characters on screen are
+usually the whole handle. The column is a *summary* — when the notes overrun the
+pane it says how many are hidden and points at `note ls`, which is the full view.
+
+### Why the notes column is drawn, not split
+
+It is a **virtual pane**: `cockpit-welcome.mjs` draws both halves in the one pane
+it already owns. A real second pane would have to be parked and restored on every
+agent switch, and the diff slot's swap works by parking *exactly one* pane and
+splitting the incoming one into it (see [the diff slot](#the-diff-slot-swaps-in-the-opposite-order)) — a
+second pane up there would turn every swap into a two-pane dance for a list that
+nothing ever types into. Drawing it costs one string; splitting it would cost the
+invariant. So **the agent view is unchanged**: attaching parks the whole pane and
+revdiff comes back at full width exactly as before.
+
+### Why `note` exists only inside the cockpit
+
+There is no install step and nothing lands on your normal `PATH`.
+`bin/cockpit-layout.sh` symlinks `bin/cockpit-note.mjs` to
+`~/.claude/cockpit/bin/note` and puts *that* directory on the `PATH` of the shells
+the cockpit spawns. Outside a cockpit window `note` is simply not a command.
+
+It cannot be inherited, either: `wezterm cli split-pane` spawns from the **mux
+server**, whose environment dates from whenever WezTerm started — not from the
+layout script or the daemon. So every terminal is spawned through `/usr/bin/env`
+naming `PATH` and `COCKPIT_REPO` explicitly (`spawnTerminal` in `cockpitd.mjs`,
+and the shell split in the layout script). `env` *execs* the shell rather than
+wrapping it, so `ps` still reports `zsh` and the idle-terminal check is unaffected.
+
+`COCKPIT_REPO` travels with it because an agent terminal sits in a **worktree**,
+where `git rev-parse --show-toplevel` would answer with the worktree path and file
+those notes under a second, phantom repo.
+
+### The agents can write notes too
+
+They run under the fleet pane, so its environment is theirs — `note add` works
+inside an agent session for free, and an agent can hand you something worth
+keeping ("skipped the flaky test, see run.sh:212"). Those notes carry the agent's
+**name**, so a note you were handed never reads like one you wrote. The author is
+decided by `CLAUDECODE` (the only reliable marker — `CLAUDE_CODE_AGENT` holds the
+agent *type*, `claude`, not the name in the fleet list) and named from
+`terminals.json`, which the daemon keeps pointed at the attached agent.
+
+Because you and the agents share one file, every mutation is a read-modify-write
+under a lock file, with a stale-lock break at 5s; without it two adds landing
+together would both read the same list and the second would write the first away.
+
+### Where notes live, and why not in the repo
+
+`~/.claude/cockpit/notes.json`, keyed by repo root:
+
+```json
+{ "version": 1, "repos": { "/Users/you/src/proj": [ { "id", "text", "ts", "author" } ] } }
+```
+
+Not in the repo — a checked-in notes file would show up in
+`revdiff --untracked HEAD`, which is the *very diff the agent is being reviewed
+on*, so every note you wrote would become a change the agent thinks it has to
+explain. Written atomically (temp + rename) like every other cockpit state file,
+so the pane watches the **directory** and never goes deaf on a replaced inode.
+
 ## Per-agent panes
 
 Each agent gets its own terminals **and its own revdiff**, and so does the fleet
@@ -342,6 +432,8 @@ And for the diff slot (`spikes/pane-swap/probe.sh`, same setup):
 | `COCKPIT_AUTO_RELOAD=0` | Never auto-reload the diff; `R` by hand only. |
 | `COCKPIT_DIR` | State directory (default `~/.claude/cockpit`). Used by the tests. |
 | `COCKPIT_REAP_MS` | How often to check whether a terminal's agent still exists (default 15000). Two consecutive misses kill it. The tests drive this down so the wait is seconds. |
+| `COCKPIT_REPO` | Which repo's notes a terminal sees. Exported into every cockpit-spawned shell; `note` falls back to `panes.json` when it is absent. Not something to set by hand. |
+| `COCKPIT_BIN` | Where the cockpit's own commands live (`~/.claude/cockpit/bin`). Set by the layout script; on the `PATH` of cockpit shells only. |
 
 ## Testing
 
@@ -352,7 +444,7 @@ spikes/cockpit-test/run.sh
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
 throwaway git repos, and drives attach → review → switch → switch back → detach →
-reap. 80 assertions. Beyond the review-injection ones it asserts that entering an
+reap. 82 assertions. Beyond the review-injection ones it asserts that entering an
 agent *opens* a terminal and a diff pane in its worktree rather than `cd`-ing or
 restarting shared ones, that switching *parks* both outgoing panes instead of
 killing them, that switching back *moves the same panes in* — with **no revdiff
@@ -367,6 +459,23 @@ that both panes are reaped only once their agent has left the fleet.
 The stub models pane **titles** too, and deliberately reports a stale one on the
 switch-back so the framed-screen check has to carry that decision. Making
 `diffPaneStatus` title-only fails exactly those two assertions.
+
+```bash
+spikes/notes-test/run.sh
+```
+
+The notes feature, standalone — the column is drawn inside the welcome pane
+rather than being a pane of its own, so it needs no mux stub. 39 assertions over
+the `note` command and the rendered column: that the command refuses outside a
+cockpit but still answers `help`, that a bare `note "text"` adds while `note ls`
+lists, that a pasted newline is collapsed rather than splitting a note, that
+**nothing is written into the repo** (the file that would otherwise appear in the
+agent's own diff), that an id survives an edit and resolves from a 2-character
+prefix while an unknown one is refused, that an agent's note carries its name and
+yours carries no byline, that two repos keep separate lists, that **10 concurrent
+adds all survive** the shared-file lock, and that the column renders its header,
+ids, ages, empty state, the `+N more` line when it overruns, and drops back to a
+single column when the pane is too narrow to split.
 
 ```bash
 spikes/pane-swap/probe.sh          # what wezterm and revdiff actually do

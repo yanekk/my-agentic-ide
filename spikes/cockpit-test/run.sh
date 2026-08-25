@@ -248,6 +248,11 @@ check "repo diff pane parked, not reused"        "move-pane-to-new-tab --pane-id
 refute "the repo diff pane was not typed into"   "--pane-id 10 --no-paste" "$CALLS"
 check "repo shell parked, not reused"            "move-pane-to-new-tab --pane-id 30" "$CALLS"
 check "a terminal opened in the agent worktree"  "--cwd $WT --" "$CALLS"
+# A cockpit terminal is where `note` lives. It cannot be inherited: split-pane
+# spawns from the mux server, so the env is named on the command line or the
+# command simply is not there.
+check "the terminal carries the cockpit's note command" "/state/bin:" "$CALLS"
+check "...and which repo's notes are its own"    "COCKPIT_REPO=$WT" "$CALLS"
 check "opened terminal is pane 32"               "opened terminal pane 32" "$T/daemon.log"
 refute "repo shell was not cd'd into the worktree" "--pane-id 30 --no-paste" "$CALLS"
 
