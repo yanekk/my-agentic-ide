@@ -118,6 +118,9 @@ brings up the fleet. Re-opening the window is the rebuild path, and deliberately
 cheap — the agents are daemon-backed and survive it, their terminals and diffs
 do not.
 
+`docs/cockpit.md` covers how it works and why — read it before changing the
+daemon.
+
 ## Known limits
 
 - Agent names must be unique to resolve from the fleet pane's header; ambiguity
