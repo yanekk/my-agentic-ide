@@ -187,17 +187,29 @@ return {
     --
     --   Option+arrow  word-by-word     ESC-b / ESC-f  (backward/forward-word)
     --   Option+Delete  delete a word   C-w            (unix-word-rubout, space-delimited)
-    --   Cmd+arrow  line start/end      C-a / C-e      (beginning/end-of-line)
+    --   Cmd+LeftArrow   line start     C-a            (beginning-of-line)
+    --   Cmd+RightArrow  line end       End key        (see below -- NOT C-e)
     --   Cmd+Delete  erase to line start  C-u          (backward-kill-line)
     --
     -- Word *motion* stops at punctuation (readline's word chars), not purely at
     -- spaces; deletion (C-w) is space-delimited. Rebind in ~/.zshrc for stricter
     -- space-only motion -- the shell owns that, WezTerm only forwards the keys.
+    --
+    -- Cmd+RightArrow sends the End *key*, not C-e, because revdiff binds C-e to
+    -- "open annotation in $EDITOR": pressed in its annotation editor, C-e spawns
+    -- $EDITOR over the diff pane and leaves it wedged. End-of-line is the one
+    -- motion where the two apps disagree on the escape sequence -- revdiff's
+    -- editor only honours the CSI form (ESC [ F) and reads SS3 (ESC O F) as
+    -- literal text, while this zsh runs in application-cursor mode and binds only
+    -- SS3. SendKey{End} threads that needle: WezTerm encodes End per the focused
+    -- pane's DECCKM, so revdiff (normal mode) gets ESC [ F and the shell
+    -- (application mode) gets ESC O F -- each its own working end-of-line. C-a
+    -- has no such collision, so Cmd+LeftArrow stays on it.
     { key = "LeftArrow",  mods = "ALT", action = act.SendKey { key = "b", mods = "ALT" } },
     { key = "RightArrow", mods = "ALT", action = act.SendKey { key = "f", mods = "ALT" } },
     { key = "Backspace",  mods = "ALT", action = act.SendKey { key = "w", mods = "CTRL" } },
     { key = "LeftArrow",  mods = "CMD", action = act.SendKey { key = "a", mods = "CTRL" } },
-    { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "e", mods = "CTRL" } },
+    { key = "RightArrow", mods = "CMD", action = act.SendKey { key = "End" } },
     { key = "Backspace",  mods = "CMD", action = act.SendKey { key = "u", mods = "CTRL" } },
 
     -- Option+Enter inserts a line break instead of WezTerm's default (toggle
