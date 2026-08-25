@@ -112,6 +112,7 @@ Each of these is a measured finding, not a preference — sources in
 | Payload has every `\r` replaced with `\n` | `\r` is what Enter sends and **submits**. `\n` merely inserts a newline. This one substitution is the whole reason the review can arrive unsent. |
 | Injection only while attached | The fleet **list** has its own prompt box that dispatches a *new agent*. Typing a review there would spawn one. |
 | `revdiff --untracked` | `git diff` does not report untracked files, and agents create new files constantly. Without this, new files are invisible. |
+| `revdiff --wrap` | The diff slot is only ~half the window wide when a terminal shares its row, so long code and prose lines would clip at the pane edge and scroll off horizontally. Wrapping keeps the whole line on screen. |
 | Diff range is `HEAD`, passed symbolically | `revdiff [base] [against]` defaults `against` to the working tree, so `revdiff HEAD` diffs `HEAD` → working tree: the agent's **uncommitted** work, an empty diff on a clean tree, matching `git status`. Passing `HEAD` rather than a resolved SHA lets a reload re-read it, so committing drops work out of the diff. (A merge-base base — the old R3 — froze at launch and kept showing committed work.) |
 | Merge base is discovered, not `main` | Agents branch from wherever they started. Tries `@{upstream}`, then `origin/HEAD`, then `main`, then `master`. |
 | Auto-reload pauses once you annotate | `R` drops annotations. The pane freezes the moment you start commenting, so text cannot shift under you. |

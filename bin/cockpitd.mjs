@@ -300,14 +300,17 @@ function persistDiffMode() {
  */
 function diffCommand(reviewFile) {
   const out = ["-o", JSON.stringify(reviewFile)];
+  // --wrap: long lines wrap in the diff view instead of being clipped at the pane
+  // edge. The diff slot is only ~half the window wide when a terminal shares the
+  // row, so without it wide code and long prose scroll off horizontally.
   if (diffMode === "lastcommit") {
     // HEAD~1 -> HEAD is exactly the most recent commit. No --untracked: this range
     // has no working tree, so untracked files do not belong to it.
-    return ["revdiff", ...out, "HEAD~1", "HEAD"].join(" ");
+    return ["revdiff", "--wrap", ...out, "HEAD~1", "HEAD"].join(" ");
   }
   // HEAD -> working tree. --untracked is not optional: agents create new files
   // constantly and plain `git diff` omits them.
-  return ["revdiff", "--untracked", ...out, "HEAD"].join(" ");
+  return ["revdiff", "--wrap", "--untracked", ...out, "HEAD"].join(" ");
 }
 
 /** The pane currently shown for `key`, or undefined if it has none live. */
