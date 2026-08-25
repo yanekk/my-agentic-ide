@@ -106,6 +106,7 @@ spikes/notes-test/      the `note` command and the notes column (39 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
+docs/requirements.md    what this had to do, and why VSCode and Conductor didn't
 docs/cockpit.md         how it works and why; read before changing the daemon
 ```
 
