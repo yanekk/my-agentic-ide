@@ -30,9 +30,21 @@ view, a terminal, and a place to type a sentence back to Claude. Everything else
 was chrome I was paying for in startup time, RAM, proportional-font UI and a
 sidebar full of things I never clicked.
 
-The other thing VSCode gets wrong for this job is that the diff and the agent
-live in different worlds. The diff is a tab; the agent is a terminal somewhere
-below it; getting a comment from one to the other means selecting text, copying
+And the diff — the one part of it I still wanted — was the part VSCode couldn't
+actually give me. A VSCode window is bound to a folder, and that folder was the
+main checkout; the agents work in git worktrees, so everything they wrote landed
+outside the tree the window was open on. The source control panel had nothing to
+show. The only dependable way to see an agent's changes was to have it commit and
+push, and then read the diff on BitBucket — a trip out through a remote to look
+at work sitting on the same disk, and even then a diff of *committed* work only,
+which is the wrong thing to be reading when the whole point is to catch something
+before it lands. So the cockpit's diff pane belongs to the attached agent's
+worktree and shows uncommitted work by default: nothing has to be committed,
+pushed or opened in a browser to be reviewed.
+
+The other half of it is that even where there is a diff on screen, it and the
+agent live in different worlds. The diff is a tab; the agent is a terminal
+somewhere below it; getting a comment from one to the other means selecting text, copying
 it, clicking into the terminal, pasting, and retyping the file and line number
 you just lost. That round trip is the *entire* job, repeated a few hundred times
 a day, and it was the slowest part of the day.
