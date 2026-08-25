@@ -347,13 +347,16 @@ spikes/cockpit-test/run.sh
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
 throwaway git repos, and drives attach → review → switch → switch back → detach →
-reap. 55 assertions. Beyond the review-injection ones it asserts that entering an
+reap. 77 assertions. Beyond the review-injection ones it asserts that entering an
 agent *opens* a terminal and a diff pane in its worktree rather than `cd`-ing or
 restarting shared ones, that switching *parks* both outgoing panes instead of
 killing them, that switching back *moves the same panes in* — with **no revdiff
 command retyped**, which is the whole point — that a parked agent's diff still
 reloads when its worktree changes but *not* while its annotation editor is open,
-and that both panes are reaped only once their agent has left the fleet.
+that an agent which *changes directory* mid-life (checkout → worktree) has its
+idle, untouched terminal `cd`'d forward on return while a busy or hand-navigated
+one is left alone, and that both panes are reaped only once their agent has left
+the fleet.
 
 The stub models pane **titles** too, and deliberately reports a stale one on the
 switch-back so the framed-screen check has to carry that decision. Making

@@ -66,7 +66,7 @@ bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
 bin/cockpit-welcome.mjs renders the diff pane's welcome screen (shown at the fleet list)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (55 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (77 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -123,6 +123,7 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | `⌥[` / `⌥]` route by **which pane is focused** | The keys append `next`/`prev` to `cmd` unconditionally; the daemon reads the cockpit tab's active pane (`is_active`) and sends them to the diff-mode switch when the **diff** pane holds focus, to the terminal cycler otherwise. `⌥t`/`⌥w` are always terminals. |
 | Switching diff mode **restarts** revdiff (`q` then relaunch) | `R` only reloads the *same* range, so changing the range means quitting revdiff back to its shell and relaunching with the new args. Never while the annotation editor is open — `q` and the whole command would land in the comment (same rule as auto-reload). |
 | A parked diff is relaunched on return **only if the mode changed** | `diffLaunchedMode` records the range a parked pane was launched with. If it still matches the global preference the pane comes back untouched — the whole point of parking. If the mode was toggled while it was away, it is relaunched so every agent honours the one persisted choice. |
+| A terminal is `cd`'d forward when its agent **changed directory**, but only if **idle and untouched** | An agent's `cwd` migrates — it can start in the checkout and later create and enter a worktree — but a terminal is spawned once and thereafter only moved between tabs, never re-`cd`'d, so it freezes at the old directory (revdiff self-heals via its relaunch/reload path; a shell has none). `termSpawnCwd` records where each shell was put; on return, if the agent has moved and the shell is still sitting at its spawn cwd (untouched — checked against WezTerm's reported `cwd`) **and** idle (foreground process is the login shell, via `ps -t`), a `cd` is typed in. A shell the user navigated or one with a job running is left alone — a stray `cd` mid-command is worse than a stale prompt. |
 
 ## How agent switching is detected
 

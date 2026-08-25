@@ -108,11 +108,18 @@ case "$sub" in
     fi
     ;;
   list)
-    awk 'BEGIN{ printf "["; while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1
-                while ((getline a < ENVIRON["ACTIVE"]) > 0) active = a }
+    # $PANECWD (lines "<pane> <file-url>") overrides a pane's reported cwd, so a
+    # test can model a shell that stayed put while its agent moved on; default is
+    # file:///tmp. tty_name is emitted for the idle check (which shells out to the
+    # `ps` stub below).
+    awk 'BEGIN{ printf "["
+                while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1
+                while ((getline a < ENVIRON["ACTIVE"]) > 0) active = a
+                while ((getline c < ENVIRON["PANECWD"]) > 0) { n = split(c, kv, " "); if (n >= 2) cwd[kv[1]] = kv[2] } }
          { t = ($1 in lag) ? "sh" : $3
            act = ($1 == active) ? "true" : "false"
-           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"cwd\":\"file:///tmp\",\"is_active\":%s}", (NR>1 ? "," : ""), $2, $1, t, act }
+           u = ($1 in cwd) ? cwd[$1] : "file:///tmp"
+           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"tty_name\":\"/dev/ttys%s\",\"cwd\":\"%s\",\"is_active\":%s}", (NR>1 ? "," : ""), $2, $1, t, $1, u, act }
          END{printf "]\n"}' "$PANESTATE"
     ;;
   split-pane)
@@ -143,6 +150,20 @@ esac
 exit 0
 STUB
 chmod +x "$T/bin/wezterm"
+
+# --- stub ps ---------------------------------------------------------------
+# The daemon asks `ps -t <tty> -o stat=,comm=` whether a terminal is idle (its
+# foreground process is the login shell) before cd-ing it. $PSBUSY names a
+# foreground command to report instead of the shell, so the busy path can be
+# exercised; empty means idle.
+cat > "$T/bin/ps" <<'PS'
+#!/usr/bin/env bash
+if [ -s "$PSBUSY" ]; then printf 'R+ %s\n' "$(cat "$PSBUSY")"; else printf 'Ss+ zsh\n'; fi
+PS
+chmod +x "$T/bin/ps"
+export PANECWD="$T/panecwd"; : > "$PANECWD"
+export PSBUSY="$T/psbusy"; : > "$PSBUSY"
+
 export PATH="$T/bin:$PATH"
 
 # --- a real git repo to act as the agent's worktree -------------------------
@@ -188,7 +209,9 @@ echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$T/state/panes.json
 # HOME is redirected so the daemon's stale-socket repair looks for wezterm
 # sockets under $T and finds none, rather than relinking the real one.
 mkdir -p "$T/home"
-HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS=700 \
+# SHELL is pinned so LOGIN_SHELL's basename ("zsh") matches what the ps stub
+# reports as an idle terminal's foreground process.
+HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS=700 SHELL=/bin/zsh \
     node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
 DPID=$!
 trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
@@ -432,6 +455,48 @@ check "the full-width split came off the fleet pane" "--top --percent 42 --pane-
 check "the placeholder was killed, not parked"   "kill-pane" "$CALLS"
 check "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log"
 check "revdiff started in it"                    "revdiff --wrap --untracked" "$CALLS"
+
+echo
+echo "== 9. an agent that changed directory drags its idle, untouched terminal along =="
+# `claude agents` reports an agent's LIVE cwd, and that migrates: an agent can
+# start in the checkout and later create and enter a worktree. A terminal is
+# spawned once and only moved between tabs after that, so without help it stays
+# frozen at the old directory. On re-attach the daemon cd's the shell forward --
+# but only when it is idle AND still sitting where it was spawned (untouched).
+echo list > "$FLEETSTATE"; sleep 2
+
+MOVED="$T/moved"                          # where the agent went (its new worktree)
+echo "32 file://$WT" > "$PANECWD"         # its terminal (pane 32) is still at $WT
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"; sleep 3
+
+check "the stale idle terminal was cd'd forward"  "cd terminal 32" "$T/daemon.log"
+check "logged as an agent directory move"         "agent moved from" "$T/daemon.log"
+# The terminal's cd is standalone (`cd "X"` then newline); the diff pane's, when
+# revdiff is relaunched, is `cd "X" && revdiff ...`. The trailing \n distinguishes
+# the shell being followed from the diff being reloaded.
+check "the new dir was typed into the terminal"   'cd "'"$MOVED"'"\n' "$CALLS"
+
+echo
+echo "== 9b. a BUSY terminal is left where it is (a cd must not land mid-command) =="
+echo list > "$FLEETSTATE"; sleep 2
+MOVED2="$T/moved2"
+echo "32 file://$MOVED" > "$PANECWD"       # 32 is now at $MOVED (untouched), still
+echo node > "$PSBUSY"                      # ...but a job is running in it now
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED2","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"; sleep 3
+
+check  "the daemon refused because it was busy"   "busy at" "$T/daemon.log"
+refute "the busy shell was NOT cd'd"              'cd "'"$MOVED2"'"\n' "$CALLS"
+: > "$PSBUSY"
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

@@ -246,6 +246,17 @@ const REAP_STRIKES = 2;
  * own, still running. The repo (fleet-list) context keeps a single shell.
  */
 const terminals = new Map([[REPO_KEY, { panes: [panes.shell], cur: 0 }]]);
+/**
+ * pane id -> the cwd the daemon spawned that shell in. An agent's cwd MIGRATES
+ * over its life -- it can start in the plain checkout and later create and enter
+ * a worktree -- but a terminal pane is spawned once and thereafter only moved
+ * between tabs, never re-cd'd. So a terminal opened before the move stays frozen
+ * at the old directory. This records where each shell was put, so a return can
+ * notice the agent has moved and cd an *untouched, idle* shell to catch up (see
+ * syncTerminalCwd). A shell the user has navigated themselves (live cwd no longer
+ * equals its spawn cwd) is left alone.
+ */
+const termSpawnCwd = new Map([[panes.shell, panes.repo]]);
 let visibleKey = REPO_KEY;
 /** How many terminals one agent may open. A backstop, not a real ceiling. */
 const MAX_TERMS = 8;
@@ -329,6 +340,7 @@ function pruneDeadTerminals(live) {
     if (t.cur >= t.panes.length) t.cur = Math.max(0, t.panes.length - 1);
     if (t.panes.length !== before && !t.panes.length && k !== REPO_KEY) terminals.delete(k);
   }
+  for (const id of termSpawnCwd.keys()) if (!live.has(id)) termSpawnCwd.delete(id);
 }
 
 /** Drop one pane id from an agent's list, keeping `cur` in range. */
@@ -337,6 +349,84 @@ function removeTerminal(entry, id) {
   if (i < 0) return;
   entry.panes.splice(i, 1);
   if (entry.cur >= entry.panes.length) entry.cur = Math.max(0, entry.panes.length - 1);
+}
+
+/**
+ * The live cwd of a pane's shell, from WezTerm's own report, or null.
+ *
+ * WezTerm records the cwd its shell last announced via OSC 7 as a file URL --
+ * `file:///Users/x` (empty host) or `file://host/Users/x`. Everything from the
+ * first slash after the host is the path; a percent-encoded segment is decoded.
+ */
+function shellCwdOf(paneId, table) {
+  const url = table?.find((p) => p.pane_id === paneId)?.cwd;
+  const m = /^file:\/\/[^/]*(\/.*)$/.exec(url ?? "");
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+}
+
+/** A path with any trailing slashes removed, for comparing two cwds. */
+const normCwd = (s) => s.replace(/\/+$/, "") || "/";
+
+/**
+ * Is a pane sitting idle at a shell prompt (nothing running in the foreground)?
+ *
+ * Same signal the strip uses to NAME terminals: `ps -t <tty>` lists the tty's
+ * processes and the foreground group carries `+` in its state. Idle means that
+ * foreground process is the login shell itself; a build or an editor running in
+ * it is any other command. Unknown (`ps` says nothing, no tty) counts as NOT
+ * idle, so an uncertain shell is left untouched rather than typed into.
+ */
+function terminalIsIdle(paneId, table) {
+  const tn = table?.find((p) => p.pane_id === paneId)?.tty_name;
+  const tty = tn ? tn.replace(/^\/dev\//, "") : null;
+  if (!tty) return false;
+  try {
+    const out = execFileSync("ps", ["-t", tty, "-o", "stat=,comm="],
+                             { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] });
+    let comm = null;
+    for (const line of out.split("\n")) {
+      const m = line.trim().match(/^(\S+)\s+(.+)$/);
+      if (m && m[1].includes("+")) comm = m[2];       // last foreground-group line wins
+    }
+    if (!comm) return false;
+    return comm.replace(/^-/, "").split("/").pop() === path.basename(LOGIN_SHELL);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Catch a terminal up to an agent that has moved directory since the shell was
+ * spawned (typically: started in the checkout, later created and entered a
+ * worktree). Only an UNTOUCHED, IDLE shell is corrected:
+ *
+ *   - untouched  — its live cwd still equals where the daemon spawned it. If the
+ *                  user has cd'd it somewhere themselves, that is theirs to keep.
+ *   - idle       — nothing is running in it, so a `cd` cannot land mid-command or
+ *                  interrupt a build.
+ *
+ * A shell whose spawn cwd we never recorded (opened by an older daemon) is left
+ * alone: without it we cannot tell "untouched" from "navigated", and yanking a
+ * shell out from under someone is worse than a stale prompt they can fix with one
+ * `cd`. ctrl-U first clears any half-typed line, exactly as launchInPane does.
+ */
+function syncTerminalCwd(paneId, worktree, table) {
+  if (paneId === undefined || !worktree) return;
+  const spawn = termSpawnCwd.get(paneId);
+  if (spawn === undefined) return;                     // unknown origin; don't risk it
+  const live = shellCwdOf(paneId, table);
+  if (live === null) return;
+  const want = normCwd(worktree);
+  if (normCwd(live) === want) return;                  // already there
+  if (normCwd(live) !== normCwd(spawn)) return;        // user navigated it; leave it
+  if (!terminalIsIdle(paneId, table)) {
+    return log(`terminal ${paneId} busy at ${spawn}; not cd-ing to ${want}`);
+  }
+  sendRaw(paneId, "\x15");                              // ctrl-U: clear the prompt line
+  sendRaw(paneId, `cd ${JSON.stringify(worktree)}\n`);
+  termSpawnCwd.set(paneId, worktree);
+  log(`cd terminal ${paneId} → ${want} (agent moved from ${spawn})`);
 }
 
 /**
@@ -484,6 +574,7 @@ async function showTerminal(key, cwd, label) {
     if (incoming === undefined) return log(`could not open a terminal for ${label ?? key}`);
     entry.panes.push(incoming);
     entry.cur = entry.panes.length - 1;
+    termSpawnCwd.set(incoming, cwd);
     log(`opened terminal pane ${incoming} for ${label ?? key} at ${cwd}`);
   }
 
@@ -532,6 +623,7 @@ async function terminalCommand(verb, attempt = 0) {
       if (anchor !== undefined) parkPane(anchor, key, cockpitTab);
       entry.panes.push(id);
       entry.cur = entry.panes.length - 1;
+      termSpawnCwd.set(id, attached.worktree);
       log(`opened terminal pane ${id} for ${key} (${entry.panes.length} total)`);
     } else if (verb === "next" || verb === "prev") {
       if (entry.panes.length < 2 || anchor === undefined) return;
@@ -1046,6 +1138,11 @@ async function onEnter(jobId, knownName) {
   }
 
   await showTerminal(jobId, worktree, agent.name);
+  // The agent may have moved directory since this terminal was spawned (e.g. it
+  // started in the checkout and later entered a worktree). Catch an untouched,
+  // idle shell up to where the agent is now; a busy or user-navigated one is left
+  // as it is.
+  syncTerminalCwd(curTermId(jobId), worktree, paneTable());
 
   watchAnnotations(reviewFile);
   watchWorktree(jobId, worktree, reviewFile);
