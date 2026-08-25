@@ -93,11 +93,14 @@ is deliberately cheap.
    **left unsent**. Edit the wording if you like, then press Enter yourself.
 5. Keep going. The pane never closes; `R` reloads by hand after the agent works.
 6. Focus the diff pane (`⌥`+arrow) and press `⌥[` / `⌥]` to switch the **diff
-   mode** — `uncommitted` (`HEAD` → working tree) ↔ `lastcommit` (`HEAD~1` →
-   `HEAD`, just the most recent commit). The footer shows which is active. The
-   choice is one global preference, persisted, so it survives reopening the
-   cockpit and applies to every agent. (Focused on a terminal, the same keys still
-   cycle terminals.)
+   mode** — `uncommitted` (`HEAD` → working tree) → `lastcommit` (`HEAD~1` →
+   `HEAD`, just the most recent commit) → `custom` (an arbitrary branch/SHA →
+   working tree). Cycling into `custom` pops an ASCII prompt in the diff pane
+   asking for the ref, pre-filled with that agent's last one; an unresolvable ref
+   re-prompts. The footer shows which mode is active (and the custom base). The
+   mode is one global preference, persisted; the custom ref is remembered per
+   agent. Both survive reopening the cockpit. (Focused on a terminal, the same
+   keys still cycle terminals.)
 7. Go back to the list. The daemon stops following that agent, and the terminal
    pane returns to the repo-root shell. The agent's own terminal keeps running in
    the background — enter that agent again and you are back in it, mid-flight.
@@ -120,7 +123,8 @@ Each of these is a measured finding, not a preference — sources in
 | Long reviews sent as bracketed paste | Over ~10 lines the prompt box collapses them to a `[Pasted text +N lines]` chip. Shorter ones stay expanded and directly editable. |
 | Watchers torn down *before* switching agents | Quitting revdiff flushes its annotations; that write must not be mistaken for a review of the agent being switched to. |
 | `⌥[` / `⌥]` are routed by pane focus | The keys append `next`/`prev` to the command channel regardless of focus; the daemon reads the cockpit tab's active pane (`is_active` from `wezterm cli list`) and hands them to the diff-mode switch when the **diff** pane is focused, the terminal cycler otherwise. `⌥t`/`⌥w` are always terminals. |
-| Switching diff mode restarts revdiff | `R` only reloads the same range, so a *range* change means quitting revdiff (`q`) back to its shell and relaunching it with the new args — never while the annotation editor is open, where `q` would land in the comment. `diffLaunchedMode` tracks the range each parked pane was launched with, so returning to an agent relaunches only when the global mode has changed since; otherwise the pane comes back untouched. The preference lives in `~/.claude/cockpit/diff-mode`. |
+| Switching diff mode restarts revdiff | `R` only reloads the same range, so a *range* change means quitting revdiff (`q`) back to its shell and relaunching it with the new args — never while the annotation editor is open, where `q` would land in the comment. `diffLaunchedMode` tracks the range each parked pane was launched with, so returning to an agent relaunches only when the global mode has changed since; otherwise the pane comes back untouched. The preference lives in `~/.claude/cockpit/diff-mode`. In `custom` mode the per-agent ref (`diffLaunchedRef` vs the stored `customRef` in `~/.claude/cockpit/custom-refs.json`) is compared too, so a parked pane whose base changed is relaunched even though the mode word did not. |
+| The custom-range prompt runs in the diff pane | There is no channel for free-form text — `cmd` carries fixed verbs and the daemon only writes into panes — so `custom` mode types `cockpit-custom-prompt.mjs` into the diff pane. It reads the ref off its TTY, validates it with `git rev-parse` against the worktree, and appends `custom-ok`/`custom-cancel` to `cmd`. While it is open `customPromptOpen` suppresses `healQuitDiff` (which would otherwise read the plain node process as a quit revdiff and type over it) and swallows `⌥[`/`⌥]`. |
 
 ## Multiple terminals per agent
 

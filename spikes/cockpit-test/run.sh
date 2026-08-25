@@ -407,6 +407,51 @@ check  "the preference is untouched"              "uncommitted" "$T/state/diff-m
 : > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo
+echo "== 5d. cycling into Custom opens the ASCII prompt, unset revdiff until answered =="
+# Custom asks for a branch/SHA every time you cycle in (pre-filled per agent).
+# The daemon quits revdiff and types the prompt script into the SAME pane; it
+# does NOT launch revdiff until the answer comes back through the cmd channel.
+: > "$CALLS"
+echo 31 > "$ACTIVE"                       # focus the diff pane
+echo prev >> "$T/state/cmd"               # uncommitted -> custom (custom is last in the cycle)
+sleep 2
+check "the running revdiff was quit first"        "STDIN:q\n" "$CALLS"
+check "the custom-range prompt was launched"      "cockpit-custom-prompt.mjs" "$CALLS"
+check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
+check "custom mode was persisted"                 "custom" "$T/state/diff-mode"
+refute "revdiff is NOT relaunched yet"            "revdiff --wrap" "$CALLS"
+
+echo
+echo "== 5d'. answering the prompt launches revdiff against that ref, persisted per agent =="
+# The prompt writes the chosen ref + a custom-ok verb (here we stand in for it).
+: > "$CALLS"
+printf '{"jobId":"abc12345","ref":"main"}' > "$T/state/custom-ref-pending"
+echo custom-ok >> "$T/state/cmd"
+sleep 2
+check "revdiff diffs the given ref -> working tree" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" \"main\"" "$CALLS"
+check "...in the agent's OWN diff pane"            "send-text --pane-id 31" "$CALLS"
+check "the per-agent ref was persisted"           "\"abc12345\":\"main\"" "$T/state/custom-refs.json"
+check "the base was set was logged"               "custom range set for abc12345: main" "$T/daemon.log"
+
+echo
+echo "== 5d''. cancelling the prompt reverts to the previous mode =="
+# Leave custom (now the mode is uncommitted), then cycle back in so the prompt
+# opens with uncommitted as the mode to fall back to, and answer with a cancel.
+echo next >> "$T/state/cmd"               # custom -> uncommitted
+sleep 2
+: > "$CALLS"
+echo prev >> "$T/state/cmd"               # uncommitted -> custom, opens the prompt again
+sleep 2
+check "the prompt opened again"                   "cockpit-custom-prompt.mjs" "$CALLS"
+: > "$CALLS"
+printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
+echo custom-cancel >> "$T/state/cmd"
+sleep 2
+check "cancel reverted to the prior mode"         "uncommitted" "$T/state/diff-mode"
+check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+: > "$ACTIVE"                             # unfocus for the remaining sections; back at the uncommitted default
+
+echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
 : > "$CALLS"
 echo list > "$FLEETSTATE"

@@ -33,12 +33,12 @@ const ESC = "\x1b[";
 
 function read() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
-  catch { return { agent: null, diffMode: "uncommitted", terminals: [] }; }
+  catch { return { agent: null, diffMode: "uncommitted", customRef: null, terminals: [] }; }
 }
 
 // The daemon persists one of these mode names; anything else falls back to the
 // default (uncommitted) rather than showing a raw token.
-const DIFF_MODE_LABELS = { uncommitted: "Uncommitted Changes", lastcommit: "Last Commit" };
+const DIFF_MODE_LABELS = { uncommitted: "Uncommitted Changes", lastcommit: "Last Commit", custom: "Custom" };
 
 // Name a terminal by what is RUNNING in it, VSCode-style: `zsh` at a prompt,
 // `node`/`npm`/`vim` while a command is in the foreground. WezTerm's pane title
@@ -121,20 +121,23 @@ function schedulePin() {
 
 // --- the footer: one full-width line of keys, always visible ----------------
 function renderFooter() {
-  const { agent, diffMode, terminals } = read();
+  const { agent, diffMode, customRef, terminals } = read();
   const attached = agent && agent !== "repo";
   const n = terminals.length;
   const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
   const left = attached
     ? `${ESC}1m${agent}${ESC}0m${ESC}2m · ${n} terminal${n === 1 ? "" : "s"}${ESC}0m`
     : `${ESC}2menter an agent to open terminals${ESC}0m`;
-  // Both modes are shown with the active one highlighted (reverse video), so the
-  // current range is legible at a glance. It doubles as the hint for ⌥[/⌥], which
-  // switch the mode when the diff pane is focused and terminals otherwise.
+  // All three modes are shown with the active one highlighted (reverse video), so
+  // the current range is legible at a glance. It doubles as the hint for ⌥[/⌥],
+  // which switch the mode when the diff pane is focused and terminals otherwise.
+  // Custom carries the agent's base ref inline when it has one, so the reviewer
+  // can see WHAT it is diffing against without opening the prompt.
+  const label = (key) => key === "custom" && customRef ? `Custom: ${customRef}` : DIFF_MODE_LABELS[key];
   const opt = (key) => key === active
-    ? `${ESC}7m ${DIFF_MODE_LABELS[key]} ${ESC}0m`
-    : `${ESC}2m${DIFF_MODE_LABELS[key]}${ESC}0m`;
-  const diff = `${ESC}2mDiff mode:${ESC}0m ${opt("uncommitted")}${ESC}2m | ${ESC}0m${opt("lastcommit")}`;
+    ? `${ESC}7m ${label(key)} ${ESC}0m`
+    : `${ESC}2m${label(key)}${ESC}0m`;
+  const diff = `${ESC}2mDiff mode:${ESC}0m ${opt("uncommitted")}${ESC}2m | ${ESC}0m${opt("lastcommit")}${ESC}2m | ${ESC}0m${opt("custom")}`;
   const keys = [
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
