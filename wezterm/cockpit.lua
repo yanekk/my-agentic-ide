@@ -125,50 +125,48 @@ return {
   window_padding = { left = 4, right = 4, top = 2, bottom = 2 },
   scrollback_lines = 10000,
 
-  -- claude keeps the CLICK; WezTerm takes the DRAG.
+  -- The left button belongs to claude, whole. Do not bind any part of it.
   --
-  -- Both halves of claude -- the fleet view and an agent session -- and revdiff
-  -- too turn on full mouse reporting (measured: `?1000h ?1002h ?1003h ?1006h`,
-  -- motion included). So by default the press, every drag and the release are
-  -- all handed to the app, WezTerm makes no selection of its own, and a drag
-  -- over the Claude pane leaves the clipboard empty however it looks on screen.
+  -- claude does its own text selection: it turns on full mouse reporting
+  -- (measured: `?1000h ?1002h ?1003h ?1006h`), draws its own highlight, and on
+  -- release copies the selected text to the system clipboard with OSC 52 --
+  -- announcing it as "copied N chars to clipboard". Driven with synthetic
+  -- press/motion/release on a pty it does exactly that, and WezTerm honours the
+  -- OSC 52 write (probed: a BEL-terminated `ESC ] 52 ; c ; <base64>` lands in
+  -- the macOS pasteboard). So drag-to-copy over the Claude pane is claude's job
+  -- and it works -- as long as nothing intercepts a piece of the gesture.
   --
-  -- Binding all three of Down/Drag/Up under `mouse_reporting = true` -- the first
-  -- attempt at copy-on-select -- bought the copy at the price of everything else:
-  -- WezTerm answered the *press* too, claude never saw a click, and nothing in
-  -- the pane was clickable any more.
+  -- Two attempts at "helping" both made it worse, and neither is to be retried:
   --
-  -- Splitting the gesture gets both. Only `Drag` and `Up` are taken here; `Down`
-  -- is deliberately absent, so the press still reaches claude and its UI stays
-  -- clickable. Keeping the release costs nothing: claude's mouse decoder labels
-  -- each event `press` or `release` and then only ever tests for `press` -- the
-  -- release WezTerm keeps is one claude would have dropped.
+  --   * Binding Down+Drag+Up under `mouse_reporting = true` gave WezTerm the
+  --     selection and left claude blind: nothing in the pane was clickable.
+  --   * Binding only Drag+Up -- meant to leave claude the press -- broke it
+  --     twice over. claude dispatches a *click* on the RELEASE (`onClickAt`),
+  --     not the press, so swallowing the release swallowed every click; and
+  --     because the release never reached `pane.mouse_event`, wezterm-term's
+  --     `current_mouse_buttons` still held Left, so `mouse_report_button_number`
+  --     kept encoding every later mouse *move* as a held-left-button drag. claude
+  --     therefore never saw the hover that ends a drag (`py()`: motion with no
+  --     button) and its selection followed the pointer forever, with the next
+  --     click starting another one.
   --
-  -- `ClearSelection` on the release is not tidiness, it is the anchor. WezTerm
-  -- normally sets the selection's origin in the Down handler; with no Down
-  -- binding, `extend_selection_at_mouse_cursor` falls back to
-  -- `origin.unwrap_or(<cursor>)`, so the first drag event anchors the selection
-  -- -- but only if no origin is left over. Without the clear, the *next* drag
-  -- would rubber-band from where the previous one started. The visible cost is
-  -- that the highlight goes away as you let go, just after the text lands on the
-  -- clipboard.
+  -- The lesson is that the gesture is indivisible: press, motion, release and
+  -- the button-up bookkeeping are one transaction, and WezTerm can only take all
+  -- of it or none of it. It takes none.
   --
-  -- Shift is still the full escape hatch (WezTerm's own
-  -- bypass_mouse_reporting_modifiers, left at its SHIFT default): held, the
-  -- event is not reported to the app *and* the modifier is stripped before the
-  -- binding lookup, so Shift+drag is handled by the stock bindings as an
-  -- ordinary terminal selection -- highlight and all -- in every pane. That is
-  -- also what still gives word- and line-select (Shift+double/triple-click) over
-  -- claude, which are left to the defaults rather than stealing more presses.
-  mouse_bindings = {
-    { event = { Drag = { streak = 1, button = "Left" } }, mods = "NONE",
-      mouse_reporting = true, action = act.ExtendSelectionToMouseCursor("Cell") },
-    { event = { Up = { streak = 1, button = "Left" } }, mods = "NONE",
-      mouse_reporting = true, action = act.Multiple {
-        act.CompleteSelection("ClipboardAndPrimarySelection"),
-        act.ClearSelection,
-      } },
-  },
+  -- Shift remains the escape hatch for a plain *terminal* selection, via
+  -- WezTerm's own bypass_mouse_reporting_modifiers (left at its SHIFT default):
+  -- held, the event is not reported to claude at all and the stock bindings
+  -- handle it -- Shift+drag selects, Shift+double/triple-click takes a word or a
+  -- line. That is the way to copy something claude's own selection cannot reach.
+  --
+  -- A drag whose press was eaten is the one way claude's copy silently fails:
+  -- with no `onSelectionStart` there is no anchor, so the release finds nothing
+  -- to copy even though a highlight appeared. macOS WezTerm eats exactly that
+  -- press by default, on the click that focuses the window -- so it is turned
+  -- off here.
+  swallow_mouse_click_on_window_focus = false,
+  swallow_mouse_click_on_pane_focus = false,
 
   keys = {
     -- Move between panes. CMD+ALT+arrow, directional. This used to be plain
