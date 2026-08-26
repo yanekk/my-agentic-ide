@@ -1173,6 +1173,7 @@ async function followWorktreeMigration() {
   const agent = list.find((a) => a.id === attached.jobId);
   if (!agent || !agent.cwd) return;
   if (normCwd(agent.cwd) === normCwd(attached.worktree)) return;
+  log(`followWorktreeMigration ${attached.jobId}: live cwd ${agent.cwd} != ${attached.worktree}, following`);
 
   const pane = diffs.get(attached.jobId);
   // The annotation editor eats every keystroke as comment text; leave the move
@@ -1474,7 +1475,10 @@ async function onEnter(jobId, knownName) {
   if (shown) {
     const mode = modeOf(jobId);           // a new agent gets the default, never another agent's mode
     const ref = customRef.get(jobId);
-    if (shown.spawned || diffPaneStatus(shown.pane) === "shell") {
+    const status = shown.spawned ? "spawned" : diffPaneStatus(shown.pane);
+    const cwdMoved = diffLaunchedCwd.has(jobId) && normCwd(diffLaunchedCwd.get(jobId)) !== normCwd(worktree);
+    log(`onEnter ${jobId}: worktree=${worktree} parkedCwd=${parkedCwd} status=${status} cwdMoved=${cwdMoved}`);
+    if (shown.spawned || status === "shell") {
       if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
       if (mode === "custom" && !ref) {
         // This agent is in custom but has never named a base: ask for one rather
@@ -1491,8 +1495,7 @@ async function onEnter(jobId, knownName) {
       }
     } else if (diffLaunchedMode.get(jobId) !== mode ||
                (mode === "custom" && diffLaunchedRef.get(jobId) !== ref) ||
-               (diffLaunchedCwd.has(jobId) &&
-                normCwd(diffLaunchedCwd.get(jobId)) !== normCwd(worktree))) {
+               cwdMoved) {
       // This agent's own mode/ref changed while the pane was parked -- or it moved
       // worktree while parked (followWorktreeMigration only follows the ATTACHED
       // agent, so a parked one that moved is caught here on return) -- so the diff
