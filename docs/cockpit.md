@@ -374,6 +374,16 @@ Each agent's worktree watcher stays alive while its diff pane is parked, so the
 pane reloads in the background and is **already current** when it comes back.
 Without that, instant switching would just mean instantly showing a stale diff.
 
+The worktree watch alone misses **commits**, though: `git commit` changes no
+working-tree file (the bytes on disk are untouched), it moves `HEAD` — which
+lives in `.git/` (ignored by that watch) and, for a *linked* agent worktree,
+entirely *outside* the worktree, in `<main>/.git/worktrees/<name>/`. So a second
+watch follows the git **reflog** (`logs/HEAD`), appended on every HEAD movement.
+It must watch the `logs/` **directory**, not the file: git writes the reflog with
+a lock-file + rename, so the file lands under a new inode each time and a file
+watch goes deaf — the same trap as the annotation watch. With it, committing
+correctly empties the `uncommitted` diff and advances `lastcommit`.
+
 Two things must be true before an `R` is sent, and only the first was needed when
 the pane was rebuilt on every switch:
 

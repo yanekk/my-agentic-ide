@@ -1192,12 +1192,13 @@ function stopWatchers() {
  * quiet second of agent writes, in a pane nobody is looking at.
  */
 const worktreeWatches = new Map();      // jobId -> fs.FSWatcher
+const headWatches = new Map();          // jobId -> fs.FSWatcher (git reflog / HEAD)
 
 function stopWorktreeWatch(jobId) {
   const w = worktreeWatches.get(jobId);
-  if (!w) return;
-  try { w.close(); } catch {}
-  worktreeWatches.delete(jobId);
+  if (w) { try { w.close(); } catch {} worktreeWatches.delete(jobId); }
+  const h = headWatches.get(jobId);
+  if (h) { try { h.close(); } catch {} headWatches.delete(jobId); }
 }
 
 /** Compose the annotations into the prompt we type into the agent. */
@@ -1311,6 +1312,49 @@ function watchWorktree(jobId, worktree, reviewFile) {
     timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
   });
   worktreeWatches.set(jobId, w);
+  watchHead(jobId, worktree, reviewFile);
+}
+
+/**
+ * Watch the worktree's git reflog so a *commit* reloads the diff. The plain
+ * worktree watch above cannot see one: `git commit` does not touch any working-
+ * tree file (the file bytes on disk are unchanged), it moves HEAD -- and HEAD
+ * lives in `.git/`, which that watch ignores, and for a *linked* agent worktree
+ * it lives entirely OUTSIDE the worktree (in `<main>/.git/worktrees/<name>/`), so
+ * a recursive watch there never sees it at all. Without this a commit leaves the
+ * `uncommitted` diff showing already-committed work and `lastcommit` showing the
+ * previous commit.
+ *
+ * `logs/HEAD` (the HEAD reflog) is appended on every HEAD movement -- commit,
+ * reset, checkout, merge -- so it catches them all. But git writes it with a
+ * lock-file + rename (atomic replace), so it lands under a NEW inode each time:
+ * a watch on the file itself goes deaf after the first event, exactly like the
+ * annotation-file watch. So watch the `logs/` DIRECTORY and fire on `HEAD` --
+ * the directory entry survives the replacement. If `logs/` is somehow absent,
+ * fall back to the git dir so the first ref update that creates it still lands.
+ */
+function watchHead(jobId, worktree, reviewFile) {
+  let gitDir;
+  try {
+    gitDir = execFileSync("git", ["-C", worktree, "rev-parse", "--absolute-git-dir"],
+      { encoding: "utf8" }).trim();
+  } catch (e) { return log(`no git dir for ${jobId}: ${e.message}`); }
+
+  const logsDir = path.join(gitDir, "logs");
+  const onLogs = fs.existsSync(logsDir);
+  const target = onLogs ? logsDir : gitDir;
+
+  let timer = null;
+  try {
+    const w = fs.watch(target, (_e, name) => {
+      // In logs/ the reflog is `HEAD`; on the git-dir fallback, `logs` appearing
+      // is the first ref update. Ignore everything else (lock churn, index, ...).
+      if (name && name !== "HEAD" && name !== "logs") return;
+      clearTimeout(timer);
+      timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
+    });
+    headWatches.set(jobId, w);
+  } catch (e) { log(`could not watch HEAD for ${jobId}: ${e.message}`); }
 }
 
 async function onEnter(jobId, knownName) {
