@@ -567,7 +567,7 @@ echo "== 9. an agent that changed directory drags its idle, untouched terminal a
 # but only when it is idle AND still sitting where it was spawned (untouched).
 echo list > "$FLEETSTATE"; sleep 2
 
-MOVED="$T/moved"                          # where the agent went (its new worktree)
+MOVED="$T/moved"; mkdir -p "$MOVED"       # where the agent went (its new worktree)
 echo "32 file://$WT" > "$PANECWD"         # its terminal (pane 32) is still at $WT
 cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$MOVED","kind":"background",
@@ -586,7 +586,7 @@ check "the new dir was typed into the terminal"   'cd "'"$MOVED"'"\n' "$CALLS"
 echo
 echo "== 9b. a BUSY terminal is left where it is (a cd must not land mid-command) =="
 echo list > "$FLEETSTATE"; sleep 2
-MOVED2="$T/moved2"
+MOVED2="$T/moved2"; mkdir -p "$MOVED2"
 echo "32 file://$MOVED" > "$PANECWD"       # 32 is now at $MOVED (untouched), still
 echo node > "$PSBUSY"                      # ...but a job is running in it now
 cat > "$AGENTS_JSON" <<JSON
@@ -621,6 +621,26 @@ sleep 3
 check  "the mid-attach move was noticed"          "moved worktree" "$T/daemon.log"
 check  "revdiff was re-pointed at the new dir"    'cd "'"$MOVED3"'" && revdiff' "$CALLS"
 refute "revdiff did not stay on the old dir"      'cd "'"$MOVED2"'" && revdiff' "$CALLS"
+
+echo
+echo "== 9d. an agent that moves WHILE PARKED is caught on return, not left stale =="
+# followWorktreeMigration only follows the ATTACHED agent. An agent you switched
+# AWAY from keeps working and can enter a worktree while its diff pane is parked --
+# so its stored launch cwd is compared on return and the parked revdiff (and its
+# watch) is relaunched in the new worktree. Here: detach to the list, move the
+# agent while it is parked, then re-attach.
+MOVED4="$T/moved4"; mkdir -p "$MOVED4"     # the watch is re-pointed on return, so it must exist
+echo list > "$FLEETSTATE"; sleep 2         # park abc12345's diff (last launched at $MOVED3)
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED4","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"; sleep 3  # re-attach: onEnter sees the parked pane moved
+
+check  "the parked pane was relaunched on return" "relaunched diff pane" "$T/daemon.log"
+check  "revdiff came back on the new worktree"    'cd "'"$MOVED4"'" && revdiff' "$CALLS"
+refute "revdiff did not come back on the old one" 'cd "'"$MOVED3"'" && revdiff' "$CALLS"
 
 echo
 echo "== 10. quitting revdiff is reinstated, never left as a bare shell =="

@@ -316,10 +316,14 @@ const reapStrikes = new Map();
 // `uncommitted`. Toggling the mode on one agent never touches another's. Only the
 // custom base ref is persisted (per agent, CUSTOM_REFS_FILE), so re-entering
 // custom pre-fills the last ref even though the mode itself resets. `diffLaunched
-// Mode`/`diffLaunchedRef` record what a parked pane was actually launched with, so
-// returning to an agent relaunches only when its own mode or ref changed since --
-// which, because the mode is per-agent and can only change while attached, means
-// a parked pane essentially always comes back untouched.
+// Mode`/`diffLaunchedRef`/`diffLaunchedCwd` record what a parked pane was actually
+// launched with, so returning to an agent relaunches only when its own mode, ref
+// or worktree changed since. The mode/ref are per-agent and can only change while
+// attached, so on those alone a parked pane essentially always comes back
+// untouched -- but the WORKTREE can move while parked (the agent keeps working and
+// may enter a worktree it just created), and followWorktreeMigration only re-points
+// the ATTACHED agent's diff. So the cwd check is what catches a parked agent that
+// moved: its diff is relaunched in the new worktree the moment you return to it.
 // ---------------------------------------------------------------------------
 
 const DIFF_MODES = ["uncommitted", "lastcommit", "custom"];
@@ -332,6 +336,7 @@ const modeOf = (jobId) => diffModeByAgent.get(jobId) ?? DEFAULT_DIFF_MODE;
 
 const diffLaunchedMode = new Map();
 const diffLaunchedRef = new Map();
+const diffLaunchedCwd = new Map();      // jobId -> the worktree its revdiff was launched in
 // When each agent's revdiff was last (re)launched. revdiff takes about a second
 // to draw its frame, and until it does the pane still looks like a shell -- so
 // healQuitDiff must not mistake a just-launched revdiff for a quit one and type
@@ -771,6 +776,7 @@ async function relaunchDiff(jobId, pane, worktree, reviewFile) {
   launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, mode, ref)}`);
   diffLaunchedMode.set(jobId, mode);
   diffLaunchedRef.set(jobId, ref);
+  diffLaunchedCwd.set(jobId, worktree);
   diffLaunchedAt.set(jobId, Date.now());
   log(`relaunched diff pane ${pane} for ${jobId} in ${mode} mode${mode === "custom" ? ` (${ref})` : ""}`);
 }
@@ -883,6 +889,7 @@ async function resolveCustomPrompt(kind, attempt = 0) {
     launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, mode, ref)}`);
     diffLaunchedMode.set(jobId, mode);
     diffLaunchedRef.set(jobId, ref);
+    diffLaunchedCwd.set(jobId, attached.worktree);
     diffLaunchedAt.set(jobId, Date.now());
     writeTerminals();                   // refresh the footer's mode + ref
     wez(["activate-pane", "--pane-id", String(pane)]);
@@ -958,7 +965,7 @@ async function showDiff(key, cwd, label) {
 
   const live = new Set(table.map((p) => p.pane_id));
   const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
-  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedAt.delete(k); diffModeByAgent.delete(k); }
+  for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedCwd.delete(k); diffLaunchedAt.delete(k); diffModeByAgent.delete(k); }
 
   if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
 
@@ -1038,6 +1045,7 @@ async function reapAgents() {
       diffs.delete(key);
       diffLaunchedMode.delete(key);
       diffLaunchedRef.delete(key);
+      diffLaunchedCwd.delete(key);
       diffLaunchedAt.delete(key);
       diffModeByAgent.delete(key);
     }
@@ -1116,6 +1124,7 @@ function healQuitDiff() {
     launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, mode, ref)}`);
     diffLaunchedMode.set(attached.jobId, mode);
     diffLaunchedRef.set(attached.jobId, ref);
+    diffLaunchedCwd.set(attached.jobId, attached.worktree);
     diffLaunchedAt.set(attached.jobId, Date.now());
     log(`revdiff was quit in ${attached.jobId}; reinstated it`);
   } finally {
@@ -1149,6 +1158,13 @@ let lastMigrationCheck = 0;
  */
 async function followWorktreeMigration() {
   if (customPromptOpen) return;              // the prompt owns the diff pane
+  // Cooldown FIRST, before the throttle is consumed: a just-launched revdiff looks
+  // exactly like a shell while it paints, so relaunching into it would corrupt the
+  // pane. Returning here without advancing lastMigrationCheck means the moment the
+  // cooldown clears the next poll does the real check -- if the throttle were
+  // consumed on a cooldown-blocked tick, a move right after an attach relaunch
+  // would sit stale for a whole extra throttle interval.
+  if (Date.now() - (diffLaunchedAt.get(attached.jobId) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) return;
   if (Date.now() - lastMigrationCheck < MIGRATION_CHECK_MS) return;
   lastMigrationCheck = Date.now();
 
@@ -1159,14 +1175,9 @@ async function followWorktreeMigration() {
   if (normCwd(agent.cwd) === normCwd(attached.worktree)) return;
 
   const pane = diffs.get(attached.jobId);
-  if (pane !== undefined) {
-    // A just-launched (still-painting) revdiff looks exactly like a shell, and an
-    // open annotation editor eats every keystroke as comment text -- relaunching
-    // into either corrupts the pane. Leave attached.worktree stale and retry on a
-    // later tick (same guards as healQuitDiff / relaunchDiff).
-    if (Date.now() - (diffLaunchedAt.get(attached.jobId) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) return;
-    if (diffPaneStatus(pane) === "editing") return;
-  }
+  // The annotation editor eats every keystroke as comment text; leave the move
+  // uncommitted and retry once it closes (a later throttle tick).
+  if (pane !== undefined && diffPaneStatus(pane) === "editing") return;
 
   const from = attached.worktree, to = agent.cwd;
   attached.worktree = to;
@@ -1369,11 +1380,18 @@ function reloadDiff(jobId, reviewFile) {
 function watchWorktree(jobId, worktree, reviewFile) {
   if (!AUTO_RELOAD || worktreeWatches.has(jobId)) return;
   let timer = null;
-  const w = fs.watch(worktree, { recursive: true }, (_e, name) => {
-    if (!name || name.startsWith(".git/") || name.includes("node_modules")) return;
-    clearTimeout(timer);
-    timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
-  });
+  let w;
+  try {
+    // fs.watch throws synchronously if the dir is gone -- and an agent's worktree
+    // can vanish (deleted, or a move we are chasing that has not landed yet). A
+    // missing watch must not take the daemon down; the pane still shows the last
+    // diff, and the next attach re-tries.
+    w = fs.watch(worktree, { recursive: true }, (_e, name) => {
+      if (!name || name.startsWith(".git/") || name.includes("node_modules")) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
+    });
+  } catch (e) { return log(`could not watch worktree for ${jobId}: ${e.message}`); }
   worktreeWatches.set(jobId, w);
   watchHead(jobId, worktree, reviewFile);
 }
@@ -1449,6 +1467,10 @@ async function onEnter(jobId, knownName) {
   // exception is a mode change while the pane was parked: the diff would come
   // back in the old range, so it is relaunched in the current mode (see
   // diffCommand / the DIFF_MODES block for what each range means).
+  // Where this agent's parked diff pane AND its worktree watch were last pointed.
+  // Captured before the relaunch branches below overwrite it, so the watch re-point
+  // at the end of onEnter can tell whether the agent moved worktree while parked.
+  const parkedCwd = diffLaunchedCwd.get(jobId);
   if (shown) {
     const mode = modeOf(jobId);           // a new agent gets the default, never another agent's mode
     const ref = customRef.get(jobId);
@@ -1464,11 +1486,16 @@ async function onEnter(jobId, knownName) {
         launchInPane(shown.pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, mode, ref)}`);
         diffLaunchedMode.set(jobId, mode);
         diffLaunchedRef.set(jobId, ref);
+        diffLaunchedCwd.set(jobId, worktree);
         diffLaunchedAt.set(jobId, Date.now());
       }
     } else if (diffLaunchedMode.get(jobId) !== mode ||
-               (mode === "custom" && diffLaunchedRef.get(jobId) !== ref)) {
-      // This agent's own mode/ref changed while the pane was parked, so the diff
+               (mode === "custom" && diffLaunchedRef.get(jobId) !== ref) ||
+               (diffLaunchedCwd.has(jobId) &&
+                normCwd(diffLaunchedCwd.get(jobId)) !== normCwd(worktree))) {
+      // This agent's own mode/ref changed while the pane was parked -- or it moved
+      // worktree while parked (followWorktreeMigration only follows the ATTACHED
+      // agent, so a parked one that moved is caught here on return) -- so the diff
       // would come back in the wrong range -- relaunch it. (With per-agent modes
       // this rarely fires: an agent's mode can only change while it is attached.)
       await relaunchDiff(jobId, shown.pane, worktree, reviewFile);
@@ -1483,6 +1510,14 @@ async function onEnter(jobId, knownName) {
   syncTerminalCwd(curTermId(jobId), worktree, paneTable());
 
   watchAnnotations(reviewFile);
+  // The worktree/reflog watch is kept alive while parked, so watchWorktree no-ops
+  // when one already exists -- but if the agent moved worktree while parked, that
+  // surviving watch still points at the old dir (auto-reload and commit-detection
+  // would watch a directory the agent has left). Tear it down first so the new one
+  // takes; only when it actually moved, to preserve the whole point of parking.
+  if (parkedCwd !== undefined && normCwd(parkedCwd) !== normCwd(worktree)) {
+    stopWorktreeWatch(jobId);
+  }
   watchWorktree(jobId, worktree, reviewFile);
 }
 
