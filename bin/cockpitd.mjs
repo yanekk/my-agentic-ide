@@ -1123,6 +1123,69 @@ function healQuitDiff() {
   }
 }
 
+// How often, at most, to re-check the attached agent's live cwd for a worktree
+// migration. reconcile() runs every POLL_MS, but re-reading the cwd means
+// spawning `claude agents --json`, so the check is throttled to a few seconds
+// rather than run on every heartbeat.
+const MIGRATION_CHECK_MS = 2000;
+let lastMigrationCheck = 0;
+
+/**
+ * Follow the attached agent when it CHANGES WORKING DIRECTORY mid-session.
+ *
+ * An agent's cwd migrates -- it commonly starts in the checkout and later creates
+ * and enters its own worktree. `claude agents --json` reports the LIVE cwd
+ * (measured: an attached agent's cwd flips to `.../.claude/worktrees/<name>` once
+ * it enters one), but nothing re-reads it while the fleet header keeps showing the
+ * same agent: reconcile() returns early on a name match. So `attached.worktree` --
+ * captured once at onEnter -- goes stale, and revdiff, its worktree + reflog
+ * watches and the terminal all stay pinned to the launch dir. The diff then shows
+ * the wrong tree and `R` cannot fix it: revdiff's reload re-runs the SAME range in
+ * the SAME directory. Detect the move and re-point everything at the new worktree.
+ *
+ * Called only from reconcile(), so it runs under the reconcile lock and cannot
+ * race a pane swap. Throttled (each check spawns claude) and cooldown-guarded
+ * against a still-painting revdiff, exactly like healQuitDiff.
+ */
+async function followWorktreeMigration() {
+  if (customPromptOpen) return;              // the prompt owns the diff pane
+  if (Date.now() - lastMigrationCheck < MIGRATION_CHECK_MS) return;
+  lastMigrationCheck = Date.now();
+
+  let list;
+  try { list = await agents(); } catch { return; }
+  const agent = list.find((a) => a.id === attached.jobId);
+  if (!agent || !agent.cwd) return;
+  if (normCwd(agent.cwd) === normCwd(attached.worktree)) return;
+
+  const pane = diffs.get(attached.jobId);
+  if (pane !== undefined) {
+    // A just-launched (still-painting) revdiff looks exactly like a shell, and an
+    // open annotation editor eats every keystroke as comment text -- relaunching
+    // into either corrupts the pane. Leave attached.worktree stale and retry on a
+    // later tick (same guards as healQuitDiff / relaunchDiff).
+    if (Date.now() - (diffLaunchedAt.get(attached.jobId) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) return;
+    if (diffPaneStatus(pane) === "editing") return;
+  }
+
+  const from = attached.worktree, to = agent.cwd;
+  attached.worktree = to;
+  log(`agent ${attached.jobId} moved worktree ${from} → ${to}; re-pointing diff and watches`);
+
+  // Relaunch, not reload: the range args are unchanged, but revdiff must `cd` into
+  // the new worktree first, which only a fresh launch does.
+  if (pane !== undefined) await relaunchDiff(attached.jobId, pane, to, attached.reviewFile);
+
+  // Re-establish the worktree + reflog watches on the new location; the old ones
+  // watch a directory the agent has left.
+  stopWorktreeWatch(attached.jobId);
+  watchWorktree(attached.jobId, to, attached.reviewFile);
+
+  // Catch an untouched, idle terminal up to where the agent now is (same rule as
+  // onEnter -- a busy or user-navigated shell is left alone).
+  syncTerminalCwd(curTermId(attached.jobId), to, paneTable());
+}
+
 // ---------------------------------------------------------------------------
 // claude
 // ---------------------------------------------------------------------------
@@ -1489,7 +1552,12 @@ async function reconcile() {
       if (attached) await onExit();
       return;
     }
-    if (attached && attached.name === state.name) return;   // already correct
+    if (attached && attached.name === state.name) {
+      // Same agent still showing -- but it may have changed working directory
+      // (created and entered a worktree) since we attached. Follow it if so.
+      await followWorktreeMigration();
+      return;
+    }
 
     let list;
     try { list = await agents(); } catch { return; }

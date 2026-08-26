@@ -601,6 +601,28 @@ refute "the busy shell was NOT cd'd"              'cd "'"$MOVED2"'"\n' "$CALLS"
 : > "$PSBUSY"
 
 echo
+echo "== 9c. an agent that moves WHILE ATTACHED drags its revdiff along, no re-attach =="
+# The bug this guards: reconcile() short-circuits on a matching fleet-header name,
+# so a cwd migration under a CONTINUOUSLY attached agent (it enters a worktree it
+# just created, without any detach/re-attach) was never noticed. revdiff stayed
+# pinned to the launch dir and Shift+R could not fix it -- revdiff's reload re-runs
+# the SAME range in the SAME directory. followWorktreeMigration re-reads the live
+# cwd on the same-name poll branch and relaunches revdiff (cd + revdiff) in the new
+# worktree. No `echo list` here: the agent never leaves the fleet header.
+MOVED3="$T/moved3"; mkdir -p "$MOVED3"     # the watch is re-pointed, so it must exist
+echo "32 file://$MOVED2" > "$PANECWD"      # its terminal sits at the previous worktree
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED3","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+sleep 3
+
+check  "the mid-attach move was noticed"          "moved worktree" "$T/daemon.log"
+check  "revdiff was re-pointed at the new dir"    'cd "'"$MOVED3"'" && revdiff' "$CALLS"
+refute "revdiff did not stay on the old dir"      'cd "'"$MOVED2"'" && revdiff' "$CALLS"
+
+echo
 echo "== 10. quitting revdiff is reinstated, never left as a bare shell =="
 # Shift+Q discards every annotation and quits (no confirm, thanks to
 # --no-confirm-discard); lowercase q just quits. Either way the daemon brings
