@@ -1476,8 +1476,9 @@ async function onEnter(jobId, knownName) {
     const mode = modeOf(jobId);           // a new agent gets the default, never another agent's mode
     const ref = customRef.get(jobId);
     const status = shown.spawned ? "spawned" : diffPaneStatus(shown.pane);
+    // The agent moved worktree while this pane was parked (followWorktreeMigration
+    // only follows the ATTACHED agent, so a parked one that moved is caught here).
     const cwdMoved = diffLaunchedCwd.has(jobId) && normCwd(diffLaunchedCwd.get(jobId)) !== normCwd(worktree);
-    log(`onEnter ${jobId}: worktree=${worktree} parkedCwd=${parkedCwd} status=${status} cwdMoved=${cwdMoved}`);
     if (shown.spawned || status === "shell") {
       if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
       if (mode === "custom" && !ref) {
