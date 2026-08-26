@@ -169,6 +169,23 @@ return {
   swallow_mouse_click_on_pane_focus = false,
 
   keys = {
+    -- Cmd+C must never clobber what claude just copied. claude runs its own
+    -- selection and copies to the clipboard with OSC 52 on mouse release (see
+    -- the big mouse comment above); WezTerm is blind to that highlight, so it
+    -- always thinks nothing is selected in the Claude pane. WezTerm's default
+    -- Cmd+C then copies that empty selection over the top -- wiping the text
+    -- claude had put there. So Cmd+C is made conditional: copy only when WezTerm
+    -- itself holds a selection (e.g. a Shift+drag, the escape hatch for reaching
+    -- what claude's own selection cannot), and otherwise do nothing at all,
+    -- leaving claude's clipboard untouched. Applies to every pane -- the rule is
+    -- the same everywhere and needs no knowledge of which pane is claude's.
+    { key = "c", mods = "CMD", action = wezterm.action_callback(function(window, pane)
+      local sel = window:get_selection_text_for_pane(pane)
+      if sel and sel ~= "" then
+        window:perform_action(act.CopyTo("Clipboard"), pane)
+      end
+    end) },
+
     -- Move between panes. CMD+ALT+arrow, directional. This used to be plain
     -- ALT+arrow, but on macOS ALT+arrow is the word-motion gesture (below), so
     -- pane switching moved up a modifier to leave Option free for the line editor.
