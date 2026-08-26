@@ -410,7 +410,7 @@ spikes/agenda-test/run.sh && spikes/notes-test/run.sh && spikes/cockpit-test/run
 **It is the only evidence a session may produce on its own.** All three, not just the first:
 T06 edits `cockpit-welcome.mjs` (covered by `notes-test`) and T07 edits `cockpitd.mjs` (covered
 by `cockpit-test`). Baseline measured 2026-08-26: notes-test 39 assertions ALL PASS,
-cockpit-test 82 assertions ALL PASS. A session that breaks either has broken something it did
+cockpit-test 108 assertions ALL PASS. A session that breaks either has broken something it did
 not mean to touch.
 
 **Dependencies.** **Nothing may be added.** This repository has zero dependencies and no
