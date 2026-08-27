@@ -75,8 +75,8 @@ function offsetAt(ts, zone) {
 // the guess: on a DST day the first guess can land on the wrong side of the jump.
 // (A zone whose clocks skip midnight itself would leave this an hour out; none of
 // the zones this cockpit runs in do that.)
-function civilToEpoch(y, m, d, zone) {
-  const guess = Date.UTC(y, m - 1, d, 0, 0, 0);
+function civilToEpoch(y, m, d, zone, h = 0, mi = 0, s = 0) {
+  const guess = Date.UTC(y, m - 1, d, h, mi, s);
   const first = offsetAt(guess, zone);
   const ts = guess - first;
   const second = offsetAt(ts, zone);
@@ -98,6 +98,23 @@ function shiftCivil({ y, m, d }, days) {
 function parseCivilDate(text) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(text ?? ""));
   return m ? { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) } : null;
+}
+
+// An RFC3339 stamp with no offset on the end: a bare wall-clock reading. Google's
+// Events resource documents dateTime as carrying an offset "unless a time zone is
+// explicitly specified in timeZone", so this is a shape the API is allowed to hand
+// back. It matters because Date.parse reads an offset-less stamp in the MACHINE's
+// zone -- the exact environment read this module may not make (DESIGN 3.1), and
+// one the purity grep cannot catch, because it happens inside Date.parse.
+const WALL_CLOCK = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
+
+// An offset in the string always wins: it names the instant outright, and the
+// event's timeZone can disagree with it. `zone` only places a bare wall clock.
+function parseDateTime(text, zone) {
+  const m = WALL_CLOCK.exec(String(text ?? "").trim());
+  if (!m) return Date.parse(text);
+  return civilToEpoch(Number(m[1]), Number(m[2]), Number(m[3]), zone,
+    Number(m[4]), Number(m[5]), Number(m[6] ?? 0));
 }
 
 /**
@@ -159,8 +176,9 @@ function findSelf(attendees, selfEmail) {
  * dropping it is chooseEvents' job, because "today is empty" has to mean empty
  * AFTER that filter or a day of declined meetings would never roll over.
  *
- * `tz` places an all-day event's boundaries and is used for nothing else -- a
- * timed event carries its own offset.
+ * `tz` places an all-day event's boundaries, and stands in for a timed event
+ * whose stamp carries neither an offset nor a `timeZone` of its own. A timed
+ * stamp with an offset needs neither and ignores both.
  */
 export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
   if (!raw || typeof raw !== "object") return null;
@@ -176,8 +194,12 @@ export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
   let start, end, allDay;
   if (rawStart.dateTime) {
     allDay = false;
-    start = Date.parse(rawStart.dateTime);
-    end = rawEnd.dateTime ? Date.parse(rawEnd.dateTime) : start;
+    // Each end of the event carries its own timeZone in Google's shape, and it
+    // is only consulted when the stamp itself has no offset.
+    start = parseDateTime(rawStart.dateTime, rawStart.timeZone ? zoneOf(rawStart.timeZone) : zone);
+    end = rawEnd.dateTime
+      ? parseDateTime(rawEnd.dateTime, rawEnd.timeZone ? zoneOf(rawEnd.timeZone) : zone)
+      : start;
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   } else if (rawStart.date) {
     allDay = true;
@@ -200,7 +222,12 @@ export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
   const self = attendees && attendees.length ? findSelf(attendees, selfEmail) : null;
   // An attendee with an unrecognised responseStatus is still someone who was
   // invited, so it reads as unanswered rather than silently as yours.
-  const reply = self ? (REPLIES[self.responseStatus] ?? "none") : "n/a";
+  // hasOwn, not a plain lookup: `responseStatus: "constructor"` would otherwise
+  // walk Object.prototype and hand back a FUNCTION as the reply, which is not one
+  // of the five strings every caller switches on.
+  const reply = self
+    ? (Object.hasOwn(REPLIES, self.responseStatus) ? REPLIES[self.responseStatus] : "none")
+    : "n/a";
 
   const title = String(raw.summary ?? "").trim() || NO_TITLE;
 

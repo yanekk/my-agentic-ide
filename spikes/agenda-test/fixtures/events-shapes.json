@@ -137,6 +137,30 @@
       "summary": "an overnight shift",
       "start": { "dateTime": "2026-08-25T22:00:00+02:00" },
       "end": { "dateTime": "2026-08-26T06:00:00+02:00" }
+    },
+    {
+      "id": "s-no-offset",
+      "status": "confirmed",
+      "summary": "a stamp with no offset, placed by its own timeZone",
+      "start": { "dateTime": "2026-08-26T14:00:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2026-08-26T15:00:00", "timeZone": "America/New_York" }
+    },
+    {
+      "id": "s-offset-wins",
+      "status": "confirmed",
+      "summary": "an offset disagreeing with the timeZone beside it",
+      "start": { "dateTime": "2026-08-26T21:00:00+02:00", "timeZone": "America/New_York" },
+      "end": { "dateTime": "2026-08-26T21:30:00+02:00", "timeZone": "America/New_York" }
+    },
+    {
+      "id": "s-odd-status",
+      "status": "confirmed",
+      "summary": "an attendee whose responseStatus names a property of Object",
+      "start": { "dateTime": "2026-08-26T22:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T22:30:00+02:00" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "constructor" }
+      ]
     }
   ]
 }

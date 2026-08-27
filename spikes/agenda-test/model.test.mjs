@@ -99,6 +99,11 @@ eq("your address is the fallback when no row is flagged", reply("s-email-self"),
 eq("...case-insensitively",
   raw("events-shapes", "s-email-self").attendees[0].email, "ME@Corp.com");
 eq("a different sign-in is not you", reply("s-email-self", { ...WORK, selfEmail: "someone@else.com" }), "n/a");
+// `reply` is one of five strings and every caller switches on it. A plain lookup
+// in the response-status table walks Object.prototype, so a status that happens to
+// name one of its properties handed back a FUNCTION instead.
+eq("a responseStatus naming an Object property is not a reply", reply("s-odd-status"), "none");
+eq("...and reply is always a string", typeof one("events-shapes", "s-odd-status", WORK).reply, "string");
 
 // ---------------------------------------------------------------------------
 section("4. what normalising drops, and what it deliberately does not");
@@ -265,5 +270,21 @@ eq("no zone means UTC, not the machine's", dayBounds(at("2026-08-26T12:00:00Z"),
   at("2026-08-26T00:00:00Z"));
 eq("an unresolvable zone falls back rather than throwing",
   dayBounds(at("2026-08-26T12:00:00Z"), { tz: "Mars/Olympus" }).todayStart, at("2026-08-26T00:00:00Z"));
+
+// Google documents `dateTime` as carrying an offset "unless a time zone is
+// explicitly specified in timeZone", so an offset-less stamp is a shape the API
+// may return -- and `Date.parse` reads one of those in the MACHINE's zone. New
+// York is deliberately neither this machine's zone nor the calendar's, so the
+// expected instant is the same number on every machine and a machine-local parse
+// cannot accidentally agree with it.
+const bare = one("events-shapes", "s-no-offset", WORK);
+eq("an offset-less stamp is placed by its own timeZone", bare.start, at("2026-08-26T18:00:00Z"));
+eq("...both ends of it", bare.end, at("2026-08-26T19:00:00Z"));
+eq("...and the calendar's zone stands in when the event names none",
+  normaliseEvent({ id: "x", start: { dateTime: "2026-08-26T14:00:00" } },
+    { ...WORK, tz: "America/New_York" }).start, at("2026-08-26T18:00:00Z"));
+// The offset names the instant outright; a timeZone beside it can disagree.
+eq("an offset in the stamp wins over the timeZone beside it",
+  one("events-shapes", "s-offset-wins", WORK).start, at("2026-08-26T19:00:00Z"));
 
 done();
