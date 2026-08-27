@@ -8,13 +8,15 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T01 implemented, awaiting review. The agenda's state layer exists:
+**Status:** T01 reviewed and done. The agenda's state layer exists:
 `bin/cockpit-agenda-store.mjs` (three files under `~/.claude/cockpit`, one lock, atomic
 writes, `0600`) and `spikes/agenda-test/run.sh`, the plan's test command and the harness
-every later task extends. Measured on this commit: agenda-test **60**, notes-test **39**,
-cockpit-test **117**, all ALL PASS.
+every later task extends. The review found and fixed a non-reentrant `withLock`.
+Measured on this commit: agenda-test **65**, notes-test **39**, cockpit-test **117**, all
+ALL PASS. Nothing is waiting on the user.
 **Last updated:** 2026-08-27
-**Next `pir-work` will:** review **T01**.
+**Next `pir-work` will:** implement **T02** (normalise Google events; choose what shows) —
+the first ⬜ whose dependencies are met, and the task that arms the purity grep.
 
 ## Tasks
 
@@ -24,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | Can both Google accounts connect? (spike) | — | ✅ | Reviewed clean, no fix. 3 "Done when" met; probe gone, tree clean, no history traces; tests 39+108 green (untouched). Probed: 7-day expiry correctly left unverified in all 3 places; nested-JSON 🐞 routed to T04. Hand-verification is the dated FINDINGS ✅ row — reviewer can't re-run it. |
-| T01 | State files, lock, atomic writes, modes | T00 | 🔍 | Store + `spikes/agenda-test/run.sh`, 60 assertions, every listed case. Deviations: `readState()` reports the quarantine as a `corruptedTo` field on its return (doc said "a flag", unnamed); one `agenda.lock` covers all three files; lock wait raised to 5s to match the stale break; harness also checks node-only imports and (skipped, prints why) T02's model boundary. |
+| T01 | State files, lock, atomic writes, modes | T00 | ✅ | Reviewed; **one defect fixed**: `withLock` was not reentrant, so a compound write took 5035ms *and* dropped the lock mid-transaction. Harness's real-dir and dependency guards hardened — both read stronger than they were. All four deviations approved. 60 → **65** assertions. Probed: readState never throws on junk, quarantine races, 10-way concurrency. |
 | T02 | Normalise Google events; choose what shows | T00 | ⬜ | |
 | T03 | Draw the column | T01, T02 | ⬜ | Heaviest task. Split it rather than rush it. |
 | T04 | Google client — OAuth, refresh, REST | T01 | ⬜ | Tests hit a loopback stub, never Google. |
@@ -37,7 +39,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** T01
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
