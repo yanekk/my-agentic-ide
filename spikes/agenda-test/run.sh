@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Tests for the cockpit agenda.
+#
+# The agenda is a column drawn inside the fleet view's welcome pane, not a pane of
+# its own, so nothing here needs WezTerm -- this runs standalone, like
+# spikes/notes-test, rather than through the mux stub in spikes/cockpit-test.
+#
+# Every suite runs against a THROWAWAY COCKPIT_DIR. That is the seatbelt that
+# matters here (DESIGN 5.2): the real ~/.claude/cockpit holds live refresh tokens,
+# and no test may ever read or write one. run.sh checks that afterwards rather
+# than trusting it.
+#
+#   spikes/agenda-test/run.sh
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+
+REAL_DIR="${HOME}/.claude/cockpit"
+real_snapshot() { [ -d "$REAL_DIR" ] && ls -A "$REAL_DIR" | sort || echo "(absent)"; }
+BEFORE_REAL="$(real_snapshot)"
+
+fail=0
+check()  { if grep -qF -- "$2" "$3"; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       expected: $2"; fail=1; fi; }
+same()   { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+
+# --- the node suites -------------------------------------------------------
+# One fresh state dir each, so a suite can never inherit another's files. Later
+# tasks add <name>.test.mjs beside this script and it is picked up here.
+for suite in "$HERE"/*.test.mjs; do
+  [ -e "$suite" ] || continue
+  d="$T/$(basename "$suite" .test.mjs)"
+  mkdir -p "$d"
+  COCKPIT_DIR="$d" node "$suite" || fail=1
+done
+
+echo
+echo "== 9. two writers at once =="
+# You in one terminal, an agent in another, and the daemon in the background all
+# write these files. Two read-modify-writes landing together would otherwise lose
+# one, exactly as they would in notes.json.
+C="$T/concurrent"; mkdir -p "$C"
+cat > "$T/writer.mjs" <<'WRITER'
+const store = await import(`${process.argv[2]}/bin/cockpit-agenda-store.mjs`);
+store.putCalendar({ slug: process.argv[3], account: "a@b.c", calendarId: "c", title: "T", colour: 1 }, 1756200000000);
+WRITER
+for i in $(seq 1 10); do COCKPIT_DIR="$C" node "$T/writer.mjs" "$ROOT" "cal-$i" & done
+wait
+n="$(COCKPIT_DIR="$C" node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>process.stdout.write(String(s.readState().calendars.length)))' "$ROOT")"
+same "all 10 concurrent writes survived"          "$n" "10"
+same "no temp file left behind"                   "$(ls -A "$C" | grep -cF '.tmp')" "0"
+same "no lock left behind"                        "$(ls -A "$C" | grep -cF 'agenda.lock')" "0"
+
+echo
+echo "== 10. nothing leaks into the repo, or into your real sign-ins =="
+# A state file checked into the repo would appear in `revdiff --untracked HEAD` --
+# the very diff an agent is reviewed on -- and would put refresh tokens in git.
+stray="$(find "$ROOT" -path "$ROOT/.git" -prune -o -path "$ROOT/.claude/worktrees" -prune -o \
+         \( -name 'agenda*.json' -o -name '*.lock' -o -name '*.json.tmp' \) -print 2>/dev/null | wc -l | tr -d ' ')"
+same "no agenda state anywhere in the checkout"   "$stray" "0"
+same "the real cockpit dir is untouched"          "$(real_snapshot)" "$BEFORE_REAL"
+
+echo
+echo "== 11. the module keeps its side of the boundary =="
+# DESIGN 5: this repository has zero dependencies and no package manifest, and
+# that is a property worth keeping -- it must survive being cloned onto a machine
+# with nothing but node and wezterm.
+foreign="$(grep -nE '^\s*(import|export).*from\s*"' "$ROOT/bin/cockpit-agenda-store.mjs" | grep -vE 'from "node:' | wc -l | tr -d ' ')"
+same "the store imports nothing outside node:*"   "$foreign" "0"
+
+# DESIGN 3.1: the pure module may not touch the world. It arrives with T02 --
+# until then this says so out loud rather than passing silently.
+MODEL="$ROOT/bin/cockpit-agenda-model.mjs"
+if [ -f "$MODEL" ]; then
+  impure="$(grep -nE 'node:fs|node:http|node:https|node:child_process|fetch\(|Date\.now\(|new Date\(\)|process\.env' "$MODEL" | wc -l | tr -d ' ')"
+  same "the model reaches for nothing impure"     "$impure" "0"
+  # If this fails the fix is to MOVE THE CODE, never to relax the check: every
+  # rule that leaks across this line becomes a rule only a person can verify.
+else
+  echo "  --   the pure model does not exist yet (T02 adds it); its boundary check is skipped"
+fi
+
+echo
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
+exit "$fail"

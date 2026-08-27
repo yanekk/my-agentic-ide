@@ -8,17 +8,13 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T00 done and verified by hand — **both Google accounts connect** (personal and
-company each returned their calendars and a refresh token; no admin block). Publishing status
-*Testing* works; the ~7-day token-expiry question stays open (needs a week of real time, §2.9,
-not a blocker). The spike is deleted. The company-account risk that gated the plan is retired.
-Plan amended 2026-08-27 from T00's findings: `agenda setup` now takes the **path to Google's
-download** (user's call), the nested-JSON parse is routed to **T05** not T04, a scope-refused
-403 classifies as `auth` not `gone`, and the cockpit-test baseline is re-measured at **117**.
+**Status:** T01 implemented, awaiting review. The agenda's state layer exists:
+`bin/cockpit-agenda-store.mjs` (three files under `~/.claude/cockpit`, one lock, atomic
+writes, `0600`) and `spikes/agenda-test/run.sh`, the plan's test command and the harness
+every later task extends. Measured on this commit: agenda-test **60**, notes-test **39**,
+cockpit-test **117**, all ALL PASS.
 **Last updated:** 2026-08-27
-**Next `pir-work` will:** implement **T01** (state files, lock, atomic writes, modes) — its
-only dependency, T00, is now ✅. First real product code of the plan. Its doc carries a dated
-amendment: Google's nested client JSON is **not** T01's problem.
+**Next `pir-work` will:** review **T01**.
 
 ## Tasks
 
@@ -28,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | Can both Google accounts connect? (spike) | — | ✅ | Reviewed clean, no fix. 3 "Done when" met; probe gone, tree clean, no history traces; tests 39+108 green (untouched). Probed: 7-day expiry correctly left unverified in all 3 places; nested-JSON 🐞 routed to T04. Hand-verification is the dated FINDINGS ✅ row — reviewer can't re-run it. |
-| T01 | State files, lock, atomic writes, modes | T00 | ⬜ | |
+| T01 | State files, lock, atomic writes, modes | T00 | 🔍 | Store + `spikes/agenda-test/run.sh`, 60 assertions, every listed case. Deviations: `readState()` reports the quarantine as a `corruptedTo` field on its return (doc said "a flag", unnamed); one `agenda.lock` covers all three files; lock wait raised to 5s to match the stale break; harness also checks node-only imports and (skipped, prints why) T02's model boundary. |
 | T02 | Normalise Google events; choose what shows | T00 | ⬜ | |
 | T03 | Draw the column | T01, T02 | ⬜ | Heaviest task. Split it rather than rush it. |
 | T04 | Google client — OAuth, refresh, REST | T01 | ⬜ | Tests hit a loopback stub, never Google. |
@@ -41,7 +37,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 
