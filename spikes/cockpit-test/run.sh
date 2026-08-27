@@ -509,6 +509,46 @@ check "reset to the uncommitted default"          '"diffMode":"uncommitted"' "$T
 : > "$ACTIVE"                             # unfocus for the remaining sections; back at the uncommitted default
 
 echo
+echo "== 5f. clicking a diff-mode label switches the mode regardless of focus =="
+# The footer appends `diff-<mode>` to the cmd channel when a label is clicked.
+# Unlike ⌥[/⌥], a click names the mode outright and must NOT depend on which pane
+# is focused -- the click landed on the footer, not the diff pane. $ACTIVE is left
+# empty so no pane reads as the focused diff pane, proving focus-independence.
+: > "$CALLS"; : > "$ACTIVE"
+echo diff-lastcommit >> "$T/state/cmd"
+sleep 2
+check "clicked label switched to last-commit while unfocused" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
+check "the mode reflects the clicked label"       '"diffMode":"lastcommit"' "$T/state/terminals.json"
+
+: > "$CALLS"
+echo diff-uncommitted >> "$T/state/cmd"
+sleep 2
+check "clicking Uncommitted returns to that range" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+check "the mode is back to uncommitted"           '"diffMode":"uncommitted"' "$T/state/terminals.json"
+
+: > "$CALLS"
+echo diff-uncommitted >> "$T/state/cmd"           # clicking the ALREADY-active label
+sleep 2
+refute "clicking the active label relaunches nothing" "revdiff --wrap" "$CALLS"
+
+echo
+echo "== 5f'. clicking Custom always (re)opens the ref prompt =="
+# Matches "cycling into custom always re-prompts": a click on Custom pops the
+# prompt so the base ref can be entered (or changed), and revdiff is not
+# relaunched until the answer comes back.
+: > "$CALLS"
+echo diff-custom >> "$T/state/cmd"
+sleep 2
+check "clicking Custom opened the ref prompt"     "cockpit-custom-prompt.mjs" "$CALLS"
+check "the mode is now custom"                    '"diffMode":"custom"' "$T/state/terminals.json"
+refute "revdiff is NOT relaunched until answered" "revdiff --wrap" "$CALLS"
+# Cancel so state is clean and later sections see the uncommitted default again.
+printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
+echo custom-cancel >> "$T/state/cmd"
+sleep 2
+check "cancel reverted to the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
+
+echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
 : > "$CALLS"
 echo list > "$FLEETSTATE"

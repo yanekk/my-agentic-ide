@@ -27,9 +27,23 @@ import { execFileSync } from "node:child_process";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
+// The command channel the daemon tails. The footer appends a `diff-<mode>` verb
+// here when a diff-mode label is clicked -- the same channel the ⌥[/⌥]
+// keybindings and the custom prompt use, so the daemon owns the actual switch.
+const CMD_FILE = path.join(DIR, "cmd");
 const FOOTER = process.argv[2] === "footer";
 
 const ESC = "\x1b[";
+
+// The three diff-mode labels, in the order the footer draws them. A click is
+// mapped back to one of these by column.
+const DIFF_ORDER = ["uncommitted", "lastcommit", "custom"];
+
+// Strip CSI sequences to measure how many COLUMNS a rendered string occupies:
+// escapes take no width, so the label positions a click must match are the
+// visible lengths, not the raw string lengths.
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+const vlen = (s) => stripAnsi(s).length;
 
 function read() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
@@ -119,10 +133,18 @@ function schedulePin() {
   pinTimer = setTimeout(pinHeight, 250);
 }
 
+// The visible column span of each diff-mode label as last drawn, so a click in
+// the footer maps back to the mode it landed on: [{ key, start, end }], 1-indexed
+// to match WezTerm's SGR mouse report. `footerAttached` gates clicks: with no
+// agent attached there is no diff to re-mode, so the labels are inert.
+let hitZones = [];
+let footerAttached = false;
+
 // --- the footer: one full-width line of keys, always visible ----------------
 function renderFooter() {
   const { agent, diffMode, customRef, terminals } = read();
   const attached = agent && agent !== "repo";
+  footerAttached = attached;
   const n = terminals.length;
   const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
   // Unattached, the left slot is empty: its old "enter an agent" hint stole the
@@ -132,14 +154,14 @@ function renderFooter() {
     : "";
   // All three modes are shown with the active one highlighted (reverse video), so
   // the current range is legible at a glance. It doubles as the hint for ⌥[/⌥],
-  // which switch the mode when the diff pane is focused and terminals otherwise.
+  // which switch the mode when the diff pane is focused and terminals otherwise,
+  // and each label is clickable (see the mouse handler below).
   // Custom carries the agent's base ref inline when it has one, so the reviewer
   // can see WHAT it is diffing against without opening the prompt.
   const label = (key) => key === "custom" && customRef ? `Custom: ${customRef}` : DIFF_MODE_LABELS[key];
   const opt = (key) => key === active
     ? `${ESC}7m ${label(key)} ${ESC}0m`
     : `${ESC}2m${label(key)}${ESC}0m`;
-  const diff = `${ESC}2mDiff mode:${ESC}0m ${opt("uncommitted")}${ESC}2m | ${ESC}0m${opt("lastcommit")}${ESC}2m | ${ESC}0m${opt("custom")}`;
   const keys = [
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
@@ -150,7 +172,59 @@ function renderFooter() {
     `${ESC}2mdrag${ESC}0m copy`,
   ].join(`${ESC}2m  ·  ${ESC}0m`);
   const lead = left ? `${left}    ` : "";
-  process.stdout.write(`${ESC}2J${ESC}H ${lead}${keys}    ${diff}${ESC}K`);
+  // The write homes the cursor then emits a leading space, so visible column 1 is
+  // that space -- fold it into `pre` so the measured label columns line up with
+  // what a mouse click reports.
+  const pre = ` ${lead}${keys}    `;
+  const modePrefix = `${ESC}2mDiff mode:${ESC}0m `;
+  const sep = `${ESC}2m | ${ESC}0m`;
+  // Build the diff segment left-to-right, recording where each label sits.
+  let col = vlen(pre) + vlen(modePrefix) + 1;   // 1-indexed column of the first label
+  let diff = modePrefix;
+  const zones = [];
+  DIFF_ORDER.forEach((key, i) => {
+    const seg = opt(key);
+    const w = vlen(seg);
+    zones.push({ key, start: col, end: col + w - 1 });
+    diff += seg;
+    col += w;
+    if (i < DIFF_ORDER.length - 1) { diff += sep; col += vlen(sep); }
+  });
+  hitZones = zones;
+  process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${ESC}K`);
+}
+
+// A left-click at column `x` on the footer: if it landed on a diff-mode label,
+// hand the daemon the corresponding verb. Inert with no agent attached.
+function onFooterClick(x) {
+  if (!footerAttached) return;
+  const zone = hitZones.find((z) => x >= z.start && x <= z.end);
+  if (!zone) return;
+  try { fs.appendFileSync(CMD_FILE, `diff-${zone.key}\n`); } catch { /* daemon re-reads on the next click */ }
+}
+
+// Turn on mouse reporting and forward left-clicks to onFooterClick. 1000h reports
+// button press/release; 1006h is SGR extended coordinates (unambiguous, and not
+// capped at column 223). This is scoped to the FOOTER's own pane -- it never
+// reaches the Claude pane, whose mouse handling is deliberately left to claude.
+// WezTerm delivers mouse events to the pane under the pointer once that pane has
+// enabled reporting, so the footer is clickable without being the focused pane.
+function enableFooterMouse() {
+  process.stdout.write(`${ESC}?1000h${ESC}?1006h`);
+  if (!process.stdin.isTTY) return;
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on("data", (buf) => {
+    const s = buf.toString("latin1");
+    // SGR mouse: ESC [ < b ; x ; y  (M = press, m = release). Act on a left-button
+    // press only: low two bits 0 = left; bit 32 set = motion, which we ignore.
+    const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const b = Number(m[1]);
+      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onFooterClick(Number(m[2]));
+    }
+  });
 }
 
 // --- the strip: a vertical list of the agent's terminals --------------------
@@ -178,6 +252,7 @@ const render = FOOTER ? renderFooter : renderStrip;
 
 process.stdout.write(`${ESC}?25l`);                   // hide the cursor
 render();
+if (FOOTER) enableFooterMouse();
 // Watch the state DIR (not the file): the daemon replaces terminals.json
 // atomically, so a file watch would go deaf after the first rename.
 try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json") render(); }); } catch {}
@@ -185,6 +260,10 @@ process.stdout.on("resize", () => { render(); schedulePin(); });
 setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
 schedulePin();                                        // the pane may open already oversized
 
-const bye = () => { process.stdout.write(`${ESC}?25h`); process.exit(0); };
+const bye = () => {
+  if (FOOTER) process.stdout.write(`${ESC}?1000l${ESC}?1006l`);   // stop mouse reporting
+  process.stdout.write(`${ESC}?25h`);
+  process.exit(0);
+};
 process.on("SIGINT", bye);
 process.on("SIGTERM", bye);

@@ -824,6 +824,49 @@ async function diffModeCommand(verb, attempt = 0) {
 }
 
 /**
+ * Set the diff mode to a SPECIFIC target (clicking a label in the footer, which
+ * appends `diff-<mode>` to the cmd channel), as opposed to the ⌥[/⌥] cycle above.
+ * Unlike the keyboard path this does NOT gate on which pane is focused: the click
+ * landed on the footer, not on the diff pane, so it must switch regardless of
+ * where the cursor was. Only meaningful attached to an agent; shares the reconcile
+ * lock like diffModeCommand so the relaunch cannot race a pane swap.
+ *
+ * Clicking Custom ALWAYS (re)opens the ref prompt -- matching "cycling into custom
+ * always re-prompts" -- so it doubles as a direct way to change the base ref even
+ * when already in custom. Clicking the already-active uncommitted/lastcommit label
+ * is a no-op: there is nothing to relaunch.
+ */
+async function diffModeSet(target, attempt = 0) {
+  if (!attached || visibleDiff === REPO_KEY) return;
+  if (reconciling) {
+    if (attempt < 20) setTimeout(() => diffModeSet(target, attempt + 1), 100);
+    return;
+  }
+  reconciling = true;
+  try {
+    const jobId = visibleDiff;
+    const pane = diffs.get(jobId);
+    if (pane === undefined || jobId !== attached.jobId) return;
+    if (customPromptOpen) return;       // the prompt owns the pane; ignore until it resolves
+    const from = modeOf(jobId);
+    if (target === "custom") {
+      diffModeByAgent.set(jobId, "custom");
+      writeTerminals();                 // the footer shows the current mode
+      modeBeforeCustom = from;          // a cancel reverts here (custom -> custom keeps the ref)
+      await openCustomPrompt(jobId, pane, attached.worktree);
+      return;
+    }
+    if (target === from) return;        // already in this mode; nothing to do
+    diffModeByAgent.set(jobId, target);
+    writeTerminals();
+    await relaunchDiff(jobId, pane, attached.worktree, attached.reviewFile);
+    wez(["activate-pane", "--pane-id", String(pane)]);
+  } finally {
+    reconciling = false;
+  }
+}
+
+/**
  * Open the ASCII "custom range" prompt in the attached agent's diff pane. Quits
  * revdiff back to its shell first (same rule as relaunchDiff: never while the
  * annotation editor is open, or the `q` lands in the comment), then types a
@@ -1629,6 +1672,14 @@ tail(CMD_FILE, (line) => {
   // The custom-range prompt hands its answer back through this same channel.
   if (verb === "custom-ok") { resolveCustomPrompt("ok"); return; }
   if (verb === "custom-cancel") { resolveCustomPrompt("cancel"); return; }
+  // Clicking a diff-mode label in the footer appends one of these (see
+  // cockpit-strip.mjs). Unlike ⌥[/⌥], a click names the mode outright and does
+  // not depend on which pane is focused.
+  if (verb.startsWith("diff-")) {
+    const target = verb.slice("diff-".length);
+    if (DIFF_MODES.includes(target)) diffModeSet(target);
+    return;
+  }
   // A successful revdiff flush (O) fires --post-flush-command, which appends this
   // verb. Jump focus to the agent's Claude pane, where injectReview has just typed
   // the flushed review as an unsent prompt, so the reviewer can edit and send it.
