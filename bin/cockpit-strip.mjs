@@ -125,9 +125,11 @@ function renderFooter() {
   const attached = agent && agent !== "repo";
   const n = terminals.length;
   const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
+  // Unattached, the left slot is empty: its old "enter an agent" hint stole the
+  // width a long `Custom: <branch>` needs to stay on the one footer line.
   const left = attached
     ? `${ESC}1m${agent}${ESC}0m${ESC}2m · ${n} terminal${n === 1 ? "" : "s"}${ESC}0m`
-    : `${ESC}2menter an agent to open terminals${ESC}0m`;
+    : "";
   // All three modes are shown with the active one highlighted (reverse video), so
   // the current range is legible at a glance. It doubles as the hint for ⌥[/⌥],
   // which switch the mode when the diff pane is focused and terminals otherwise.
@@ -147,7 +149,8 @@ function renderFooter() {
     `${ESC}2m⌥z${ESC}0m zoom`,
     `${ESC}2mdrag${ESC}0m copy`,
   ].join(`${ESC}2m  ·  ${ESC}0m`);
-  process.stdout.write(`${ESC}2J${ESC}H ${left}    ${keys}    ${diff}${ESC}K`);
+  const lead = left ? `${left}    ` : "";
+  process.stdout.write(`${ESC}2J${ESC}H ${lead}${keys}    ${diff}${ESC}K`);
 }
 
 // --- the strip: a vertical list of the agent's terminals --------------------
