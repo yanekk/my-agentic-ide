@@ -13,9 +13,8 @@ company each returned their calendars and a refresh token; no admin block). Publ
 *Testing* works; the ~7-day token-expiry question stays open (needs a week of real time, §2.9,
 not a blocker). The spike is deleted. The company-account risk that gated the plan is retired.
 **Last updated:** 2026-08-27
-**Next `pir-work` will:** review **T00** — a light pass: confirm the four FINDINGS rows
-faithfully record what was verified, the tree is clean, and the 7-day expiry is correctly left
-unverified. Then T01 (state files) is unblocked.
+**Next `pir-work` will:** implement **T01** (state files, lock, atomic writes, modes) — its
+only dependency, T00, is now ✅. First real product code of the plan.
 
 ## Tasks
 
@@ -24,7 +23,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | Can both Google accounts connect? (spike) | — | 🔍 | ✅ by hand: both accounts connected, both got refresh tokens, no admin block; *Testing* status, 7-day expiry still open. Probe (22 checks) built then deleted; 4 FINDINGS rows are the deliverable. Nested Google client-JSON shape found → note for T04. |
+| T00 | Can both Google accounts connect? (spike) | — | ✅ | Reviewed clean, no fix. 3 "Done when" met; probe gone, tree clean, no history traces; tests 39+108 green (untouched). Probed: 7-day expiry correctly left unverified in all 3 places; nested-JSON 🐞 routed to T04. Hand-verification is the dated FINDINGS ✅ row — reviewer can't re-run it. |
 | T01 | State files, lock, atomic writes, modes | T00 | ⬜ | |
 | T02 | Normalise Google events; choose what shows | T00 | ⬜ | |
 | T03 | Draw the column | T01, T02 | ⬜ | Heaviest task. Split it rather than rush it. |
@@ -38,7 +37,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** T00
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
