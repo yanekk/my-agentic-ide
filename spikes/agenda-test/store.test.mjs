@@ -125,7 +125,7 @@ eq("only well-formed calendars survive", junk.calendars.map((c) => c.slug), ["ok
 eq("...with the missing fields filled in", junk.calendars[0], { slug: "ok", account: "", calendarId: "", title: "", colour: null, addedAt: 0 });
 ok("a well-shaped file is not quarantined", junk.corruptedTo === null);
 
-section("8. a stale lock is broken, not waited on forever");
+section("8. the lock: a stale one is broken, a nested one does not stall");
 // A process killed mid-write leaves the lock behind. Breaking it at 5s is what
 // stops one crash wedging every later write.
 fs.writeFileSync(path.join(DIR, "agenda.lock"), "");
@@ -137,5 +137,31 @@ const waited = Date.now() - t;
 ok("the write got in", store.readState().calendars.some((c) => c.slug === "after-stale"));
 ok("...without waiting out the retries", waited < 2000, `waited ${waited}ms`);
 ok("...and the lock is cleared", !fs.existsSync(path.join(DIR, "agenda.lock")));
+
+// ONE agenda.lock covers all three files precisely so that a compound write -- add
+// a calendar, prime its cache -- is a single transaction. That makes nesting the
+// ordinary case, so withLock has to be reentrant. Before it was, this took 5035ms:
+// the inner call spun the whole retry budget against a lock this same process was
+// holding, then broke it as stale and UNLINKED it, so the rest of the outer block
+// ran with no lock at all. Both halves are asserted -- the stall and the drop --
+// because fixing only the timing would leave the transaction just as unprotected.
+const lockFile = path.join(DIR, "agenda.lock");
+let heldThroughout = null;
+const t2 = Date.now();
+const returned = store.withLock(() => {
+  store.putCalendar({ slug: "compound", account: "a@b.c", calendarId: "c", title: "C", colour: 3 }, T0);
+  store.putCacheEntry("compound", { fetchedAt: T0, events: [], error: null });
+  heldThroughout = fs.existsSync(lockFile);
+  return "returned";
+});
+const nested = Date.now() - t2;
+ok("a nested withLock does not spin on this process's own lock", nested < 1000, `took ${nested}ms`);
+ok("...and the lock is still held after the inner calls", heldThroughout === true);
+eq("...the outer return value is passed through", returned, "returned");
+eq("...and both files were written", [
+  store.readState().calendars.some((c) => c.slug === "compound"),
+  Boolean(store.readCache().calendars.compound),
+], [true, true]);
+ok("...and the lock is released when the outermost call ends", !fs.existsSync(lockFile));
 
 done();

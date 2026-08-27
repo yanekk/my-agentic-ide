@@ -53,7 +53,21 @@ const LOCK_WAIT_MS = 25;
 // delays a write that is now guaranteed to get in.
 const LOCK_TRIES = Math.ceil(LOCK_STALE_MS / LOCK_WAIT_MS);
 
+// It is not reentrant on its own, and ONE lock across all three files makes nesting
+// the ordinary case rather than an exotic one: a compound write -- add a calendar,
+// prime its cache -- is one withLock around calls that each take it again. Measured
+// before this guard: that took 5035ms, because the inner call spun the whole retry
+// budget against a lock THIS process was holding, then broke it as stale and
+// unlinked it -- leaving the rest of the outer transaction running with no lock at
+// all, which is the opposite of what wrapping it was for. So count depth: the
+// outermost call owns the file and the inner ones simply run.
+let lockDepth = 0;
+
 export function withLock(fn) {
+  if (lockDepth > 0) {
+    lockDepth++;
+    try { return fn(); } finally { lockDepth--; }
+  }
   let fd = null;
   try { fs.mkdirSync(DIR, { recursive: true }); } catch { /* exists, or unwritable */ }
   for (let i = 0; i < LOCK_TRIES; i++) {
@@ -66,9 +80,11 @@ export function withLock(fn) {
       sleepSync(LOCK_WAIT_MS);
     }
   }
+  lockDepth = 1;
   try {
     return fn();
   } finally {
+    lockDepth = 0;
     if (fd !== null) try { fs.closeSync(fd); } catch { /* already gone */ }
     try { fs.unlinkSync(LOCK_FILE); } catch { /* already gone */ }
   }

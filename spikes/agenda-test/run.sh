@@ -19,7 +19,22 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 REAL_DIR="${HOME}/.claude/cockpit"
-real_snapshot() { [ -d "$REAL_DIR" ] && ls -A "$REAL_DIR" | sort || echo "(absent)"; }
+# Names for the whole directory, plus name+size+mtime for the agenda's own files.
+# Names alone would miss a test that rewrote your real agenda.json in place, which
+# is the one accident this check exists to catch -- but stat'ing the WHOLE dir would
+# fail for reasons nothing to do with these tests, because a live cockpit rewrites
+# terminals.json every couple of seconds while the window is open. Nothing but the
+# agenda code writes agenda*, and no test may point that code at the real dir, so
+# those are the files worth watching closely. Sizes and mtimes, never contents: this
+# must not read a refresh token to prove it did not write one.
+real_snapshot() {
+  if [ -d "$REAL_DIR" ]; then
+    ls -A "$REAL_DIR" | sort
+    find "$REAL_DIR" -maxdepth 1 -name 'agenda*' -exec stat -f '%N %z %m' {} \; 2>/dev/null | sort
+  else
+    echo "(absent)"
+  fi
+}
 BEFORE_REAL="$(real_snapshot)"
 
 fail=0
@@ -67,7 +82,15 @@ echo "== 11. the module keeps its side of the boundary =="
 # DESIGN 5: this repository has zero dependencies and no package manifest, and
 # that is a property worth keeping -- it must survive being cloned onto a machine
 # with nothing but node and wezterm.
-foreign="$(grep -nE '^\s*(import|export).*from\s*"' "$ROOT/bin/cockpit-agenda-store.mjs" | grep -vE 'from "node:' | wc -l | tr -d ' ')"
+# Every quoted module specifier, however it is written -- `import x from "y"`,
+# `export … from 'y'`, `await import('y')` -- and then everything that is not a
+# node: builtin. Comment lines are dropped first: prose says "from" too, and the
+# store's own header ("...`from "there and broken"`...") tripped the narrower
+# pattern this replaced. Relative imports count as foreign here on purpose: the
+# store is the base layer and the task requires it to stand on node: alone.
+foreign="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/bin/cockpit-agenda-store.mjs" \
+  | grep -oE "(from|import|require)[[:space:]]*\(?[[:space:]]*[\"'][^\"']+[\"']" \
+  | grep -oE "[\"'][^\"']+[\"']" | grep -vcE "^[\"']node:")"
 same "the store imports nothing outside node:*"   "$foreign" "0"
 
 # DESIGN 3.1: the pure module may not touch the world. It arrives with T02 --
