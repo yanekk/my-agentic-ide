@@ -8,14 +8,14 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** Planned, nothing built. The plan was settled with the user on 2026-08-26; every
-behavioural question is answered and recorded in DESIGN §7. The one live risk is whether the
-user's company Google account is allowed to connect at all, which T00 exists to answer before
-anything is built on top of it.
-**Last updated:** 2026-08-26
-**Next `pir-work` will:** implement **T00** — the throwaway spike that finds out whether both
-Google accounts can sign in. It is first because every task after it assumes they can, and it
-needs the user's own hands.
+**Status:** T00 done and verified by hand — **both Google accounts connect** (personal and
+company each returned their calendars and a refresh token; no admin block). Publishing status
+*Testing* works; the ~7-day token-expiry question stays open (needs a week of real time, §2.9,
+not a blocker). The spike is deleted. The company-account risk that gated the plan is retired.
+**Last updated:** 2026-08-27
+**Next `pir-work` will:** review **T00** — a light pass: confirm the four FINDINGS rows
+faithfully record what was verified, the tree is clean, and the 7-day expiry is correctly left
+unverified. Then T01 (state files) is unblocked.
 
 ## Tasks
 
@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | Can both Google accounts connect? (spike) | — | ⬜ | Throwaway. Needs the user's hands; **stop and ask** if the company account is blocked. |
+| T00 | Can both Google accounts connect? (spike) | — | 🔍 | ✅ by hand: both accounts connected, both got refresh tokens, no admin block; *Testing* status, 7-day expiry still open. Probe (22 checks) built then deleted; 4 FINDINGS rows are the deliverable. Nested Google client-JSON shape found → note for T04. |
 | T01 | State files, lock, atomic writes, modes | T00 | ⬜ | |
 | T02 | Normalise Google events; choose what shows | T00 | ⬜ | |
 | T03 | Draw the column | T01, T02 | ⬜ | Heaviest task. Split it rather than rush it. |
@@ -38,11 +38,13 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty)*
+**Review queue:** T00
 
 ## Blocked on the user
 
-*(Empty, and that is the right state — nothing is waiting on anyone yet.)*
+*(Empty — T00's hand-verification is done, recorded in FINDINGS 2026-08-27. Nothing waiting.)*
 
-T00 will put something here the moment it starts: it cannot be completed without the user
-clicking through Google's console and two sign-in screens.
+Left for the user's own machine, on their own schedule, not blocking anything: the probe's
+`~/.claude/cockpit/probe-client.json` can stay (T04 reuses the same registration) or be
+removed. Whether *Testing*'s refresh token still works in a week is the one open question, and
+DESIGN §2.9 already handles either answer.
