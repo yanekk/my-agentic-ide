@@ -1,0 +1,40 @@
+{
+  "kind": "calendar#events",
+  "summary": "Home",
+  "description": "The second calendar of the same Wednesday. Added AFTER work, so its all-day row sorts below work's and its 17:30 sorts below work's 17:30 -- calendar-add order is the only ranking all-day rows have.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "id": "h-allday-school",
+      "status": "confirmed",
+      "summary": "school closed",
+      "start": { "date": "2026-08-26" },
+      "end": { "date": "2026-08-27" },
+      "iCalUID": "h-allday-school@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "h-0800-gym",
+      "status": "confirmed",
+      "summary": "gym",
+      "start": { "dateTime": "2026-08-26T08:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T09:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "iCalUID": "h-0800-gym@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "h-1730-kids",
+      "status": "confirmed",
+      "summary": "pick up kids",
+      "start": { "dateTime": "2026-08-26T17:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T18:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "iCalUID": "h-1730-kids@google.com",
+      "sequence": 0
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "calendar#events",
+  "summary": "Empty",
+  "description": "What Google returns for a window with nothing in it. `items` is present and empty, not absent.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": []
+}

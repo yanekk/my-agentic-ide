@@ -1,0 +1,47 @@
+{
+  "kind": "calendar#events",
+  "summary": "Rollover",
+  "description": "A Wednesday whose every remaining event is one you declined, and a Thursday that is not. Today is empty only AFTER the declined filter, which is the case the roll-over rule has to survive.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "id": "r-today-declined-late",
+      "status": "confirmed",
+      "summary": "a meeting you are not going to",
+      "start": { "dateTime": "2026-08-26T18:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T19:00:00+02:00" },
+      "attendees": [{ "email": "me@corp.com", "self": true, "responseStatus": "declined" }]
+    },
+    {
+      "id": "r-today-finished",
+      "status": "confirmed",
+      "summary": "this morning, over with",
+      "start": { "dateTime": "2026-08-26T09:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T09:30:00+02:00" }
+    },
+    {
+      "id": "r-tomorrow-allday",
+      "status": "confirmed",
+      "summary": "Bo on leave",
+      "start": { "date": "2026-08-27" },
+      "end": { "date": "2026-08-28" }
+    },
+    {
+      "id": "r-tomorrow-0900",
+      "status": "confirmed",
+      "summary": "planning",
+      "start": { "dateTime": "2026-08-27T09:00:00+02:00" },
+      "end": { "dateTime": "2026-08-27T10:00:00+02:00" }
+    },
+    {
+      "id": "r-tomorrow-0800-declined",
+      "status": "confirmed",
+      "summary": "a tomorrow you also said no to",
+      "start": { "dateTime": "2026-08-27T08:00:00+02:00" },
+      "end": { "dateTime": "2026-08-27T08:30:00+02:00" },
+      "attendees": [{ "email": "me@corp.com", "self": true, "responseStatus": "declined" }]
+    }
+  ]
+}

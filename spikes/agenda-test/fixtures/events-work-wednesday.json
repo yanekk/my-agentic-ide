@@ -1,0 +1,103 @@
+{
+  "kind": "calendar#events",
+  "summary": "Work",
+  "description": "Recorded shape of a Google Calendar events.list response. Wed 26 Aug 2026, Europe/Warsaw. This is the canonical busy Wednesday of DESIGN 1 and 2.3: 09:30, 11:00, 14:00-15:00 and 17:30, plus one all-day, one declined and one cancelled tombstone.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "id": "w-allday-ana",
+      "status": "confirmed",
+      "summary": "Ana on leave",
+      "creator": { "email": "me@corp.com", "self": true },
+      "organizer": { "email": "me@corp.com", "self": true },
+      "start": { "date": "2026-08-26" },
+      "end": { "date": "2026-08-27" },
+      "transparency": "transparent",
+      "iCalUID": "w-allday-ana@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-0930-standup",
+      "status": "confirmed",
+      "summary": "standup",
+      "start": { "dateTime": "2026-08-26T09:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T09:45:00+02:00", "timeZone": "Europe/Warsaw" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "accepted" },
+        { "email": "ana@corp.com", "responseStatus": "accepted" }
+      ],
+      "iCalUID": "w-0930-standup@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-1100-oneonone",
+      "status": "confirmed",
+      "summary": "1:1 with Ana",
+      "start": { "dateTime": "2026-08-26T11:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T11:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "accepted" },
+        { "email": "ana@corp.com", "responseStatus": "accepted", "organizer": true }
+      ],
+      "iCalUID": "w-1100-oneonone@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-1200-allhands",
+      "status": "confirmed",
+      "summary": "all-hands",
+      "start": { "dateTime": "2026-08-26T12:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T13:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "declined" },
+        { "email": "everyone@corp.com", "responseStatus": "accepted", "organizer": true }
+      ],
+      "iCalUID": "w-1200-allhands@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-1400-sprint",
+      "status": "confirmed",
+      "summary": "sprint review",
+      "start": { "dateTime": "2026-08-26T14:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T15:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "accepted" },
+        { "email": "team@corp.com", "responseStatus": "accepted", "organizer": true }
+      ],
+      "iCalUID": "w-1400-sprint@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-1730-arch",
+      "status": "confirmed",
+      "summary": "architecture sync",
+      "start": { "dateTime": "2026-08-26T17:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T18:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "needsAction" },
+        { "email": "arch@corp.com", "responseStatus": "accepted", "organizer": true }
+      ],
+      "iCalUID": "w-1730-arch@google.com",
+      "sequence": 0
+    },
+    {
+      "kind": "calendar#event",
+      "id": "w-1000-cancelled",
+      "status": "cancelled",
+      "summary": "old planning slot",
+      "start": { "dateTime": "2026-08-26T10:00:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T10:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "iCalUID": "w-1000-cancelled@google.com",
+      "sequence": 1
+    }
+  ]
+}

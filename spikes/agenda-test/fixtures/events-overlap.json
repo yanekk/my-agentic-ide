@@ -1,0 +1,38 @@
+{
+  "kind": "calendar#events",
+  "summary": "Overlap",
+  "description": "Two meetings running at the same time, and one that ends on the stroke of the test's `now`. The boundaries are the point of this file: 14:20 sits inside both overlapping events, and 14:00 is exactly when the earlier standup ends.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "id": "o-ends-at-1420",
+      "status": "confirmed",
+      "summary": "ends on the stroke",
+      "start": { "dateTime": "2026-08-26T14:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T14:20:00+02:00" }
+    },
+    {
+      "id": "o-starts-at-1420",
+      "status": "confirmed",
+      "summary": "starts on the stroke",
+      "start": { "dateTime": "2026-08-26T14:20:00+02:00" },
+      "end": { "dateTime": "2026-08-26T14:40:00+02:00" }
+    },
+    {
+      "id": "o-earlier-current",
+      "status": "confirmed",
+      "summary": "the long one",
+      "start": { "dateTime": "2026-08-26T13:45:00+02:00" },
+      "end": { "dateTime": "2026-08-26T15:00:00+02:00" }
+    },
+    {
+      "id": "o-later-current",
+      "status": "confirmed",
+      "summary": "the one that cuts across it",
+      "start": { "dateTime": "2026-08-26T14:15:00+02:00" },
+      "end": { "dateTime": "2026-08-26T14:45:00+02:00" }
+    }
+  ]
+}

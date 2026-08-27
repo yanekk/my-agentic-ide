@@ -1,0 +1,45 @@
+{
+  "kind": "calendar#events",
+  "summary": "DST",
+  "description": "Sun 25 Oct 2026 in Europe/Warsaw: the clocks go back at 03:00, so the day is 25 hours long. A day boundary computed by adding 24 hours to midnight would land an hour early and throw that evening's events onto the wrong day.",
+  "updated": "2026-10-25T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "id": "d-allday",
+      "status": "confirmed",
+      "summary": "clocks change",
+      "start": { "date": "2026-10-25" },
+      "end": { "date": "2026-10-26" }
+    },
+    {
+      "id": "d-brunch",
+      "status": "confirmed",
+      "summary": "brunch",
+      "start": { "dateTime": "2026-10-25T12:00:00+01:00" },
+      "end": { "dateTime": "2026-10-25T13:30:00+01:00" }
+    },
+    {
+      "id": "d-late",
+      "status": "confirmed",
+      "summary": "late film",
+      "start": { "dateTime": "2026-10-25T23:30:00+01:00" },
+      "end": { "dateTime": "2026-10-26T01:00:00+01:00" }
+    },
+    {
+      "id": "d-yesterday",
+      "status": "confirmed",
+      "summary": "saturday supper",
+      "start": { "dateTime": "2026-10-24T20:00:00+02:00" },
+      "end": { "dateTime": "2026-10-24T22:00:00+02:00" }
+    },
+    {
+      "id": "d-tomorrow",
+      "status": "confirmed",
+      "summary": "monday standup",
+      "start": { "dateTime": "2026-10-26T09:30:00+01:00" },
+      "end": { "dateTime": "2026-10-26T09:45:00+01:00" }
+    }
+  ]
+}

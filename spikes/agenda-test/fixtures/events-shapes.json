@@ -1,0 +1,142 @@
+{
+  "kind": "calendar#events",
+  "summary": "Shapes",
+  "description": "One of every odd shape Google returns, so the normaliser is driven from recorded JSON rather than from hand-built objects. Signed in as me@corp.com; alias-self@corp.com is the same person under an alias.",
+  "updated": "2026-08-26T06:00:00.000Z",
+  "timeZone": "Europe/Warsaw",
+  "accessRole": "owner",
+  "items": [
+    {
+      "id": "s-timed",
+      "status": "confirmed",
+      "summary": "a plain timed event",
+      "start": { "dateTime": "2026-08-26T09:30:00+02:00", "timeZone": "Europe/Warsaw" },
+      "end": { "dateTime": "2026-08-26T10:15:00+02:00", "timeZone": "Europe/Warsaw" }
+    },
+    {
+      "id": "s-allday-one",
+      "status": "confirmed",
+      "summary": "one whole day",
+      "start": { "date": "2026-08-26" },
+      "end": { "date": "2026-08-27" }
+    },
+    {
+      "id": "s-allday-many",
+      "status": "confirmed",
+      "summary": "a week off",
+      "start": { "date": "2026-08-24" },
+      "end": { "date": "2026-08-28" }
+    },
+    {
+      "id": "s-cancelled",
+      "status": "cancelled",
+      "summary": "a tombstone",
+      "start": { "dateTime": "2026-08-26T11:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T11:30:00+02:00" }
+    },
+    {
+      "id": "s-declined",
+      "status": "confirmed",
+      "summary": "one you said no to",
+      "start": { "dateTime": "2026-08-26T12:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T13:00:00+02:00" },
+      "attendees": [
+        { "email": "me@corp.com", "self": true, "responseStatus": "declined" },
+        { "email": "ana@corp.com", "responseStatus": "accepted", "organizer": true }
+      ]
+    },
+    {
+      "id": "s-needs-action",
+      "status": "confirmed",
+      "summary": "one you have not answered",
+      "start": { "dateTime": "2026-08-26T13:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T13:30:00+02:00" },
+      "attendees": [{ "email": "me@corp.com", "self": true, "responseStatus": "needsAction" }]
+    },
+    {
+      "id": "s-tentative",
+      "status": "confirmed",
+      "summary": "a maybe",
+      "start": { "dateTime": "2026-08-26T14:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T14:30:00+02:00" },
+      "attendees": [{ "email": "me@corp.com", "self": true, "responseStatus": "tentative" }]
+    },
+    {
+      "id": "s-accepted",
+      "status": "confirmed",
+      "summary": "a yes",
+      "start": { "dateTime": "2026-08-26T15:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T15:30:00+02:00" },
+      "attendees": [{ "email": "me@corp.com", "self": true, "responseStatus": "accepted" }]
+    },
+    {
+      "id": "s-no-attendees",
+      "status": "confirmed",
+      "summary": "a note to yourself",
+      "start": { "dateTime": "2026-08-26T16:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T16:30:00+02:00" }
+    },
+    {
+      "id": "s-empty-attendees",
+      "status": "confirmed",
+      "summary": "an empty attendee list",
+      "start": { "dateTime": "2026-08-26T16:30:00+02:00" },
+      "end": { "dateTime": "2026-08-26T16:45:00+02:00" },
+      "attendees": []
+    },
+    {
+      "id": "s-not-an-attendee",
+      "status": "confirmed",
+      "summary": "someone else's meeting on a calendar you subscribe to",
+      "start": { "dateTime": "2026-08-26T17:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T17:30:00+02:00" },
+      "attendees": [
+        { "email": "ana@corp.com", "responseStatus": "accepted", "organizer": true },
+        { "email": "bo@corp.com", "responseStatus": "needsAction" }
+      ]
+    },
+    {
+      "id": "s-alias-self",
+      "status": "confirmed",
+      "summary": "invited at an alias address",
+      "start": { "dateTime": "2026-08-26T18:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T18:30:00+02:00" },
+      "attendees": [
+        { "email": "alias-self@corp.com", "self": true, "responseStatus": "tentative" },
+        { "email": "ana@corp.com", "responseStatus": "accepted", "organizer": true }
+      ]
+    },
+    {
+      "id": "s-email-self",
+      "status": "confirmed",
+      "summary": "no self flag, only your address",
+      "start": { "dateTime": "2026-08-26T18:30:00+02:00" },
+      "end": { "dateTime": "2026-08-26T19:00:00+02:00" },
+      "attendees": [
+        { "email": "ME@Corp.com", "responseStatus": "declined" },
+        { "email": "ana@corp.com", "responseStatus": "accepted", "organizer": true }
+      ]
+    },
+    {
+      "id": "s-transparent",
+      "status": "confirmed",
+      "summary": "focus block",
+      "transparency": "transparent",
+      "start": { "dateTime": "2026-08-26T19:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T20:00:00+02:00" }
+    },
+    {
+      "id": "s-no-summary",
+      "status": "confirmed",
+      "start": { "dateTime": "2026-08-26T20:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T20:15:00+02:00" }
+    },
+    {
+      "id": "s-yesterday-into-today",
+      "status": "confirmed",
+      "summary": "an overnight shift",
+      "start": { "dateTime": "2026-08-25T22:00:00+02:00" },
+      "end": { "dateTime": "2026-08-26T06:00:00+02:00" }
+    }
+  ]
+}
