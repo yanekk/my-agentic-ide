@@ -12,9 +12,13 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 company each returned their calendars and a refresh token; no admin block). Publishing status
 *Testing* works; the ~7-day token-expiry question stays open (needs a week of real time, §2.9,
 not a blocker). The spike is deleted. The company-account risk that gated the plan is retired.
+Plan amended 2026-08-27 from T00's findings: `agenda setup` now takes the **path to Google's
+download** (user's call), the nested-JSON parse is routed to **T05** not T04, a scope-refused
+403 classifies as `auth` not `gone`, and the cockpit-test baseline is re-measured at **117**.
 **Last updated:** 2026-08-27
 **Next `pir-work` will:** implement **T01** (state files, lock, atomic writes, modes) — its
-only dependency, T00, is now ✅. First real product code of the plan.
+only dependency, T00, is now ✅. First real product code of the plan. Its doc carries a dated
+amendment: Google's nested client JSON is **not** T01's problem.
 
 ## Tasks
 

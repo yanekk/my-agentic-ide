@@ -2,6 +2,11 @@
 
 **Phase:** 2 · **Depends on:** T01 · **Weight:** heavy
 
+> **Amended 2026-08-27, after T00.** Two things the spike measured against the real Google
+> that this doc did not know: a 403 can mean *the calendar permission was never granted* rather
+> than *the calendar is gone* (DESIGN §2.7), and an account missing from the OAuth screen's
+> **Test users** list is refused outright with no way past. Both are reflected below.
+
 ## Goal
 
 Everything that touches the wire: signing in through the browser, exchanging and refreshing
@@ -65,6 +70,16 @@ Non-obvious, and why:
   failure, a connection refused, a timeout, or any 5xx — it heals itself. **A 403 on a *token*
   call is `auth`, not `gone`**; the same status code means different things at the two
   endpoints, and this is the mistake to avoid.
+- **A 403 whose body carries `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is `auth`, not `gone`** — measured
+  against the real Google in T00 (FINDINGS 2026-08-27). Google's consent screen has a per-scope
+  checkbox; an unticked calendar box yields a valid token whose calendar calls 403. The fix is to
+  sign in again, so it must render `calendar permission not granted · agenda add <slug>` and
+  **never** `agenda rm`, which would destroy a working configuration (DESIGN §2.7). This means
+  the 403 branch has to read the response body, not just the status.
+- **The "not a test user" refusal happens before any redirect comes back.** An account missing
+  from the OAuth screen's Test users list is refused by Google outright. The listener will simply
+  time out; the message on timeout must therefore mention it as a likely cause, or the user is
+  left with "it hung".
 - **`singleEvents=true&orderBy=startTime`** on the events call, so a recurring meeting arrives
   as individual instances. Without it you get the recurrence rule and would have to expand it
   yourself.
@@ -98,6 +113,7 @@ Sign-in:
       message naming that, and leaves nothing listening
 - [ ] the listener binds `127.0.0.1` only
 - [ ] the listener closes after `timeoutMs` with a clear failure and no leaked handle
+- [ ] that timeout message names "not on the Test users list" as a likely cause
 - [ ] the browser is sent to the same URL that was built
 
 Tokens and calls:
@@ -112,6 +128,8 @@ Classification:
 - [ ] 401 → `auth`
 - [ ] a token response with `error: "invalid_grant"` → `auth`
 - [ ] **403 on a token call → `auth`; 403 on a calendar call → `gone`**
+- [ ] **a 403 whose body carries `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → `auth`, not `gone`**
+- [ ] that classification is driven by the body, not by the calendar/token endpoint alone
 - [ ] 404 on a calendar call → `gone`
 - [ ] 500, 502, 503 → `network`
 - [ ] connection refused → `network`

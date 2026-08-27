@@ -199,12 +199,20 @@ and one dim line is added: `last updated 22m ago · offline`. *Why:* it heals it
 minutes, events rarely change inside twenty minutes, and an agenda that turns into an error
 message every time a laptop wakes from sleep teaches you to ignore the line that matters.
 
-**Permanent — the sign-in is revoked or expired (401/`invalid_grant`), or the calendar is gone
+**Permanent — the sign-in is revoked or expired (401/`invalid_grant`), the consent was granted
+without the calendar permission (403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`), or the calendar is gone
 or no longer shared (404/403).** That calendar's events are replaced by one loud line naming
 the command that fixes it: `work  sign-in expired · agenda add work`, `work  calendar gone ·
 agenda rm work`. Other calendars are unaffected and keep showing their events. *Why:* nothing
 improves until you act, and a silent gap in a two-calendar view is indistinguishable from a
 quiet day.
+
+**A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a consent mistake, not a dead calendar,
+and must not say `calendar gone`.** Measured 2026-08-27 (T00): Google's consent screen carries a
+**per-scope checkbox**, and leaving the calendar box unticked yields a perfectly valid token
+whose calendar calls 403. The remedy is to sign in again and tick the box — so it classifies as
+`auth` and renders `work  calendar permission not granted · agenda add work`. Telling someone to
+`agenda rm` a calendar that is fine would destroy the configuration and fix nothing.
 
 **Staleness is only reported when a fetch has actually failed.** A cache five minutes old
 during normal operation is not stale, it is current; saying "5m ago" every time would make the
@@ -251,9 +259,22 @@ Google requires the cockpit to identify itself with a client ID and secret, crea
 in the Google Cloud console. **They are not in this repository and never will be** — they live
 in `~/.claude/cockpit/agenda-client.json`, mode `0600`, alongside the sign-ins.
 
-Kept in a **separate file from `agenda.json`** because it is machine setup you paste once, not
-state the tool manages: a corrupt state file, or `agenda rm` on everything, must not cost you
-the registration.
+Kept in a **separate file from `agenda.json`** because it is machine setup you provide once,
+not state the tool manages: a corrupt state file, or `agenda rm` on everything, must not cost
+you the registration.
+
+**`agenda setup` takes the path to the JSON Google gave you** —
+`agenda setup ~/Downloads/client_secret_….json` — not two typed values. A client secret is a
+long opaque string and a single mistyped character produces a sign-in failure indistinguishable
+from every other sign-in failure. The download is read, the two values are copied into
+`agenda-client.json`, and your download is left where it is.
+
+**It must accept the shape Google actually emits, which is nested.** Measured 2026-08-27 (T00):
+a Desktop client downloads as `{ "installed": { "client_id": …, "client_secret": … } }` —
+snake_case, one level down — and a web client uses `"web"` instead. The plan originally assumed
+a flat `{ clientId, clientSecret }` and the spike rejected the real file. So the parse accepts
+`installed`, `web` and flat, in either key style, and **stores the normalised flat shape**
+(§3.5). What is on disk is ours; what is read is Google's.
 
 **Sign-in uses the loopback flow with PKCE.** Verified live against Google's discovery document
 on 2026-08-26: `authorization_endpoint` `https://accounts.google.com/o/oauth2/v2/auth`,
@@ -359,6 +380,8 @@ about you.
 
 ```
 agenda-client.json   0600   { version, clientId, clientSecret }
+                            ^ OUR normalised shape, not Google's download (§2.9): the
+                              nested `installed`/`web` wrapper is parsed away at setup
 agenda.json          0600   { version,
                               accounts:  { "<email>": { refreshToken, addedAt } },
                               calendars: [ { slug, account, calendarId, title, colour, addedAt } ] }
@@ -410,7 +433,7 @@ spikes/agenda-test/run.sh && spikes/notes-test/run.sh && spikes/cockpit-test/run
 **It is the only evidence a session may produce on its own.** All three, not just the first:
 T06 edits `cockpit-welcome.mjs` (covered by `notes-test`) and T07 edits `cockpitd.mjs` (covered
 by `cockpit-test`). Baseline measured 2026-08-26: notes-test 39 assertions ALL PASS,
-cockpit-test 108 assertions ALL PASS. A session that breaks either has broken something it did
+cockpit-test 117 assertions ALL PASS. A session that breaks either has broken something it did
 not mean to touch.
 
 **Dependencies.** **Nothing may be added.** This repository has zero dependencies and no
@@ -482,6 +505,8 @@ Written for somebody under pressure who is not reading the code.
 | Find out whether the company account can connect **first**, as T00 | Build the private-iCal-link fallback up front; ignore the risk | User's call. The fallback is a bearer URL on disk and admins can disable those separately anyway, so it is not a guaranteed escape hatch — not worth building on spec. | 2026-08-26 |
 | The daemon fetches, the pane draws | The pane fetches for itself | `cockpit-welcome.mjs` being pure display is what lets `cockpitd` own it as a diff slot. Network there would not break the machinery today, but it would break the rule the machinery depends on. | 2026-08-26 |
 | Normalising Google's event shape sits on the **pure** side | In the network module, next to the fetch | It is where every rule in §2.4 lives; on the pure side it is exhaustively testable from fixtures. | 2026-08-26 |
+| `agenda setup` takes the **path to Google's download** | Typing the ID and secret; accepting either | User's call 2026-08-27, after T00 found the real file is nested and the plan's assumed flat shape rejected it. A mistyped 72-character secret fails exactly like every other sign-in failure. | 2026-08-27 |
+| A 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` classifies as `auth`, not `gone` | Treating every calendar 403 as `gone` | T00 measured Google's per-scope consent checkbox: an unticked calendar box yields a valid token whose calls 403. `agenda rm` would destroy a working configuration and fix nothing. | 2026-08-27 |
 | Zero dependencies, as the rest of the repo | An OAuth or Google API library | Node 24 has `fetch`, `node:http` and webcrypto; the repo has no package manifest at all and that portability is worth keeping. | 2026-08-26 |
 
 ---

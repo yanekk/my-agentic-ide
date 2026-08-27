@@ -2,6 +2,12 @@
 
 **Phase:** 1 · **Depends on:** T00 · **Weight:** medium
 
+> **Amended 2026-08-27, after T00.** Google's downloaded client JSON is **nested**
+> (`{ "installed": { "client_id", "client_secret" } }`), not the flat `{ clientId, clientSecret }`
+> this doc assumed. That does **not** change this task: `agenda-client.json` still holds our
+> normalised flat shape, and parsing Google's download is T05's job (`agenda setup <path>`,
+> DESIGN §2.9). `writeClient` receives values already normalised. Do not add shape-guessing here.
+
 ## Goal
 
 Everything the agenda knows lives in three files under `~/.claude/cockpit/`: the Google
@@ -34,7 +40,9 @@ export const CLIENT_FILE, STATE_FILE, CACHE_FILE;
 
 // --- the Google registration (agenda-client.json) --------------------------
 readClient()   -> { clientId, clientSecret } | null
-writeClient({ clientId, clientSecret }) -> void        // 0600
+writeClient({ clientId, clientSecret }) -> void        // 0600; values ALREADY normalised
+                                                       // by T05 — this never sees Google's
+                                                       // nested `installed`/`web` wrapper
 
 // --- accounts and calendars (agenda.json) ----------------------------------
 // { version: 1,

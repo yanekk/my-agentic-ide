@@ -71,7 +71,7 @@ Non-obvious, and why:
   conversations. Log the slug, the outcome and the error kind.
 - **Failures must never take the daemon down.** It runs unattended behind a window; the existing
   `uncaughtException` handler is a backstop, not a licence to leave a rejection unhandled.
-- **`spikes/cockpit-test/run.sh` currently passes 108 assertions.** All of them must still pass.
+- **`spikes/cockpit-test/run.sh` currently passes 117 assertions.** All of them must still pass.
 
 ## Tests
 
@@ -92,7 +92,7 @@ Through the existing wezterm-stubbed harness, with the T04 stub standing in for 
 - [ ] the on-return path refreshes a stale calendar and skips a fresh one
 - [ ] a thrown error inside a pass does not kill the daemon — the next tick still runs
 - [ ] no token and no event title appears in the log
-- [ ] **all 108 existing cockpit-test assertions still pass**
+- [ ] **all 117 existing cockpit-test assertions still pass**
 
 ## Done when
 

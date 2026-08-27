@@ -2,6 +2,10 @@
 
 **Phase:** 3 · **Depends on:** T01, T02, T03, T04 · **Weight:** medium
 
+> **Amended 2026-08-27, after T00.** `agenda setup` takes the **path to the JSON Google gave
+> you**, not two typed values, and must parse Google's **nested** shape. The user decided this
+> on 2026-08-27 once the spike found the real file is nested; DESIGN §2.9 and §7 carry it.
+
 ## Goal
 
 The command itself: `agenda add work`, `agenda rm work`, bare `agenda` to see the day. It is
@@ -33,12 +37,26 @@ agenda ls                  the configured calendars, one per line
 agenda add <slug>          sign in if needed, list the account's calendars, pick one
 agenda rm <slug>           detach (exact slug match — no prefixes)
 agenda color <slug>        reroll its colour, preferring an unused one
-agenda setup               paste clientId/clientSecret; runs implicitly when missing
+agenda setup <path>        read Google's downloaded client JSON; prompts for the path
+                           when none is given, and runs implicitly when unconfigured
 agenda help
 
 exit 0  success
 exit 1  anything the user must fix (no registration, unknown slug, refused, sign-in failed)
 ```
+
+`agenda setup` adds one pure function to the model, tested there:
+
+```js
+// bin/cockpit-agenda-model.mjs   — PURE, covered by the T02 forbidden-import check
+parseGoogleClient(text) -> { clientId, clientSecret } | { error }
+  // accepts { installed: {...} }, { web: {...} } and a flat object,
+  // in snake_case or camelCase. Returns { error } — never throws, never guesses.
+```
+
+*Why in the model and not in the store:* it is a pure text-to-shape transform with half a dozen
+failure modes, which is exactly what the pure side is for. It pairs with `normaliseEvent` —
+both turn a Google shape into ours. The store (T01) stays dumb and receives normalised values.
 
 `agenda add <slug>` in order:
 
@@ -69,7 +87,12 @@ Non-obvious, and why:
   disagree about how to get started.
 - **Bare `agenda` renders through `renderAgenda`** at the terminal's width — the same function
   the pane uses, so what you see in a terminal and what you see in the column cannot drift.
-- **`agenda setup` never echoes the client secret** as it is typed and stores it `0600`.
+- **`agenda setup` never echoes the client secret**, never copies or moves the user's download,
+  and stores its own file `0600`. Reading someone's `~/Downloads` and leaving it untouched is the
+  least surprising thing it can do.
+- **A file that parses but has no client id gets a message naming the file**, not "invalid JSON".
+  T00 measured that the real download is nested (FINDINGS 2026-08-27); the failure a user will
+  actually hit is "right file, shape I did not expect", and it must say which file it read.
 
 ## Tests
 
@@ -97,6 +120,14 @@ stubbed. **No test may reach Google or open a browser.**
 - [ ] a failed sign-in leaves **no** partial calendar and no account behind
 - [ ] the client secret never appears in stdout, stderr or any file but `agenda-client.json`
 - [ ] `agenda-client.json` is mode 0600 after `setup`
+- [ ] `agenda setup <path>` reads Google's **nested** `{ installed: { client_id, client_secret } }`
+      and stores the normalised flat shape
+- [ ] it also reads a `{ web: {...} }` wrapper and a flat object, in either key style
+- [ ] `parseGoogleClient` on valid JSON with no client id returns `{ error }` rather than throwing
+- [ ] `parseGoogleClient` on text that is not JSON returns `{ error }` rather than throwing
+- [ ] `agenda setup` on a missing path exits 1 naming the path, and writes nothing
+- [ ] `agenda setup` on an unparseable file names **the file it read** in the message
+- [ ] the user's download is neither modified nor moved
 - [ ] the symlink line in `cockpit-layout.sh` produces a working `agenda` on PATH in the test's
       fake state dir, exactly as the notes test does for `note`
 
