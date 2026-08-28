@@ -103,6 +103,12 @@ function readError(data, status) {
   return { reason: "", code: String(status), detail: "" };
 }
 
+// The three ways Google has been seen to name "your token is valid but was never
+// granted the calendar scope". One regex, because classifyError and describeError
+// must agree about it: the first decides it is `auth`, the second is what makes the
+// column say WHICH auth failure it was.
+const SCOPE_SIGNAL = /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes|insufficientPermissions/i;
+
 /**
  * The one place a failure is given a meaning (DESIGN 2.7).
  *
@@ -131,7 +137,7 @@ export function classifyError(err) {
   // yields a perfectly valid token whose calendar calls 403. The fix is to sign in
   // again and tick it -- so this is `auth`, and must never render `agenda rm`,
   // which would destroy a working configuration and fix nothing.
-  if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes|insufficientPermissions/i.test(text)) return "auth";
+  if (SCOPE_SIGNAL.test(text)) return "auth";
 
   // Google spends 403 on rate limits too, and a rate limit heals itself. Calling
   // it `gone` would tell the user to delete a calendar that is perfectly fine.
@@ -157,12 +163,19 @@ export function classifyError(err) {
  */
 export function describeError(err) {
   const kind = classifyError(err);
-  return {
-    kind,
-    reason: String((err && err.reason) || ""),
-    code: String((err && err.code) || ""),
-    detail: String((err && err.detail) || ""),
-  };
+  let reason = String((err && err.reason) || "");
+  const code = String((err && err.code) || "");
+  const detail = String((err && err.detail) || "");
+  // classifyError reads the raw response body as well; describeError deliberately
+  // does not carry it, because a body can hold tokens and this object is written to
+  // the cache file. So a scope failure whose only signal was in the body would
+  // arrive as a bare `auth` and the column would say "sign-in expired" -- the wrong
+  // sentence for a consent checkbox. Name it in `reason`, which is what the model
+  // greps (FINDINGS 2026-08-28).
+  if (kind === "auth" && !SCOPE_SIGNAL.test(`${reason} ${code} ${detail}`) && SCOPE_SIGNAL.test(String((err && err.body) || ""))) {
+    reason = reason ? `${reason} ACCESS_TOKEN_SCOPE_INSUFFICIENT` : "ACCESS_TOKEN_SCOPE_INSUFFICIENT";
+  }
+  return { kind, reason, code, detail };
 }
 
 // --- http ------------------------------------------------------------------
@@ -350,15 +363,20 @@ export async function signIn({ clientId, clientSecret, openBrowser, origin, time
       // Not the redirect at all (a favicon probe, a stray curl): answer and keep
       // waiting rather than failing the sign-in on someone else's request.
       if (!code && !error) { reply(res, 404, "Nothing here."); return; }
-      if (error) {
-        reply(res, 200, PAGE_BAD);
-        reject(new AgendaError(`sign-in was refused at Google (${error})`, { kind: "flow", reason: error }));
-        return;
-      }
-      // Any local process can hit this port, so the state we minted must come back.
+      // Any local process can hit this port, so the state we minted must come back --
+      // and it is checked on the REDIRECT, before anything in it is believed, not
+      // only on the branch that carries a code. A stray `?error=access_denied` was
+      // otherwise taken at face value and killed the sign-in blaming Google for a
+      // refusal that never happened. RFC 6749 4.1.2.1 requires the state to be echoed
+      // on the error redirect too, so a genuine Deny still reaches the branch below.
       if (got !== state) {
         reply(res, 400, PAGE_BAD);
         reject(new AgendaError("sign-in refused: the redirect carried the wrong state", { kind: "flow", reason: "state_mismatch" }));
+        return;
+      }
+      if (error) {
+        reply(res, 200, PAGE_BAD);
+        reject(new AgendaError(`sign-in was refused at Google (${error})`, { kind: "flow", reason: error }));
         return;
       }
       reply(res, 200, PAGE_OK);

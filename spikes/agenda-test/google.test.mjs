@@ -157,15 +157,37 @@ eq("...and no token exchange is attempted", stub.log.filter((e) => e.path === "/
 eq("...and nothing is left listening", listeners(), before);
 
 // -- the user clicked Deny ---------------------------------------------------
+// Google echoes the state on the error redirect too (RFC 6749 4.1.2.1), so a real
+// Deny carries ours.
 stub.set(() => ({ status: 200, body: {} }));
 const denied = await caught(() => google.signIn({
   ...CLIENT, origin: stub.origin, timeoutMs: 5000,
   openBrowser: async (u) => {
-    const back = new URL(new URL(u).searchParams.get("redirect_uri"));
-    await fetch(`${back.origin}/?error=access_denied&state=x`);
+    const q = new URL(u).searchParams;
+    const back = new URL(q.get("redirect_uri"));
+    await fetch(`${back.origin}/?error=access_denied&state=${encodeURIComponent(q.get("state"))}`);
   },
 }));
 ok("Deny fails cleanly, naming what happened", denied && denied.message.includes("access_denied"), denied && denied.message);
+eq("...with no token call", stub.log.filter((e) => e.path === "/token").length, 0);
+eq("...and nothing left listening", listeners(), before);
+
+// -- a refusal that did not come from Google ---------------------------------
+// The state is checked on the REDIRECT, not only on the branch carrying a code:
+// any local process can hit this port, and one that does with `?error=access_denied`
+// must not be believed and reported as Google turning the user away.
+stub.set(() => ({ status: 200, body: {} }));
+const forged = await caught(() => google.signIn({
+  ...CLIENT, origin: stub.origin, timeoutMs: 5000,
+  openBrowser: async (u) => {
+    const back = new URL(new URL(u).searchParams.get("redirect_uri"));
+    await fetch(`${back.origin}/?error=access_denied&state=not-the-state-we-minted`);
+  },
+}));
+ok("an error redirect with the wrong state is refused as a wrong state",
+  forged && /state/i.test(forged.message), forged && forged.message);
+ok("...and is never reported as Google refusing the sign-in",
+  forged && !/refused at Google/.test(forged.message), forged && forged.message);
 eq("...with no token call", stub.log.filter((e) => e.path === "/token").length, 0);
 eq("...and nothing left listening", listeners(), before);
 
@@ -341,6 +363,30 @@ const drawn = renderAgenda({
 }).join("\n");
 ok("...so the column says the permission, not `agenda rm`", drawn.includes("calendar permission not granted"), drawn);
 ok("...and never tells you to remove a calendar that is fine", !drawn.includes("agenda rm"), drawn);
+
+// The same sentence has to survive a body that names the scope failure somewhere
+// readError does not lift into reason/code/detail. classifyError reads the raw body,
+// but the body is deliberately not carried into the cache (it can hold tokens), so
+// without describeError naming it the column would fall back to "sign-in expired" --
+// right command, wrong sentence.
+const BURIED_SCOPE_403 = { status: 403, body: { error: {
+  code: 403, message: "Forbidden", status: "PERMISSION_DENIED",
+  details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", domain: "googleapis.com",
+              metadata: { service: "calendar-json.googleapis.com", why: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" } }],
+} } };
+stub.set(() => BURIED_SCOPE_403);
+const buried = await caught(eventsCall);
+eq("a scope failure buried in the body still classifies auth", google.classifyError(buried), "auth");
+const buriedDesc = google.describeError(buried);
+ok("...and the cache entry still names the scope, not just the kind",
+  /scope/i.test(`${buriedDesc.reason} ${buriedDesc.code} ${buriedDesc.detail}`), JSON.stringify(buriedDesc));
+ok("...so the column still says the permission", renderAgenda({
+  width: 44, rows: 8, now: NOW, tz: "Europe/Warsaw",
+  calendars: [{ slug: "work", colour: "teal" }],
+  cache: { calendars: { work: { fetchedAt: NOW, events: [], error: buriedDesc } } },
+}).join("\n").includes("calendar permission not granted"), JSON.stringify(buriedDesc));
+ok("...and the body itself never rides into the cache entry",
+  !JSON.stringify(buriedDesc).includes("calendar-json.googleapis.com"), JSON.stringify(buriedDesc));
 
 stub.set(() => ({ status: 404, body: { error: { code: 404, message: "Not Found", errors: [{ reason: "notFound" }] } } }));
 eq("404 on a calendar -- gone", await failing(eventsCall), "gone");
