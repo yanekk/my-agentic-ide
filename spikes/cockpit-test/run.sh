@@ -185,6 +185,18 @@ git -C "$WT2" config user.email t@t; git -C "$WT2" config user.name t
 echo other > "$WT2/other.txt"
 git -C "$WT2" add -A; git -C "$WT2" commit -qm base2
 
+# A directory an agent moves INTO must be a real git repo, because the daemon now
+# skips a non-repo cwd (isGitRepo, commit 2ce144d: an agent left at the projects
+# root has nothing to review). The sections below simulate an agent entering a
+# worktree it just created; a bare mkdir'd dir reads as a non-repo and the daemon
+# rightly refuses to follow it, so these fixtures must be real repos like the real
+# worktrees they stand in for.
+mkrepo() {
+  mkdir -p "$1"; git init -q -b main "$1"
+  git -C "$1" config user.email t@t; git -C "$1" config user.name t
+  git -C "$1" commit -q --allow-empty -m base
+}
+
 # --- stub `claude agents --json` -------------------------------------------
 # Read from a file rather than baked in, so the fleet can lose an agent partway
 # through and the terminal reaper can be observed.
@@ -202,6 +214,23 @@ cat > "$T/bin/claude" <<'CLAUDE'
 CLAUDE
 chmod +x "$T/bin/claude"
 
+# --- test speed -------------------------------------------------------------
+# This suite is dominated by WAITING for the daemon's poll/settle intervals, not
+# by computation: it pokes the daemon, then sleeps a beat for it to react, ~45
+# times. COCKPIT_TEST_SPEED scales BOTH the daemon's internal timers (through
+# COCKPIT_TIME_SCALE, passed below) AND every `nap` the script sleeps, by the same
+# factor -- so a smaller value runs the identical scenario proportionally faster.
+# 1.0 is the original timing (~119s). The default 0.5 was chosen by sweeping down
+# and measuring pass-rate: 0.5 passed every repeat with a steady ~69s (a ~1.7x
+# speedup) and kept margin on the timing-sensitive worktree-migration checks
+# (section 9c). The speedup is sublinear because fixed costs (node startup,
+# subprocess spawns) and a few detach/re-attach waits do NOT scale -- which is what
+# protects those checks from going flaky. Re-run the sweep any time with e.g.
+# `COCKPIT_TEST_SPEED=0.3 bash run.sh`; go lower and section 9c starts to flake.
+SPEED="${COCKPIT_TEST_SPEED:-0.5}"
+# nap N: sleep N seconds scaled by SPEED, with a small floor so it never hits zero.
+nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }
+
 # --- state -----------------------------------------------------------------
 echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$T/state/panes.json"
 : > "$T/state/fleet.log"
@@ -210,12 +239,16 @@ echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$T/state/panes.json
 # sockets under $T and finds none, rather than relinking the real one.
 mkdir -p "$T/home"
 # SHELL is pinned so LOGIN_SHELL's basename ("zsh") matches what the ps stub
-# reports as an idle terminal's foreground process.
-HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS=700 SHELL=/bin/zsh \
+# reports as an idle terminal's foreground process. COCKPIT_REAP_MS is scaled by
+# SPEED like everything else (never below 50ms); COCKPIT_TIME_SCALE scales the
+# daemon's own poll/debounce/settle constants to match the naps below.
+REAP_MS="$(awk -v s="$SPEED" 'BEGIN{ v=700*s; if (v<50) v=50; printf "%d", v }')"
+HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS="$REAP_MS" \
+    COCKPIT_TIME_SCALE="$SPEED" SHELL=/bin/zsh \
     node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
 DPID=$!
 trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
-sleep 1
+sleep 1   # node startup is fixed overhead -- not scaled by SPEED
 
 fail=0
 check() {  # check <description> <pattern> <file>
@@ -236,7 +269,7 @@ echo "== 1. attach: panes retargeted =="
 # The pane now shows an agent; the log line is only a nudge to reconcile sooner.
 echo "test agent" > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] respawnJob abc12345: ok=false alive=true' >> "$T/state/fleet.log"
-sleep 3
+nap 3
 
 check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
 check "revdiff invoked with --wrap --untracked"  "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
@@ -260,7 +293,7 @@ echo
 echo "== 2. review flushed: typed into the fleet pane, unsent =="
 : > "$CALLS"
 printf '## tracked.txt:2 (+)\nthis allocates in a loop\n' > "$T/state/review-abc12345.md"
-sleep 1.5
+nap 1.5
 
 check "sent to the FLEET pane"                   "--pane-id 20" "$CALLS"
 check "annotation text present"                  "this allocates in a loop" "$CALLS"
@@ -271,10 +304,10 @@ echo
 echo "== 3. detach: injection refused while the fleet list is showing =="
 echo list > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] attachJob returned after 2020ms — remounting list' >> "$T/state/fleet.log"
-sleep 2
+nap 2
 : > "$CALLS"
 printf '## tracked.txt:9 (+)\nSHOULD NOT BE SENT\n' >> "$T/state/review-abc12345.md"
-sleep 1.5
+nap 1.5
 
 # Nothing reaches the fleet pane once the list is showing. Two independent
 # mechanisms enforce this and only the first is exercised here: watchers are torn
@@ -290,29 +323,29 @@ echo "== 3b. a SECOND flush injects too (atomic rename must not kill the watch) 
 # path gets a new inode each time. Watching the file rather than its directory
 # fired once and then watched a deleted inode forever -- the second O did nothing.
 echo "test agent" > "$FLEETSTATE"          # re-attach
-sleep 2
+nap 2
 : > "$CALLS"
 printf '## a.txt:1 (+)\nfirst flush\n' > "$T/state/tmp.$$" \
     && mv "$T/state/tmp.$$" "$T/state/review-abc12345.md"
-sleep 1.5
+nap 1.5
 check "first flush injected"                     "first flush" "$CALLS"
 
 : > "$CALLS"
 printf '## a.txt:1 (+)\nfirst flush\n## b.txt:2 (+)\nsecond flush\n' > "$T/state/tmp2.$$" \
     && mv "$T/state/tmp2.$$" "$T/state/review-abc12345.md"
-sleep 1.5
+nap 1.5
 check "second flush injected after rename"       "second flush" "$CALLS"
 
 : > "$CALLS"
 touch "$T/state/review-abc12345.md"        # same content, new mtime = new gesture
-sleep 1.5
+nap 1.5
 check "re-flushing identical content injects"    "second flush" "$CALLS"
 
 echo
 echo "== 4. switch A→B with NO log line: the pane itself is the signal =="
 : > "$CALLS"
 echo "second agent" > "$FLEETSTATE"     # nothing appended to fleet.log
-sleep 3
+nap 3
 
 check "followed to the second agent's worktree"  "cd \"$WT2\"" "$CALLS"
 check "resolved it by the name in the header"    "enter def67890" "$T/daemon.log"
@@ -332,7 +365,7 @@ echo "== 4b. the PARKED agent's diff keeps following its worktree =="
 : > "$CALLS"
 : > "$T/state/review-abc12345.md"          # nothing flushed, so reloading is allowed
 echo "more work by the agent" >> "$WT/tracked.txt"
-sleep 3
+nap 3
 
 check "a reload was sent"                        'STDIN:R\n' "$CALLS"
 check "...to the first agent's PARKED pane"      "send-text --pane-id 31 --no-paste" "$CALLS"
@@ -345,7 +378,7 @@ echo "== 4c. nothing is typed into a pane whose annotation editor is open =="
 : > "$CALLS"
 echo 31 > "$EDITING"
 echo "yet more work" >> "$WT/tracked.txt"
-sleep 3
+nap 3
 
 refute "no reload while a comment is half-typed" "send-text --pane-id 31 --no-paste" "$CALLS"
 check  "and the daemon said why"                 "annotation editor is open" "$T/daemon.log"
@@ -363,7 +396,7 @@ echo "== 5. switching BACK restores both panes (the whole point) =="
 : > "$CALLS"
 echo 31 > "$TITLELAG"
 echo "test agent" > "$FLEETSTATE"
-sleep 3
+nap 3
 
 check "the agent's diff pane is moved back in"   "--move-pane-id 31" "$CALLS"
 check "the agent's terminal is moved back in"    "--move-pane-id 32" "$CALLS"
@@ -384,7 +417,7 @@ echo "== 5b. ⌥] with the diff pane focused switches the diff MODE, not a termi
 : > "$CALLS"
 echo 31 > "$ACTIVE"                       # focus the agent's diff pane (31)
 echo next >> "$T/state/cmd"
-sleep 2
+nap 2
 
 check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
 check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
@@ -396,7 +429,7 @@ echo
 echo "== 5b'. toggling again returns to the uncommitted range =="
 : > "$CALLS"
 echo prev >> "$T/state/cmd"
-sleep 2
+nap 2
 check "back to HEAD -> working tree"              "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "this agent's mode is back to uncommitted"  '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
@@ -406,7 +439,7 @@ echo "== 5c. ⌥] with a TERMINAL focused leaves the diff mode alone =="
 : > "$CALLS"
 echo 32 > "$ACTIVE"                       # focus the agent's terminal, not the diff
 echo next >> "$T/state/cmd"
-sleep 2
+nap 2
 refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
 check  "the mode is untouched"                    '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
@@ -420,7 +453,7 @@ echo "== 5c'. a revdiff flush (O) jumps focus to the agent's Claude pane =="
 : > "$CALLS"
 echo 32 > "$ACTIVE"                       # even from the terminal (the verb only ever comes from revdiff)
 echo focus-claude >> "$T/state/cmd"
-sleep 2
+nap 2
 check "focus moved to the Claude (fleet) pane"    "activate-pane --pane-id 20" "$CALLS"
 refute "did NOT focus the shell pane"             "activate-pane --pane-id 32" "$CALLS"
 
@@ -430,10 +463,10 @@ echo "== 5c''. revdiff is launched with the focus-claude post-flush command =="
 : > "$CALLS"
 echo 31 > "$ACTIVE"                       # focus the diff pane
 echo next >> "$T/state/cmd"               # uncommitted -> last-commit forces a relaunch
-sleep 2
+nap 2
 check "revdiff carries the post-flush hook"       "--post-flush-command \"echo focus-claude >> $T/state/cmd\"" "$CALLS"
 echo prev >> "$T/state/cmd"               # back to uncommitted, restoring state for later sections
-sleep 2
+nap 2
 : > "$ACTIVE"                             # unfocus for the remaining sections
 
 echo
@@ -444,7 +477,7 @@ echo "== 5d. cycling into Custom opens the ASCII prompt, unset revdiff until ans
 : > "$CALLS"
 echo 31 > "$ACTIVE"                       # focus the diff pane
 echo prev >> "$T/state/cmd"               # uncommitted -> custom (custom is last in the cycle)
-sleep 2
+nap 2
 check "the running revdiff was quit first"        "STDIN:q\n" "$CALLS"
 check "the custom-range prompt was launched"      "cockpit-custom-prompt.mjs" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
@@ -457,7 +490,7 @@ echo "== 5d'. answering the prompt launches revdiff against that ref, persisted 
 : > "$CALLS"
 printf '{"jobId":"abc12345","ref":"main"}' > "$T/state/custom-ref-pending"
 echo custom-ok >> "$T/state/cmd"
-sleep 2
+nap 2
 check "revdiff diffs the given ref -> working tree" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" \"main\"" "$CALLS"
 check "...in the agent's OWN diff pane"            "send-text --pane-id 31" "$CALLS"
 check "the per-agent ref was persisted"           "\"abc12345\":\"main\"" "$T/state/custom-refs.json"
@@ -468,15 +501,15 @@ echo "== 5d''. cancelling the prompt reverts to the previous mode =="
 # Leave custom (now the mode is uncommitted), then cycle back in so the prompt
 # opens with uncommitted as the mode to fall back to, and answer with a cancel.
 echo next >> "$T/state/cmd"               # custom -> uncommitted
-sleep 2
+nap 2
 : > "$CALLS"
 echo prev >> "$T/state/cmd"               # uncommitted -> custom, opens the prompt again
-sleep 2
+nap 2
 check "the prompt opened again"                   "cockpit-custom-prompt.mjs" "$CALLS"
 : > "$CALLS"
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
-sleep 2
+nap 2
 check "cancel reverted to the prior mode"         '"diffMode":"uncommitted"' "$T/state/terminals.json"
 check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 
@@ -487,11 +520,11 @@ echo "== 5e. the diff mode is PER AGENT: a new agent is never carried into anoth
 # launched uncommitted and comes back untouched.)
 echo 31 > "$ACTIVE"                       # focus abc12345's diff pane
 echo next >> "$T/state/cmd"               # uncommitted -> last-commit for abc12345 only
-sleep 2
+nap 2
 check "this agent went to last-commit"            '"diffMode":"lastcommit"' "$T/state/terminals.json"
 : > "$CALLS"; : > "$ACTIVE"
 echo "second agent" > "$FLEETSTATE"       # switch to def67890
-sleep 3
+nap 3
 check "the OTHER agent shows the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
 refute "it did NOT inherit last-commit"           "HEAD~1 HEAD" "$CALLS"
 
@@ -499,12 +532,12 @@ echo
 echo "== 5e'. switching back leaves abc12345 in its own last-commit, then reset =="
 : > "$CALLS"
 echo "test agent" > "$FLEETSTATE"         # back to abc12345
-sleep 3
+nap 3
 check "abc12345 kept its own last-commit mode"    '"diffMode":"lastcommit"' "$T/state/terminals.json"
 # Reset to the uncommitted default so the later sections see the default range.
 echo 31 > "$ACTIVE"
 echo prev >> "$T/state/cmd"               # last-commit -> uncommitted
-sleep 2
+nap 2
 check "reset to the uncommitted default"          '"diffMode":"uncommitted"' "$T/state/terminals.json"
 : > "$ACTIVE"                             # unfocus for the remaining sections; back at the uncommitted default
 
@@ -516,19 +549,19 @@ echo "== 5f. clicking a diff-mode label switches the mode regardless of focus ==
 # empty so no pane reads as the focused diff pane, proving focus-independence.
 : > "$CALLS"; : > "$ACTIVE"
 echo diff-lastcommit >> "$T/state/cmd"
-sleep 2
+nap 2
 check "clicked label switched to last-commit while unfocused" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "the mode reflects the clicked label"       '"diffMode":"lastcommit"' "$T/state/terminals.json"
 
 : > "$CALLS"
 echo diff-uncommitted >> "$T/state/cmd"
-sleep 2
+nap 2
 check "clicking Uncommitted returns to that range" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "the mode is back to uncommitted"           '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 : > "$CALLS"
 echo diff-uncommitted >> "$T/state/cmd"           # clicking the ALREADY-active label
-sleep 2
+nap 2
 refute "clicking the active label relaunches nothing" "revdiff --wrap" "$CALLS"
 
 echo
@@ -538,14 +571,14 @@ echo "== 5f'. clicking Custom always (re)opens the ref prompt =="
 # relaunched until the answer comes back.
 : > "$CALLS"
 echo diff-custom >> "$T/state/cmd"
-sleep 2
+nap 2
 check "clicking Custom opened the ref prompt"     "cockpit-custom-prompt.mjs" "$CALLS"
 check "the mode is now custom"                    '"diffMode":"custom"' "$T/state/terminals.json"
 refute "revdiff is NOT relaunched until answered" "revdiff --wrap" "$CALLS"
 # Cancel so state is clean and later sections see the uncommitted default again.
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
-sleep 2
+nap 2
 check "cancel reverted to the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 echo
@@ -559,7 +592,7 @@ echo "== 5g. the strip's [+ add] and [x] buttons manage terminals by number =="
 # zero and leaves that one terminal exactly as it found it.
 : > "$CALLS"
 echo new >> "$T/state/cmd"                        # [+ add]
-sleep 2
+nap 2
 check "[+ add] opened a second terminal"          '"n":2' "$T/state/terminals.json"
 check "opening a terminal was logged"             "opened terminal pane" "$T/daemon.log"
 
@@ -567,7 +600,7 @@ check "opening a terminal was logged"             "opened terminal pane" "$T/dae
 # slot-dance path brings the original sibling back before killing the new one.
 : > "$CALLS"
 echo close-2 >> "$T/state/cmd"
-sleep 2
+nap 2
 check "[x] on the on-screen terminal closed it"   "closed terminal pane" "$T/daemon.log"
 refute "one terminal left after closing #2"       '"n":2' "$T/state/terminals.json"
 
@@ -576,13 +609,13 @@ refute "one terminal left after closing #2"       '"n":2' "$T/state/terminals.js
 # empty, so `prev` cycles terminals, not the diff mode.)
 : > "$CALLS"
 echo new >> "$T/state/cmd"
-sleep 2
+nap 2
 check "a second terminal is open again"           '"n":2' "$T/state/terminals.json"
 echo prev >> "$T/state/cmd"                        # show terminal #1, parking #2
-sleep 2
+nap 2
 : > "$CALLS"
 echo close-2 >> "$T/state/cmd"
-sleep 2
+nap 2
 check "[x] on a PARKED terminal closed it"        "closed parked terminal pane" "$T/daemon.log"
 refute "back to one terminal"                     '"n":2' "$T/state/terminals.json"
 
@@ -590,7 +623,7 @@ refute "back to one terminal"                     '"n":2' "$T/state/terminals.js
 # refused -- the slot must always hold a terminal (mirrors ⌥w).
 : > "$CALLS"
 echo close-1 >> "$T/state/cmd"
-sleep 2
+nap 2
 refute "closing the last terminal killed nothing" "kill-pane" "$CALLS"
 check "refusing to close the last was logged"     "refusing to close the last terminal" "$T/daemon.log"
 
@@ -598,7 +631,7 @@ echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
 : > "$CALLS"
 echo list > "$FLEETSTATE"
-sleep 3
+nap 3
 
 check "repo diff pane moved back into the slot"  "--move-pane-id 10" "$CALLS"
 check "repo shell moved back into the slot"      "--move-pane-id 30" "$CALLS"
@@ -612,7 +645,7 @@ cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$WT","kind":"background",
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
-sleep 3
+nap 3
 
 check "the vanished agent's terminal was killed" "kill-pane --pane-id 34" "$CALLS"
 check "the vanished agent's diff pane too"       "kill-pane --pane-id 33" "$CALLS"
@@ -628,10 +661,10 @@ echo "== 8. a diff pane that dies is rebuilt, at full width =="
 # repairs it: the reconcile poll returns early while the same agent is still
 # showing, so the slot would sit empty until the next switch.
 echo "test agent" > "$FLEETSTATE"
-sleep 3
+nap 3
 : > "$CALLS"
 awk '$1 != 31' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
-sleep 4
+nap 4
 
 check "the loss was noticed"                     "diff pane for abc12345 is gone" "$T/daemon.log"
 check "the slot was rebuilt"                     "rebuilt the diff slot" "$T/daemon.log"
@@ -653,7 +686,7 @@ echo "== 9. an agent that changed directory drags its idle, untouched terminal a
 # but only when it is idle AND still sitting where it was spawned (untouched).
 echo list > "$FLEETSTATE"; sleep 2
 
-MOVED="$T/moved"; mkdir -p "$MOVED"       # where the agent went (its new worktree)
+MOVED="$T/moved"; mkrepo "$MOVED"       # where the agent went (its new worktree)
 echo "32 file://$WT" > "$PANECWD"         # its terminal (pane 32) is still at $WT
 cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$MOVED","kind":"background",
@@ -672,7 +705,7 @@ check "the new dir was typed into the terminal"   'cd "'"$MOVED"'"\n' "$CALLS"
 echo
 echo "== 9b. a BUSY terminal is left where it is (a cd must not land mid-command) =="
 echo list > "$FLEETSTATE"; sleep 2
-MOVED2="$T/moved2"; mkdir -p "$MOVED2"
+MOVED2="$T/moved2"; mkrepo "$MOVED2"
 echo "32 file://$MOVED" > "$PANECWD"       # 32 is now at $MOVED (untouched), still
 echo node > "$PSBUSY"                      # ...but a job is running in it now
 cat > "$AGENTS_JSON" <<JSON
@@ -695,13 +728,17 @@ echo "== 9c. an agent that moves WHILE ATTACHED drags its revdiff along, no re-a
 # the SAME range in the SAME directory. followWorktreeMigration re-reads the live
 # cwd on the same-name poll branch and relaunches revdiff (cd + revdiff) in the new
 # worktree. No `echo list` here: the agent never leaves the fleet header.
-MOVED3="$T/moved3"; mkdir -p "$MOVED3"     # the watch is re-pointed, so it must exist
+MOVED3="$T/moved3"; mkrepo "$MOVED3"     # the watch is re-pointed, so it must exist
 echo "32 file://$MOVED2" > "$PANECWD"      # its terminal sits at the previous worktree
 cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$MOVED3","kind":"background",
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 : > "$CALLS"
+# NOT scaled: followWorktreeMigration re-reads the cwd only once per
+# MIGRATION_CHECK_MS and spawns `claude` each time, so this wait must clear that
+# throttle plus the spawn with margin. Scaled down it shrinks below the throttle
+# and the relaunch is missed (measured: flaky at SPEED 0.5). Fixed 3s is cheap.
 sleep 3
 
 check  "the mid-attach move was noticed"          "moved worktree" "$T/daemon.log"
@@ -715,7 +752,7 @@ echo "== 9d. an agent that moves WHILE PARKED is caught on return, not left stal
 # so its stored launch cwd is compared on return and the parked revdiff (and its
 # watch) is relaunched in the new worktree. Here: detach to the list, move the
 # agent while it is parked, then re-attach.
-MOVED4="$T/moved4"; mkdir -p "$MOVED4"     # the watch is re-pointed on return, so it must exist
+MOVED4="$T/moved4"; mkrepo "$MOVED4"     # the watch is re-pointed on return, so it must exist
 echo list > "$FLEETSTATE"; sleep 2         # park abc12345's diff (last launched at $MOVED3)
 cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$MOVED4","kind":"background",
@@ -739,6 +776,9 @@ DP=$(grep -oE '"diff":[0-9]+' "$T/state/panes.json" | grep -oE '[0-9]+')
 # revdiff), exactly what the daemon sees the moment revdiff exits.
 awk -v p="$DP" '{ if ($1 == p) print $1, $2, "sh"; else print }' "$PANESTATE" > "$PANESTATE.q" \
     && mv "$PANESTATE.q" "$PANESTATE"
+# NOT scaled: healQuitDiff must fire (its own interval), clear the relaunch
+# cooldown, and relaunch. Scaled down this margin got thin and the reinstate was
+# occasionally missed. Fixed 3s keeps it reliable at any SPEED.
 sleep 3
 
 check "the quit was noticed and revdiff reinstated" "reinstated it" "$T/daemon.log"

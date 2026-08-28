@@ -1319,7 +1319,7 @@ function tail(file, onLine) {
     for (const l of lines) onLine(l);
   };
   try { pos = fs.statSync(file).size; ino = fs.statSync(file).ino; } catch {}
-  setInterval(read, 200);
+  setInterval(read, ms(200));
 }
 
 // ---------------------------------------------------------------------------
@@ -1720,7 +1720,7 @@ writeTerminals();   // give the strip its first frame (the repo shell)
 
 // The log only nudges; reconcile() decides.
 tail(FLEET_LOG, (line) => {
-  if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, 250);
+  if (ENTER.test(line) || EXIT.test(line)) setTimeout(reconcile, ms(250));
 });
 // Terminal-management gestures. The WezTerm keybindings append one verb per line
 // (see wezterm/cockpit.lua); tailing reuses the same rotation-safe reader as the
@@ -1769,7 +1769,7 @@ setInterval(healMissingPanes, REAP_MS);
 // Faster than the reap poll: a quit revdiff should come back promptly, not after
 // a reap interval. The cooldown in healQuitDiff keeps this from firing during a
 // launch's draw lag.
-setInterval(healQuitDiff, 1000);
+setInterval(healQuitDiff, ms(1000));
 reconcile();
 
 const shutdown = () => {
