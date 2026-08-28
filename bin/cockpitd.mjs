@@ -43,12 +43,23 @@ const CUSTOM_REFS_FILE = path.join(DIR, "custom-refs.json");
 const CUSTOM_PROMPT = path.join(HERE, "cockpit-custom-prompt.mjs");
 const CUSTOM_PENDING_FILE = path.join(DIR, "custom-ref-pending");
 
+// A uniform scale on every internal poll/debounce/settle interval below, so the
+// integration test can run the daemon "fast" without re-tuning each constant by
+// hand -- the same trick COCKPIT_REAP_MS already applies to the reaper. Defaults to
+// 1 (an unset or bogus value), so production and a plain test run are unchanged;
+// only spikes/cockpit-test dials it down. These intervals wait out real WezTerm
+// latency (a title lags a launch by ~1s, a shell needs a beat to start reading);
+// with WezTerm stubbed those settle instantly, so scaling them for the test loses
+// nothing. Anything below is a *measured* interval -- scale it, never delete it.
+const TIME_SCALE = Number(process.env.COCKPIT_TIME_SCALE) || 1;
+const ms = (base) => Math.round(base * TIME_SCALE);
+
 // Auto-reload the diff while the agent writes. `R` in revdiff drops annotations,
 // but revdiff prompts first (we deliberately do NOT pass --no-confirm-reload), so
 // an auto-reload can never silently destroy work in progress.
 const AUTO_RELOAD = process.env.COCKPIT_AUTO_RELOAD !== "0";
-const RELOAD_DEBOUNCE_MS = 1200;
-const ANNOTATION_DEBOUNCE_MS = 250;
+const RELOAD_DEBOUNCE_MS = ms(1200);
+const ANNOTATION_DEBOUNCE_MS = ms(250);
 // Above this many lines a review is sent as a bracketed paste, which the prompt
 // box collapses to a tidy `[Pasted text +N lines]` chip. Below it, raw newlines
 // keep the text expanded and directly editable.
@@ -155,7 +166,7 @@ const EDITOR_MARKER = "[enter] save";
 const FRAMED_LINES = /^│/gm;
 const FRAMED_ENOUGH = 5;
 /** How long a freshly spawned login shell gets before we type into it. */
-const SHELL_SETTLE_MS = 400;
+const SHELL_SETTLE_MS = ms(400);
 
 /**
  * What is in a diff pane right now.
@@ -342,7 +353,7 @@ const diffLaunchedCwd = new Map();      // jobId -> the worktree its revdiff was
 // healQuitDiff must not mistake a just-launched revdiff for a quit one and type
 // the command in again, where every character is a keybinding.
 const diffLaunchedAt = new Map();
-const DIFF_RELAUNCH_COOLDOWN_MS = 3000;
+const DIFF_RELAUNCH_COOLDOWN_MS = ms(3000);
 
 // The per-agent custom base ref (jobId -> branch/SHA), persisted so an agent
 // keeps its base across cockpit rebuilds. The prompt (openCustomPrompt) is the
@@ -1194,7 +1205,7 @@ function healQuitDiff() {
 // migration. reconcile() runs every POLL_MS, but re-reading the cwd means
 // spawning `claude agents --json`, so the check is throttled to a few seconds
 // rather than run on every heartbeat.
-const MIGRATION_CHECK_MS = 2000;
+const MIGRATION_CHECK_MS = ms(2000);
 let lastMigrationCheck = 0;
 
 /**
@@ -1267,6 +1278,20 @@ async function agents() {
   return JSON.parse(stdout);
 }
 
+/**
+ * Is `dir` inside a git repo? An agent that never had a repo set stays at the
+ * projects root (e.g. ~/git), which has no repo -- revdiff there dies with "no
+ * git, mercurial, or jujutsu repository found" and, relaunched every switch,
+ * turns the diff pane into a crash loop. So such an agent is treated as having
+ * nothing to review: the cockpit keeps its default panes instead of attaching.
+ */
+function isGitRepo(dir) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() === "true";
+  } catch { return false; }
+}
+
 // ---------------------------------------------------------------------------
 // Tail the fleet debug log
 // ---------------------------------------------------------------------------
@@ -1307,6 +1332,11 @@ function tail(file, onLine) {
  * into it there would spawn one instead of commenting. Verified; see RESULTS.md.
  */
 let attached = null;          // { jobId, worktree, reviewFile }
+// An agent shown in the fleet header but left at a non-repo dir (see isGitRepo):
+// there is nothing to review, so we keep the default panes and DO NOT attach.
+// Remembered so reconcile short-circuits instead of re-listing agents every poll
+// while such an agent stays on screen. Cleared on any other agent or the list.
+let unreviewableName = null;
 let watchers = [];            // annotation watch: torn down on every switch
 
 function stopWatchers() {
@@ -1611,7 +1641,7 @@ async function onExit() {
 
 const HEADER = /─{10,}\s+(\S.*?)\s+─/;
 const LIST_MARKER = "describe a task for a new session";
-const POLL_MS = 800;
+const POLL_MS = ms(800);
 
 async function paneState() {
   let text;
@@ -1646,9 +1676,13 @@ async function reconcile() {
     if (!state) return;
 
     if (state.mode === "list") {
+      unreviewableName = null;
       if (attached) await onExit();
       return;
     }
+    // Same non-repo agent still showing: panes are already at their default, so
+    // there is nothing to do -- skip even the `claude agents` list this needs.
+    if (state.name === unreviewableName) return;
     if (attached && attached.name === state.name) {
       // Same agent still showing -- but it may have changed working directory
       // (created and entered a worktree) since we attached. Follow it if so.
@@ -1665,6 +1699,16 @@ async function reconcile() {
       if (hits.length > 1) log(`ambiguous agent name ${JSON.stringify(state.name)}`);
       return;
     }
+    if (!isGitRepo(hits[0].cwd)) {
+      // Agent left at a non-repo dir (e.g. the projects root ~/git): keep the
+      // default cockpit panes (welcome | notes, repo shell) rather than crash-
+      // loop revdiff in a folder with no repo. Park a previously attached agent.
+      log(`agent ${JSON.stringify(state.name)} at non-repo ${hits[0].cwd} -- keeping default panes`);
+      if (attached) await onExit();
+      unreviewableName = state.name;
+      return;
+    }
+    unreviewableName = null;
     await onEnter(hits[0].id, state.name);
   } finally {
     reconciling = false;
