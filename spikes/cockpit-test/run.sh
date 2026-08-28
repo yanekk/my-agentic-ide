@@ -628,6 +628,46 @@ refute "closing the last terminal killed nothing" "kill-pane" "$CALLS"
 check "refusing to close the last was logged"     "refusing to close the last terminal" "$T/daemon.log"
 
 echo
+echo "== 5g'. clicking a terminal's label selects it (select-<n>) =="
+# The strip appends `select-<n>` when a terminal's label area (not its [x]) is
+# clicked -- it shows that terminal outright rather than cycling to it. Driven here
+# by the verb directly, like 5g; the pointer->verb mapping needs a real WezTerm and
+# is verified by hand. Nets to zero: the fresh pane opened here is closed again, so
+# the agent's original terminal (32) is left exactly as found.
+: > "$CALLS"
+echo new >> "$T/state/cmd"                        # a second terminal, now on screen (#2)
+nap 2
+check "a second terminal is open"                 '"n":2' "$T/state/terminals.json"
+
+: > "$CALLS"
+echo select-1 >> "$T/state/cmd"                   # click terminal #1's label
+nap 2
+check "selecting #1 was logged"                   "selected terminal pane" "$T/daemon.log"
+check "terminal #1 is now active"                 '"n":1,"active":true' "$T/state/terminals.json"
+check "terminal #2 is now parked"                 '"n":2,"active":false' "$T/state/terminals.json"
+
+# Selecting the terminal already on screen is a no-op: no slot swap, nothing moves.
+: > "$CALLS"
+echo select-1 >> "$T/state/cmd"
+nap 2
+refute "re-selecting the active terminal moved nothing" "move-pane-id" "$CALLS"
+
+# An out-of-range number names no terminal and is refused, not guessed.
+: > "$CALLS"
+echo select-9 >> "$T/state/cmd"
+nap 2
+check "an out-of-range select is refused"         "no terminal #9" "$T/daemon.log"
+refute "an out-of-range select moved nothing"     "move-pane-id" "$CALLS"
+
+# Bring #2 back and close it, netting the section to zero (leaves terminal 32).
+echo select-2 >> "$T/state/cmd"
+nap 2
+: > "$CALLS"
+echo close-2 >> "$T/state/cmd"
+nap 2
+refute "back to one terminal after 5g'"           '"n":2' "$T/state/terminals.json"
+
+echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
 : > "$CALLS"
 echo list > "$FLEETSTATE"

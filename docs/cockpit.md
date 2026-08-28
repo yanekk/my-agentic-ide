@@ -142,13 +142,19 @@ active one.
 | `⌥[` | `prev`  | Show the previous one (wraps). |
 | `⌥w` | `close` | Close the shown terminal and drop back to a neighbour. The **last** one cannot be closed — the slot must always hold a terminal. |
 
-The strip is also **clickable**, so the same two actions can be reached with the
-mouse: each terminal row carries a right-aligned `[x]` that closes *that* terminal
-(a `close-<n>` verb naming it by number), and a `[+ add]` line below the list opens
-another (the `new` verb, same as `⌥t`). The `[x]` is drawn only when there is more
-than one terminal — the last has none, since closing it is refused anyway. Unlike
-`⌥w`, which closes whatever is on screen, `close-<n>` can name a **parked**
-terminal, so the daemon closes it without the slot-dance a visible one needs. The
+The strip is also **clickable**, so the actions can be reached with the mouse:
+clicking a terminal row's **label area** makes that terminal active (a `select-<n>`
+verb naming it by number), each row carries a right-aligned `[x]` that closes *that*
+terminal (a `close-<n>` verb), and a `[+ add]` line below the list opens another
+(the `new` verb, same as `⌥t`). The label's select zone stops one column short of
+`[x]`, so a click is never both. The `[x]` is drawn only when there is more than one
+terminal — the last has none, since closing it is refused anyway (a lone terminal's
+whole row is still its select zone, though selecting the only terminal is a no-op).
+Unlike `⌥[`/`⌥]`, which *cycle* to the neighbouring terminal, `select-<n>` jumps
+straight to any one — parked or shown; like `close-<n>`, and unlike
+`⌥w`, which closes whatever is on screen, it names a **parked** terminal outright,
+so the daemon can bring it back (or, for close, kill it) without needing it on
+screen first. The
 click→verb mapping is the same mechanism as the footer's clickable diff-mode labels
 (`enableMouse`, SGR mouse reporting scoped to the strip's own pane); the strip needs
 the click's **row** as well as its column, since it is a column of rows.
@@ -465,7 +471,7 @@ spikes/cockpit-test/run.sh
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
 throwaway git repos, and drives attach → review → switch → switch back → detach →
-reap. 82 assertions. Beyond the review-injection ones it asserts that entering an
+reap. 134 assertions. Beyond the review-injection ones it asserts that entering an
 agent *opens* a terminal and a diff pane in its worktree rather than `cd`-ing or
 restarting shared ones, that switching *parks* both outgoing panes instead of
 killing them, that switching back *moves the same panes in* — with **no revdiff

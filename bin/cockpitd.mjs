@@ -736,6 +736,19 @@ async function terminalCommand(verb, attempt = 0) {
       parkPane(anchor, key, cockpitTab);
       entry.cur = entry.panes.indexOf(incoming);
       log(`switched to terminal pane ${incoming} for ${key}`);
+    } else if (/^select-\d+$/.test(verb)) {
+      // `select-<n>` (clicking a terminal's label in the strip) shows that
+      // 1-indexed terminal outright, rather than cycling to it like next/prev.
+      const idx = Number(/^select-(\d+)$/.exec(verb)[1]) - 1;
+      if (idx < 0 || idx >= entry.panes.length) return log(`no terminal #${idx + 1} for ${key}`);
+      if (idx === entry.cur || anchor === undefined) return;   // already shown, or no slot to swap
+      const incoming = entry.panes[idx];
+      if (insertIntoSlot(anchor, { moveId: incoming }, cockpitTab) === undefined) {
+        return removeTerminal(entry, incoming);
+      }
+      parkPane(anchor, key, cockpitTab);
+      entry.cur = entry.panes.indexOf(incoming);
+      log(`selected terminal pane ${incoming} for ${key}`);
     } else if (verb === "close" || /^close-\d+$/.test(verb)) {
       if (entry.panes.length < 2) return log(`refusing to close the last terminal for ${key}`);
       // `close-<n>` (a strip [x]) names a 1-indexed terminal; bare `close` (⌥w) is
@@ -1755,6 +1768,9 @@ tail(CMD_FILE, (line) => {
   // names the terminal outright, so unlike ⌥w it can close a parked one, not only
   // the one on screen.
   if (/^close-\d+$/.test(verb)) { terminalCommand(verb); return; }
+  // Clicking a terminal's label area in the strip appends this; like close-<n> it
+  // names the terminal outright, so it can jump straight to any one, not just cycle.
+  if (/^select-\d+$/.test(verb)) { terminalCommand(verb); return; }
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
   // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.

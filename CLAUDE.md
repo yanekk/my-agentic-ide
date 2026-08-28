@@ -44,12 +44,14 @@ handed never reads like one you wrote.
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
-another, `⌥[` / `⌥]` cycle, `⌥w` closes. The strip is also **clickable**: each
-terminal row carries a right-aligned `[x]` that closes that one (by number, so a
-parked terminal can be closed too, not only the shown one), and a `[+ add]` line
-below the list opens another — the same click→verb-on-the-`cmd`-channel path as the
-footer's diff-mode labels. The last terminal has no `[x]` (closing it is refused
-anyway). Every terminal of every agent keeps
+another, `⌥[` / `⌥]` cycle, `⌥w` closes. The strip is also **clickable**: clicking a
+terminal row's label makes that terminal active (a `select-<n>` verb naming it by
+number — so a click jumps straight to any terminal, parked or not, where `⌥[`/`⌥]`
+would have to cycle); each row also carries a right-aligned `[x]` that closes that
+one (by number, so a parked terminal can be closed too, not only the shown one),
+and a `[+ add]` line below the list opens another — the same
+click→verb-on-the-`cmd`-channel path as the footer's diff-mode labels. The last
+terminal has no `[x]` (closing it is refused anyway). Every terminal of every agent keeps
 running while parked, so all of them resume mid-flight on a return, not just the
 one that was on screen. A thin full-width **footer** along the bottom always shows
 that key legend, so the gestures are discoverable without memorising them.
@@ -106,7 +108,7 @@ bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (82 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (134 assertions)
 spikes/notes-test/      the `note` command and the notes column (39 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,

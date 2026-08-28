@@ -28,8 +28,9 @@ import { execFileSync } from "node:child_process";
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
 // The command channel the daemon tails. Both display modes append verbs here on a
-// click -- the footer a `diff-<mode>`, the strip a `new` (the [+ add] button) or
-// `close-<n>` (a terminal's [x]) -- the same channel the ⌥ keybindings and the
+// click -- the footer a `diff-<mode>`, the strip a `new` (the [+ add] button),
+// `close-<n>` (a terminal's [x]) or `select-<n>` (a terminal's label area) -- the
+// same channel the ⌥ keybindings and the
 // custom prompt use, so the daemon owns every actual pane change.
 const CMD_FILE = path.join(DIR, "cmd");
 const FOOTER = process.argv[2] === "footer";
@@ -269,9 +270,15 @@ function renderStrip() {
         const label = base.length > budget ? base.slice(0, budget) : base;
         const pad = " ".repeat(Math.max(1, cols - label.length - CLOSE.length));
         out += row(`${label}${pad}${CLOSE}`, t.active);
+        // The row splits into two disjoint buttons: the label area selects that
+        // terminal, and [x] at the right edge closes it. Select stops one column
+        // short of [x] so a click never means both.
+        zones.push({ action: "select", n: t.n, row: rowNum, start: 1, end: cols - CLOSE.length });
         zones.push({ action: "close", n: t.n, row: rowNum, start: cols - CLOSE.length + 1, end: cols });
       } else {
         out += row(base, t.active);
+        // A lone terminal has no [x], so its whole row is the select button.
+        zones.push({ action: "select", n: t.n, row: rowNum, start: 1, end: cols });
       }
       rowNum++;
     }
@@ -284,16 +291,18 @@ function renderStrip() {
   process.stdout.write(out);
 }
 
-// A left-click at pane-local (x, y) on the strip: [x] on a terminal row closes that
-// terminal by its number, [+ add] opens a new one. Both hand the daemon a verb on
-// the shared command channel, so it owns the actual pane change (a raw split here
-// would make an untracked pane the daemon then has to shuffle around).
+// A left-click at pane-local (x, y) on the strip: a terminal row's label area makes
+// that terminal active, its [x] closes it by number, and [+ add] opens a new one.
+// All hand the daemon a verb on the shared command channel, so it owns the actual
+// pane change (a raw split here would make an untracked pane the daemon then has to
+// shuffle around).
 function onStripClick(x, y) {
   const z = stripZones.find((z) => z.row === y && x >= z.start && x <= z.end);
   if (!z) return;
   try {
     if (z.action === "add") fs.appendFileSync(CMD_FILE, "new\n");
     else if (z.action === "close") fs.appendFileSync(CMD_FILE, `close-${z.n}\n`);
+    else if (z.action === "select") fs.appendFileSync(CMD_FILE, `select-${z.n}\n`);
   } catch { /* daemon re-reads on the next click */ }
 }
 
