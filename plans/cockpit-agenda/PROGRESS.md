@@ -8,18 +8,20 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T04 implemented, awaiting review. `bin/cockpit-agenda-google.mjs` is the whole of
-the wire: loopback+PKCE sign-in, token refresh, `calendarList`, `events`, and `classifyError`
-— the one place a failure is given a meaning. Every test runs against a loopback stub;
-measured under a network-denied sandbox, all three suites pass with outbound traffic blocked.
-Measured after rebasing onto `2ce144d`: agenda-test **404** ALL PASS, notes-test **39** ALL
-PASS — and **cockpit-test is RED**, 116 ok / **11 FAIL**. **That breakage is not T04's**: it
-reproduces at `2ce144d` with T04 absent, and bisects to that commit (`2390851` before it is
-green at 126). T04 touches nothing it tests. Nothing is waiting on the user.
+**Status:** T04 is reviewed and done, and Phase 2 is complete: `bin/cockpit-agenda-google.mjs`
+is the whole of the wire — loopback+PKCE sign-in, token refresh, `calendarList`, `events`, and
+`describeError`, the one place a failure is given a meaning. The review found **two defects,
+both fixed**: the redirect's `state` was checked only on the branch carrying a code, and
+`describeError` dropped a scope signal `classifyError` had read from the response body.
+Re-measured this session, all three suites ALL PASS with outbound traffic denied: agenda-test
+**412**, notes-test **39**, cockpit-test **134**. **`cockpit-test` is green again** — `f180213`
+fixed the fixtures `2ce144d` broke, so the red-baseline warning is retired and T07 is
+unblocked. Nothing is waiting on the user; the module has never been run against the real
+Google, which is T08's job.
 **Last updated:** 2026-08-28
-**Next `pir-work` will:** **review T04**. It is the only 🔍 and the review queue's sole entry.
-**Read the top FINDINGS row first:** the reviewer will meet a red cockpit-test that T04 did not
-cause and must not be asked to fix.
+**Next `pir-work` will:** **implement T05**, the `agenda` command — the lowest ⬜ whose
+dependencies (T01–T04) are all ✅. **Read the top two FINDINGS rows first:** the cockpit-test
+baseline is now **134 and green**, and the cache's `error` contract is `describeError(err)`.
 
 ## Tasks
 
@@ -32,7 +34,7 @@ done · ⛔ blocked, needs a human.
 | T01 | State files, lock, atomic writes, modes | T00 | ✅ | Reviewed; **one defect fixed**: `withLock` was not reentrant, so a compound write took 5035ms *and* dropped the lock mid-transaction. Harness's real-dir and dependency guards hardened — both read stronger than they were. All four deviations approved. 60 → **65** assertions. Probed: readState never throws on junk, quarantine races, 10-way concurrency. |
 | T02 | Normalise Google events; choose what shows | T00 | ✅ | Reviewed; **two defects fixed**: a `responseStatus` naming an Object property returned a *function* as `reply`, and an offset-less `dateTime` was read in the **machine's** zone — a §3.1 leak the grep cannot see. All four deviations approved. 157 → **163**. Probed: junk `now`, reversed and zero-length events, input mutation, +12:45 zones; grep re-armed by hand. |
 | T03 | Draw the column | T01, T02 | ✅ | Reviewed; **three defects fixed**, all lines escaping the `rows`/`width` contract: the **header was never clipped** (over-width below 11 cols, and the sweep started at 12); **two rows could both wear `NOW`** (one Google event id spans calendars — now compared by identity); an **event title could write control sequences** into the pane (a newline painted a 7th line out of 6). All seven deviations approved. 288 → **300**. Probed: narrow widths, wrapping loud lines vs `agendaHeight`, escape smuggling. |
-| T04 | Google client — OAuth, refresh, REST | T01 | 🔍 | Built `cockpit-agenda-google.mjs` + `google.test.mjs`; 300 → **404**. Deviations: no store import (task's own "Done when"); added `describeError`, `pkceChallenge`, per-call `timeoutMs`, optional `now`; `openBrowser` required, no default; `listCalendars` paginates too; rate-limit/429 → `network`. Two new run.sh guards, both proven to bite. |
+| T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ⬜ | |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ⬜ | Touches `cockpit-welcome.mjs`; `notes-test` must stay green. |
 | T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
@@ -42,7 +44,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T04** — the Google client.
+**Review queue:** *(empty — T05 is next, and it is an implementation.)*
 
 ## Blocked on the user
 
