@@ -142,7 +142,18 @@ active one.
 | `⌥[` | `prev`  | Show the previous one (wraps). |
 | `⌥w` | `close` | Close the shown terminal and drop back to a neighbour. The **last** one cannot be closed — the slot must always hold a terminal. |
 
-The keybindings do not move panes themselves. Each appends one verb to
+The strip is also **clickable**, so the same two actions can be reached with the
+mouse: each terminal row carries a right-aligned `[x]` that closes *that* terminal
+(a `close-<n>` verb naming it by number), and a `[+ add]` line below the list opens
+another (the `new` verb, same as `⌥t`). The `[x]` is drawn only when there is more
+than one terminal — the last has none, since closing it is refused anyway. Unlike
+`⌥w`, which closes whatever is on screen, `close-<n>` can name a **parked**
+terminal, so the daemon closes it without the slot-dance a visible one needs. The
+click→verb mapping is the same mechanism as the footer's clickable diff-mode labels
+(`enableMouse`, SGR mouse reporting scoped to the strip's own pane); the strip needs
+the click's **row** as well as its column, since it is a column of rows.
+
+The keybindings and the clicks do not move panes themselves. Each appends one verb to
 `~/.claude/cockpit/cmd`; the daemon tails that file (the same rotation-safe reader
 as the fleet log) and does every swap, so every terminal stays tracked and
 parked. A raw `SplitPane` binding — what `⌥t` used to be — makes an untracked pane

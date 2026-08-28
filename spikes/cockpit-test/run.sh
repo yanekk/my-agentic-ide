@@ -549,6 +549,52 @@ sleep 2
 check "cancel reverted to the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 echo
+echo "== 5g. the strip's [+ add] and [x] buttons manage terminals by number =="
+# The strip appends `new` ([+ add]) and `close-<n>` (a terminal's [x]) to the cmd
+# channel; like 5f these name the action outright, so they are driven here by
+# writing the verb directly (the click->verb mapping itself needs a real WezTerm
+# pointer and is verified by hand). abc12345 is attached with its one terminal.
+# Every open/close below is of a FRESH pane -- the agent's original terminal (32,
+# leaned on by later sections) is never the one killed -- so the section nets to
+# zero and leaves that one terminal exactly as it found it.
+: > "$CALLS"
+echo new >> "$T/state/cmd"                        # [+ add]
+sleep 2
+check "[+ add] opened a second terminal"          '"n":2' "$T/state/terminals.json"
+check "opening a terminal was logged"             "opened terminal pane" "$T/daemon.log"
+
+# close-2 targets the terminal ON SCREEN (the one just added, now current): the
+# slot-dance path brings the original sibling back before killing the new one.
+: > "$CALLS"
+echo close-2 >> "$T/state/cmd"
+sleep 2
+check "[x] on the on-screen terminal closed it"   "closed terminal pane" "$T/daemon.log"
+refute "one terminal left after closing #2"       '"n":2' "$T/state/terminals.json"
+
+# Add another, switch BACK to #1, then close-2 -- terminal #2 is now PARKED (not on
+# screen), so the no-slot-dance path just kills it and keeps #1 shown. ($ACTIVE is
+# empty, so `prev` cycles terminals, not the diff mode.)
+: > "$CALLS"
+echo new >> "$T/state/cmd"
+sleep 2
+check "a second terminal is open again"           '"n":2' "$T/state/terminals.json"
+echo prev >> "$T/state/cmd"                        # show terminal #1, parking #2
+sleep 2
+: > "$CALLS"
+echo close-2 >> "$T/state/cmd"
+sleep 2
+check "[x] on a PARKED terminal closed it"        "closed parked terminal pane" "$T/daemon.log"
+refute "back to one terminal"                     '"n":2' "$T/state/terminals.json"
+
+# The last terminal has no [x] in the strip, but a stray close-<n> must still be
+# refused -- the slot must always hold a terminal (mirrors ⌥w).
+: > "$CALLS"
+echo close-1 >> "$T/state/cmd"
+sleep 2
+refute "closing the last terminal killed nothing" "kill-pane" "$CALLS"
+check "refusing to close the last was logged"     "refusing to close the last terminal" "$T/daemon.log"
+
+echo
 echo "== 6. back to the list: the repo shell returns, agents keep running =="
 : > "$CALLS"
 echo list > "$FLEETSTATE"

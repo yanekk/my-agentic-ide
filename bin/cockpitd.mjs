@@ -725,19 +725,34 @@ async function terminalCommand(verb, attempt = 0) {
       parkPane(anchor, key, cockpitTab);
       entry.cur = entry.panes.indexOf(incoming);
       log(`switched to terminal pane ${incoming} for ${key}`);
-    } else if (verb === "close") {
+    } else if (verb === "close" || /^close-\d+$/.test(verb)) {
       if (entry.panes.length < 2) return log(`refusing to close the last terminal for ${key}`);
-      if (anchor === undefined) return;
-      // Show a sibling (the previous one, or the next if this is the first), then
-      // kill the pane being closed -- restoring collapses the split and the
-      // sibling inherits the slot before the closed pane goes.
-      const nextIdx = entry.cur > 0 ? entry.cur - 1 : 1;
-      const incoming = entry.panes[nextIdx];
-      insertIntoSlot(anchor, { moveId: incoming }, cockpitTab);
-      wez(["kill-pane", "--pane-id", String(anchor)]);
-      removeTerminal(entry, anchor);
-      entry.cur = entry.panes.indexOf(incoming);
-      log(`closed terminal pane ${anchor} for ${key} (${entry.panes.length} left)`);
+      // `close-<n>` (a strip [x]) names a 1-indexed terminal; bare `close` (⌥w) is
+      // whichever is on screen.
+      const cm = /^close-(\d+)$/.exec(verb);
+      const target = cm ? entry.panes[Number(cm[1]) - 1] : anchor;
+      if (target === undefined) return cm ? log(`no terminal #${cm[1]} for ${key}`) : undefined;
+      if (target === anchor) {
+        // On screen: show a sibling (the previous one, or the next if this is the
+        // first), then kill the pane being closed -- restoring collapses the split
+        // and the sibling inherits the slot before the closed pane goes.
+        const nextIdx = entry.cur > 0 ? entry.cur - 1 : 1;
+        const incoming = entry.panes[nextIdx];
+        insertIntoSlot(anchor, { moveId: incoming }, cockpitTab);
+        wez(["kill-pane", "--pane-id", String(anchor)]);
+        removeTerminal(entry, anchor);
+        entry.cur = entry.panes.indexOf(incoming);
+        log(`closed terminal pane ${anchor} for ${key} (${entry.panes.length} left)`);
+      } else {
+        // A parked terminal (not on screen): no slot dance -- just kill it. Pin cur
+        // back onto the terminal that IS shown, since removing an earlier index
+        // would otherwise shift the shown one out from under it.
+        const shown = curTermId(key);
+        wez(["kill-pane", "--pane-id", String(target)]);
+        removeTerminal(entry, target);
+        entry.cur = Math.max(0, entry.panes.indexOf(shown));
+        log(`closed parked terminal pane ${target} for ${key} (${entry.panes.length} left)`);
+      }
     } else {
       return;
     }
@@ -1692,6 +1707,10 @@ tail(CMD_FILE, (line) => {
     }
     return;
   }
+  // Clicking a terminal's [x] in the strip appends this (see cockpit-strip.mjs); it
+  // names the terminal outright, so unlike ⌥w it can close a parked one, not only
+  // the one on screen.
+  if (/^close-\d+$/.test(verb)) { terminalCommand(verb); return; }
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
   // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.

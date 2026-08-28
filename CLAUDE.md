@@ -44,7 +44,12 @@ handed never reads like one you wrote.
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
-another, `⌥[` / `⌥]` cycle, `⌥w` closes. Every terminal of every agent keeps
+another, `⌥[` / `⌥]` cycle, `⌥w` closes. The strip is also **clickable**: each
+terminal row carries a right-aligned `[x]` that closes that one (by number, so a
+parked terminal can be closed too, not only the shown one), and a `[+ add]` line
+below the list opens another — the same click→verb-on-the-`cmd`-channel path as the
+footer's diff-mode labels. The last terminal has no `[x]` (closing it is refused
+anyway). Every terminal of every agent keeps
 running while parked, so all of them resume mid-flight on a return, not just the
 one that was on screen. A thin full-width **footer** along the bottom always shows
 that key legend, so the gestures are discoverable without memorising them.

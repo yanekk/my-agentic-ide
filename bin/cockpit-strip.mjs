@@ -27,9 +27,10 @@ import { execFileSync } from "node:child_process";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
-// The command channel the daemon tails. The footer appends a `diff-<mode>` verb
-// here when a diff-mode label is clicked -- the same channel the ⌥[/⌥]
-// keybindings and the custom prompt use, so the daemon owns the actual switch.
+// The command channel the daemon tails. Both display modes append verbs here on a
+// click -- the footer a `diff-<mode>`, the strip a `new` (the [+ add] button) or
+// `close-<n>` (a terminal's [x]) -- the same channel the ⌥ keybindings and the
+// custom prompt use, so the daemon owns every actual pane change.
 const CMD_FILE = path.join(DIR, "cmd");
 const FOOTER = process.argv[2] === "footer";
 
@@ -203,14 +204,17 @@ function onFooterClick(x) {
   try { fs.appendFileSync(CMD_FILE, `diff-${zone.key}\n`); } catch { /* daemon re-reads on the next click */ }
 }
 
-// Turn on mouse reporting and forward left-clicks to onFooterClick. 1000h reports
-// button press/release; 1006h is SGR extended coordinates (unambiguous, and not
-// capped at column 223). This is scoped to the FOOTER's own pane -- it never
-// reaches the Claude pane, whose mouse handling is deliberately left to claude.
-// WezTerm delivers mouse events to the pane under the pointer once that pane has
-// enabled reporting, so the footer is clickable without being the focused pane.
-function enableFooterMouse() {
+// Turn on mouse reporting and forward left-clicks to `onClick(x, y)` (both 1-indexed,
+// pane-local). 1000h reports button press/release; 1006h is SGR extended coordinates
+// (unambiguous, and not capped at column 223). This is scoped to the display pane's
+// own terminal -- it never reaches the Claude pane, whose mouse handling is
+// deliberately left to claude. WezTerm delivers mouse events to the pane under the
+// pointer once that pane has enabled reporting, so the pane is clickable without
+// being focused. The footer needs only the column; the strip needs the row too.
+let mouseOn = false;
+function enableMouse(onClick) {
   process.stdout.write(`${ESC}?1000h${ESC}?1006h`);
+  mouseOn = true;
   if (!process.stdin.isTTY) return;
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -222,10 +226,18 @@ function enableFooterMouse() {
     let m;
     while ((m = re.exec(s))) {
       const b = Number(m[1]);
-      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onFooterClick(Number(m[2]));
+      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onClick(Number(m[2]), Number(m[3]));
     }
   });
 }
+
+// The clickable buttons on the strip as last drawn, rebuilt on every renderStrip:
+// [{ action: "close"|"add", n?, row, start, end }], all 1-indexed and pane-local to
+// match the SGR mouse report. Unlike the footer (one line, column only), the strip
+// is a column of rows, so a hit needs BOTH the row and the column span.
+let stripZones = [];
+const CLOSE = "[x]";                                  // per-terminal remove button
+const ADD = "[+ add]";                                // open-another-terminal button
 
 // --- the strip: a vertical list of the agent's terminals --------------------
 function renderStrip() {
@@ -235,24 +247,63 @@ function renderStrip() {
   const clip = (s) => (s.length > cols ? s.slice(0, cols) : s);
   const row = (s, active) => `${active ? `${ESC}7m` : ""}${clip(s)}${ESC}0m${ESC}K\r\n`;
 
+  const zones = [];
   let out = `${ESC}2J${ESC}H`;                         // clear, cursor home
-  out += `${ESC}1mTERMINALS${ESC}0m${ESC}K\r\n`;
-  out += `${rule}${ESC}K\r\n`;
+  out += `${ESC}1mTERMINALS${ESC}0m${ESC}K\r\n`;       // pane row 1
+  out += `${rule}${ESC}K\r\n`;                         // pane row 2
+  let rowNum = 3;                                      // first terminal lands here
   if (!terminals.length) {
     out += row(" (none)", false);
+    rowNum++;
   } else {
+    // Never offer an [x] on the last terminal: the slot must always hold one, so
+    // the daemon refuses to close it anyway (mirrors ⌥w). Drawing a dead button
+    // would just invite a click that does nothing.
+    const showClose = terminals.length > 1;
     for (const t of terminals) {
-      out += row(`${t.active ? "▶" : " "}${t.n} ${procOf(t.tty) ?? "sh"}`, t.active);
+      const base = `${t.active ? "▶" : " "}${t.n} ${procOf(t.tty) ?? "sh"}`;
+      if (showClose) {
+        // Right-align [x] at the pane's edge; the strip is narrow (~12 cols), so
+        // clip the process name rather than let a long one push [x] off-screen.
+        const budget = cols - CLOSE.length - 1;
+        const label = base.length > budget ? base.slice(0, budget) : base;
+        const pad = " ".repeat(Math.max(1, cols - label.length - CLOSE.length));
+        out += row(`${label}${pad}${CLOSE}`, t.active);
+        zones.push({ action: "close", n: t.n, row: rowNum, start: cols - CLOSE.length + 1, end: cols });
+      } else {
+        out += row(base, t.active);
+      }
+      rowNum++;
     }
   }
+  // A clickable line that opens another terminal, mirroring ⌥t.
+  out += `${ESC}2m${ADD}${ESC}0m${ESC}K\r\n`;
+  zones.push({ action: "add", row: rowNum, start: 1, end: ADD.length });
+
+  stripZones = zones;
   process.stdout.write(out);
+}
+
+// A left-click at pane-local (x, y) on the strip: [x] on a terminal row closes that
+// terminal by its number, [+ add] opens a new one. Both hand the daemon a verb on
+// the shared command channel, so it owns the actual pane change (a raw split here
+// would make an untracked pane the daemon then has to shuffle around).
+function onStripClick(x, y) {
+  const z = stripZones.find((z) => z.row === y && x >= z.start && x <= z.end);
+  if (!z) return;
+  try {
+    if (z.action === "add") fs.appendFileSync(CMD_FILE, "new\n");
+    else if (z.action === "close") fs.appendFileSync(CMD_FILE, `close-${z.n}\n`);
+  } catch { /* daemon re-reads on the next click */ }
 }
 
 const render = FOOTER ? renderFooter : renderStrip;
 
 process.stdout.write(`${ESC}?25l`);                   // hide the cursor
 render();
-if (FOOTER) enableFooterMouse();
+// The footer maps a click to a diff-mode label (column only); the strip to a
+// terminal button (row + column). Both pass through the same reader.
+enableMouse(FOOTER ? (x) => onFooterClick(x) : onStripClick);
 // Watch the state DIR (not the file): the daemon replaces terminals.json
 // atomically, so a file watch would go deaf after the first rename.
 try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json") render(); }); } catch {}
@@ -261,7 +312,7 @@ setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a w
 schedulePin();                                        // the pane may open already oversized
 
 const bye = () => {
-  if (FOOTER) process.stdout.write(`${ESC}?1000l${ESC}?1006l`);   // stop mouse reporting
+  if (mouseOn) process.stdout.write(`${ESC}?1000l${ESC}?1006l`);   // stop mouse reporting
   process.stdout.write(`${ESC}?25h`);
   process.exit(0);
 };
