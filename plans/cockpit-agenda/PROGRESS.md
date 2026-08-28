@@ -14,9 +14,9 @@ symlink `bin/cockpit-layout.sh` relinks on every rebuild. **The feature is now u
 end from a terminal with nothing yet drawn in the pane**, which is what T06 renders and T07
 refreshes. `parseGoogleClient` joined the pure model. Measured this session with outbound
 traffic denied: agenda-test **562** (was 412), notes-test **39**, cockpit-test **134**, all
-ALL PASS. **One half is unverified:** nothing here has run in a live cockpit window, so
-"`agenda` answers in a cockpit terminal and is not a command outside one" is proven only
-against a fake state dir — the live check is with the user.
+ALL PASS. **The hands-on half is done too**, this session: `agenda help` answered in a live
+cockpit terminal and `agenda` was `command not found` outside one — the dated ✅ row at the top
+of FINDINGS is the whole record of it. Nothing is waiting on the user.
 **Last updated:** 2026-08-28
 **Next `pir-work` will:** **review T05**. **Read the top three FINDINGS rows first:** the CLI
 carries three test-only env seams and each has its own guard in `run.sh`; the first fetch after
@@ -36,7 +36,7 @@ done · ⛔ blocked, needs a human.
 | T02 | Normalise Google events; choose what shows | T00 | ✅ | Reviewed; **two defects fixed**: a `responseStatus` naming an Object property returned a *function* as `reply`, and an offset-less `dateTime` was read in the **machine's** zone — a §3.1 leak the grep cannot see. All four deviations approved. 157 → **163**. Probed: junk `now`, reversed and zero-length events, input mutation, +12:45 zones; grep re-armed by hand. |
 | T03 | Draw the column | T01, T02 | ✅ | Reviewed; **three defects fixed**, all lines escaping the `rows`/`width` contract: the **header was never clipped** (over-width below 11 cols, and the sweep started at 12); **two rows could both wear `NOW`** (one Google event id spans calendars — now compared by identity); an **event title could write control sequences** into the pane (a newline painted a 7th line out of 6). All seven deviations approved. 288 → **300**. Probed: narrow widths, wrapping loud lines vs `agendaHeight`, escape smuggling. |
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
-| T05 | The `agenda` command | T01–T04 | 🔍 | The CLI, plus `parseGoogleClient` in the pure model. 412 → **562**. Deviations: no cockpit gate (state is not repo-keyed — the PATH symlink *is* the gate); three test-only env seams (`AGENDA_ORIGIN`/`AGENDA_BROWSER`/`AGENDA_TTY`), each fenced by a new `run.sh` guard, all three proven to bite; slugs refuse whitespace and control characters; ANSI stripped off a pipe; the terminal render capped at 80 columns. Full account in the commit. **Live-cockpit half unverified.** |
+| T05 | The `agenda` command | T01–T04 | 🔍 | The CLI, plus `parseGoogleClient` in the pure model. 412 → **562**. Deviations: no cockpit gate (state is not repo-keyed — the PATH symlink *is* the gate); three test-only env seams (`AGENDA_ORIGIN`/`AGENDA_BROWSER`/`AGENDA_TTY`), each fenced by a new `run.sh` guard, all three proven to bite; slugs refuse whitespace and control characters; ANSI stripped off a pipe; the terminal render capped at 80 columns. Full account in the commit. Publication verified by hand (FINDINGS ✅). |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ⬜ | Touches `cockpit-welcome.mjs`; `notes-test` must stay green. |
 | T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
@@ -49,18 +49,11 @@ message.
 
 ## Blocked on the user
 
-**Waiting: does `agenda` actually answer inside a live cockpit?** Nothing in this session can
-see a WezTerm window, so the symlink is proven only against a fake state dir. The check needs
-no rebuild and kills no agents — in any cockpit terminal:
+*(Empty. T00's hand-verification is recorded in FINDINGS 2026-08-27, T05's in FINDINGS
+2026-08-28. Nothing waiting.)*
 
-```
-ln -sf ~/src/agentic-ide/bin/cockpit-agenda.mjs ~/.claude/cockpit/bin/agenda && agenda help && agenda
-```
-
-Expect the usage, then `AGENDA / no calendars / agenda add home`. Then in a **non-cockpit**
-terminal, `agenda` should be `command not found`. Nothing is written by either command.
-
-*(T00's hand-verification is done, recorded in FINDINGS 2026-08-27.)*
+The user's `~/.claude/cockpit/bin/agenda` symlink was created by hand for that check; every
+cockpit rebuild relinks it anyway, so there is nothing to undo.
 
 Left for the user's own machine, on their own schedule, not blocking anything: the probe's
 `~/.claude/cockpit/probe-client.json` can stay (T04 reuses the same registration) or be
