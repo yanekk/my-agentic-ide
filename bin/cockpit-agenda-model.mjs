@@ -311,3 +311,368 @@ export function chooseEvents(events, now, { tz } = {}) {
 
   return { scope: "empty", allDay: [], timed: [], nowEvent: null };
 }
+
+// --- drawing ---------------------------------------------------------------
+// From here down is T03: the chosen events become the actual lines of the AGENDA
+// section. Still pure -- given the calendars, the cache and a timestamp it returns
+// strings, which is what makes every display rule in DESIGN 2.3, 2.4, 2.7 and 2.8
+// a millisecond test rather than something only a person looking at a pane can
+// confirm.
+//
+// The whole section is ONE call (DESIGN 3.3) and it honours `rows` exactly:
+// returning more corrupts the column below it, returning fewer leaves the pane's
+// previous paint on screen.
+
+const ESC = "\x1b[";
+
+// Visible width ignores the escape sequences, so centring and clipping line up
+// with what is actually on screen. These three live here rather than in
+// cockpit-welcome.mjs (where they started) because both halves of the right column
+// must measure a string identically or the divider between them will not line up.
+export const visibleLen = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "").length;
+export const pad = (s, w) => s + " ".repeat(Math.max(0, w - visibleLen(s)));
+
+/** Clip to `w` VISIBLE columns, marking the cut so a truncated line reads as one. */
+export function clip(s, w) {
+  if (w <= 0) return "";
+  if (visibleLen(s) <= w) return s;
+  // Slicing raw would count escape bytes as columns and could cut one in half,
+  // spilling `[38;5;37m` into the pane. So walk the string, copying escapes for
+  // free and counting only what is drawn.
+  let out = "", seen = 0, styled = false;
+  for (let i = 0; i < s.length; ) {
+    const esc = /^\x1b\[[0-9;]*m/.exec(s.slice(i));
+    if (esc) { out += esc[0]; i += esc[0].length; styled = true; continue; }
+    if (seen >= w - 1) break;
+    out += s[i++]; seen++;
+  }
+  // Reset only if something was actually turned on: a plain string must come back
+  // plain, so a caller can compare it without stripping anything.
+  return `${out}…${styled ? `${ESC}0m` : ""}`;
+}
+
+const dim = (s) => `${ESC}2m${s}${ESC}0m`;
+const bold = (s) => `${ESC}1m${s}${ESC}0m`;
+
+// --- the palette -----------------------------------------------------------
+// Eight mid-brightness 256-colour codes (DESIGN 2.8), deliberately away from both
+// ends of the ramp: the dark end disappears on a dark theme and the light end on a
+// light one, and this cockpit is used on both. Eight distinct hues, so two adjacent
+// calendars never read as the same colour.
+
+export const PALETTE = [
+  { name: "teal", code: "38;5;37" },
+  { name: "blue", code: "38;5;68" },
+  { name: "violet", code: "38;5;99" },
+  { name: "magenta", code: "38;5;133" },
+  { name: "rose", code: "38;5;168" },
+  { name: "amber", code: "38;5;172" },
+  { name: "olive", code: "38;5;100" },
+  { name: "green", code: "38;5;71" },
+];
+
+const CODE_BY_NAME = new Map(PALETTE.map((c) => [c.name, c.code]));
+
+/**
+ * A colour for a new calendar. `rand` is an integer the CALLER produced -- the
+ * model may not reach for randomness any more than it may reach for a clock, and
+ * a colour that changes on every render is not a colour.
+ *
+ * No two configured calendars share one while a free colour remains; past eight,
+ * repeats are allowed rather than refusing to add a ninth calendar (DESIGN 2.8).
+ */
+export function pickColour(takenNames, rand) {
+  const taken = new Set(Array.isArray(takenNames) ? takenNames : []);
+  const free = PALETTE.filter((c) => !taken.has(c.name));
+  const pool = free.length ? free : PALETTE;
+  const n = Number.isFinite(rand) ? Math.trunc(rand) : 0;
+  return pool[((n % pool.length) + pool.length) % pool.length].name;
+}
+
+// --- clock and calendar words ----------------------------------------------
+// Written out rather than asked of Intl: the machine's LOCALE is an environment
+// read exactly as much as its timezone is, and "Wed 26 Aug" must not become
+// "śr. 26 sie" on one machine and not another. The zone still decides WHICH day
+// it is; only the words are ours.
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const two = (n) => String(n).padStart(2, "0");
+
+function hhmm(ts, zone) {
+  const p = partsIn(ts, zone);
+  return `${two(p.hour)}:${two(p.minute)}`;
+}
+
+// Weekday from the civil date in UTC, where 1970-01-01 was a Thursday. Asking a
+// zoned Date for getDay() would answer in the MACHINE's zone.
+function dayLabel({ y, m, d }) {
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return `${WEEKDAYS[wd]} ${d} ${MONTHS[m - 1]}`;
+}
+
+/** "22m ago" -- how old the newest thing on screen is, when a fetch has failed. */
+function ageText(ms) {
+  // Not finite means it has never been fetched at all. A NEGATIVE age is a clock
+  // that jumped backwards, which is not worth a special case: the cache is current
+  // as far as anyone can tell.
+  if (!Number.isFinite(ms)) return "never";
+  const min = Math.floor(Math.max(0, ms) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// --- what a cached error means ---------------------------------------------
+// The cache carries whatever `classifyError` decided (T04): "network" | "auth" |
+// "gone" | "unknown", as a bare string or as an object with a `kind`. Two of those
+// four are permanent -- nothing improves until you act -- and the split is what
+// DESIGN 2.7 hangs the whole unhappy-path behaviour on.
+//
+// "unknown" is drawn as TRANSIENT on purpose. A malformed 200 is not something the
+// user can act on, and 2.7's rule is that a failure is loud only when it names a
+// command that fixes it; shouting "sign-in expired" at a JSON parse error would be
+// both wrong and unactionable.
+
+const LOUD = {
+  // The sign-in itself is dead or was never granted the calendar permission. Both
+  // are fixed by signing in again, and NEITHER may say `agenda rm`: T00 measured
+  // Google's per-scope consent checkbox, and telling someone to remove a calendar
+  // that is perfectly fine would destroy a working configuration and fix nothing.
+  auth: { message: "sign-in expired", fix: (slug) => `agenda add ${slug}` },
+  scope: { message: "calendar permission not granted", fix: (slug) => `agenda add ${slug}` },
+  gone: { message: "calendar gone", fix: (slug) => `agenda rm ${slug}` },
+};
+
+function errorKind(error) {
+  if (!error) return null;
+  const kind = String((typeof error === "string" ? error : error.kind) ?? "").toLowerCase();
+  if (kind === "gone") return "gone";
+  if (kind === "scope") return "scope";
+  if (kind === "auth") {
+    // A 403 carrying ACCESS_TOKEN_SCOPE_INSUFFICIENT classifies as auth (T04) but
+    // has its own wording, so the reason travels beside the kind.
+    const detail = typeof error === "object"
+      ? `${error.reason ?? ""} ${error.code ?? ""} ${error.detail ?? ""}` : "";
+    return /scope/i.test(detail) ? "scope" : "auth";
+  }
+  return "transient";   // network, unknown, and anything a later task invents
+}
+
+// --- the section -----------------------------------------------------------
+
+const BAR = "▌";
+const LABEL_W = 7;          // fits "ALL DAY"; "17:30" and "NOW" pad into it
+const GAP = 2;
+// bar, space, label, the `?` column, gap. Every event row's title starts here, so
+// the titles form one column whether or not a row carries a question mark.
+const PREFIX_W = 1 + 1 + LABEL_W + 1 + GAP;
+const MIN_TITLE_W = 6;
+
+/** Only what a renderer can safely draw: a title and two finite instants. */
+const usable = (e) => e && typeof e === "object" &&
+  Number.isFinite(e.start) && Number.isFinite(e.end);
+
+/**
+ * The section as blocks, before anything is dropped to fit. A block is one event
+ * and the lines it draws -- the NOW row draws two, and they must be kept or
+ * dropped together or the `until` line would end up orphaned under something else.
+ */
+function compose({ width, calendars, cache, now, tz }) {
+  const zone = zoneOf(tz);
+  const w = Math.max(1, Math.floor(width) || 0);
+  const cals = (Array.isArray(calendars) ? calendars : []).filter((c) => c && c.slug);
+  const entries = (cache && typeof cache === "object" && cache.calendars) || {};
+
+  const head = [];
+  const blocks = [];
+  const trail = [];
+
+  const clock = hhmm(now, zone);
+  head.push(pad(bold("AGENDA"), w - clock.length) + dim(clock));
+
+  if (!cals.length) {
+    // A blank region with no explanation reads as a bug, so say what is missing
+    // and the one command that fixes it (DESIGN 2.6).
+    blocks.push({ events: 0, lines: [dim("no calendars")] });
+    blocks.push({ events: 0, lines: [bold("agenda add home")] });
+    return { head, blocks, trail };
+  }
+
+  // Colours, and how wide the slug column has to be. Capped at a third of the row
+  // so a long slug cannot squeeze the title down to nothing; clipped, not wrapped.
+  const colourOf = new Map(cals.map((c) => [c.slug, CODE_BY_NAME.get(c.colour) ?? ""]));
+  const longest = cals.reduce((n, c) => Math.max(n, c.slug.length), 0);
+  let slugW = Math.min(longest, Math.max(0, Math.floor((w - PREFIX_W) / 3)));
+  let titleW = w - PREFIX_W - (slugW ? slugW + GAP : 0);
+  if (titleW < MIN_TITLE_W) { slugW = 0; titleW = w - PREFIX_W; }
+
+  // Events, in calendar-add order: that order is the only ranking the all-day rows
+  // have (they have no start time to sort by), and chooseEvents takes it from the
+  // order of the array it is handed.
+  const events = [];
+  let stalest = null;
+  let loud = 0;               // calendars replaced by a loud line, not trail LINES
+  for (const cal of cals) {
+    const entry = entries[cal.slug];
+    const kind = errorKind(entry && entry.error);
+    if (kind && kind !== "transient") {
+      // The whole calendar is replaced by one line naming the command that fixes
+      // it. A silent gap in a two-calendar view is indistinguishable from a quiet
+      // day (DESIGN 2.7), which is why this is loud and why the OTHER calendars
+      // keep their rows.
+      const { message, fix } = LOUD[kind];
+      const tag = colourOf.get(cal.slug)
+        ? `${ESC}${colourOf.get(cal.slug)}m${cal.slug}${ESC}0m` : cal.slug;
+      const command = fix(cal.slug);
+      const one = `${tag}  ${message} ${dim("·")} ${bold(command)}`;
+      // The COMMAND is the point of a loud line -- "nothing improves until you act"
+      // is only useful if you can read what to do. `calendar permission not granted`
+      // plus `agenda add work` is 50-odd columns and the right column is nearer 40,
+      // so when it will not fit the command drops to its own line rather than being
+      // clipped away, which would leave a complaint and no remedy.
+      loud++;
+      if (visibleLen(one) <= w) trail.push(one);
+      else {
+        trail.push(clip(`${tag}  ${message}`, w));
+        trail.push(clip(`  ${bold(command)}`, w));
+      }
+      continue;
+    }
+    if (kind === "transient") {
+      // Staleness is reported only when a fetch has actually FAILED. A cache five
+      // minutes old in normal operation is current, and saying "5m ago" every time
+      // would make the line meaningless (DESIGN 2.7).
+      const age = Number.isFinite(entry.fetchedAt) && entry.fetchedAt > 0
+        ? now - entry.fetchedAt : Infinity;
+      if (stalest === null || age > stalest) stalest = age;
+    }
+    for (const e of (entry && Array.isArray(entry.events) ? entry.events : [])) {
+      // The cache key is the authority on which calendar an event came from: the
+      // stored slug could be from before a rename.
+      if (usable(e)) events.push({ ...e, slug: cal.slug });
+    }
+  }
+
+  const showing = cals.length - loud;           // calendars still contributing rows
+  const chosen = chooseEvents(events, now, { tz: zone });
+
+  if (chosen.scope === "empty") {
+    // With every calendar in a permanent error there is nothing to be empty ABOUT:
+    // the loud lines already say why the section has no rows, and "nothing today or
+    // tomorrow" over the top of them would be a claim about a day nobody could see.
+    if (showing > 0) blocks.push({ events: 0, lines: [dim("nothing today or tomorrow")] });
+  } else {
+    const today = civilIn(now, zone);
+    const day = chosen.scope === "tomorrow" ? shiftCivil(today, 1) : today;
+    // Both scopes are labelled, symmetrically (DESIGN 2.3; the user chose this over
+    // a bare date for today on 2026-08-28). The word is what changes meaning, so it
+    // is the part drawn brightly and the date beside it stays dim.
+    head.push(clip(`${bold(chosen.scope === "tomorrow" ? "TOMORROW" : "TODAY")} ` +
+                   `${dim(`· ${dayLabel(day)}`)}`, w));
+
+    const row = (e, label, labelStyle) => {
+      const code = colourOf.get(e.slug) ?? "";
+      const bar = code ? `${ESC}${code}m${BAR}${ESC}0m` : BAR;
+      // The `?` is its own column, so a row that has one and a row that does not
+      // still start their titles in the same place (DESIGN 2.4). No `✗` is ever
+      // drawn -- declined events never reach here, chooseEvents dropped them.
+      const flag = e.reply === "none" ? "?" : " ";
+      const title = clip(String(e.title ?? ""), titleW);
+      const tail = slugW ? "  " + dim(clip(e.slug, slugW)) : "";
+      return clip(`${bar} ${pad(labelStyle(label), LABEL_W)}${flag}  ` +
+                  `${tail ? pad(title, titleW) : title}${tail}`, w);
+    };
+
+    // All-day rows are pinned above the timed ones: a day off is the single most
+    // schedule-changing fact of the day, and they do not finish until the day does.
+    for (const e of chosen.allDay) blocks.push({ events: 1, lines: [row(e, "ALL DAY", dim)] });
+
+    for (const e of chosen.timed) {
+      const isNow = chosen.nowEvent && e.id === chosen.nowEvent.id;
+      const lines = [row(e, isNow ? "NOW" : hhmm(e.start, zone), isNow ? bold : dim)];
+      if (isNow) {
+        // What you actually want at 14:20 is not the next meeting but when this one
+        // lets you go (DESIGN 2.3).
+        const code = colourOf.get(e.slug) ?? "";
+        const bar = code ? `${ESC}${code}m${BAR}${ESC}0m` : BAR;
+        lines.push(clip(`${bar}   ${dim(`└ until ${hhmm(e.end, zone)}`)}`, w));
+      }
+      blocks.push({ events: 1, lines });
+    }
+  }
+
+  if (stalest !== null) {
+    trail.unshift(clip(dim(`last updated ${ageText(stalest)} · offline`), w));
+  }
+
+  return { head, blocks, trail };
+}
+
+/**
+ * How many lines the section wants if given unlimited room. T06 budgets the right
+ * column with this rather than rendering twice and measuring.
+ */
+export function agendaHeight({ width, calendars, cache, now, tz } = {}) {
+  const { head, blocks, trail } = compose({ width, calendars, cache, now, tz });
+  return head.length + blocks.reduce((n, b) => n + b.lines.length, 0) + trail.length;
+}
+
+/**
+ * THE decision function (DESIGN 3.3). A function of its arguments and nothing
+ * else: the configured calendars, the cached events, a width, a row budget and a
+ * millisecond timestamp in, the exact lines of the AGENDA section out.
+ *
+ * Returns EXACTLY `rows` entries, each at most `width` visible columns. The caller
+ * has already budgeted the column; more would corrupt what is drawn below and
+ * fewer would leave the pane's previous paint showing through.
+ *
+ * `tz` places the day boundaries and the clock. It is a parameter for the same
+ * reason `now` is -- Intl's default zone is an environment read (DESIGN 3.1) -- and
+ * defaults to UTC so a caller who names none gets the same answer on every machine.
+ */
+export function renderAgenda({ width, rows, calendars, cache, now, tz } = {}) {
+  const w = Math.max(1, Math.floor(width) || 0);
+  const n = Math.max(0, Math.floor(rows) || 0);
+  if (n === 0) return [];
+
+  const { head, blocks, trail } = compose({ width: w, calendars, cache, now, tz });
+  const total = blocks.reduce((sum, b) => sum + b.events, 0);
+
+  // Whole blocks only: the NOW row and its `until` line are one event and must be
+  // kept or dropped together. Anything the room cannot take is counted, not
+  // silently forgotten -- stopping at the fold reads as "that is all of them", and
+  // here that would be a false statement about your afternoon (DESIGN 2.3).
+  const fit = (room) => {
+    const lines = [];
+    let shown = 0;
+    for (const b of blocks) {
+      if (lines.length + b.lines.length > room) break;
+      lines.push(...b.lines);
+      shown += b.events;
+    }
+    return { lines, missed: total - shown };
+  };
+
+  // The trailer is reserved before the events are: the one line you can act on
+  // must not be the first thing pushed off the bottom.
+  let room = n - head.length - trail.length;
+  let body = fit(Math.max(0, room));
+  let overflow = null;
+  if (body.missed > 0) {
+    body = fit(Math.max(0, room - 1));
+    if (body.missed > 0) {
+      overflow = clip(`${ESC}2m… +${body.missed} more · ${ESC}0m${bold("agenda")}`, w);
+    }
+  }
+
+  const out = [...head, ...body.lines, ...(overflow ? [overflow] : []), ...trail];
+  // Honoured exactly, in both directions -- including a pane too short for even the
+  // header, which degrades to whatever fits rather than throwing.
+  while (out.length < n) out.push("");
+  return out.slice(0, n);
+}
