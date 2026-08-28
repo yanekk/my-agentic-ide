@@ -8,16 +8,14 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T03 reviewed and done. The drawing half of `bin/cockpit-agenda-model.mjs` is
-closed: `PALETTE`, `pickColour`, `agendaHeight`, `renderAgenda` and the `visibleLen`/`pad`/`clip`
-helpers T06 imports back. The review found **three defects, all fixed** — every one of them a
-way a line escaped the two guarantees `renderAgenda` sells (exactly `rows` entries, each at
-most `width` columns). All seven recorded deviations were checked and approved. Measured:
-agenda-test **300**, notes-test **39**, cockpit-test **117**, all ALL PASS. Nothing is waiting
-on the user.
+**Status:** T04 implemented, awaiting review. `bin/cockpit-agenda-google.mjs` is the whole of
+the wire: loopback+PKCE sign-in, token refresh, `calendarList`, `events`, and `classifyError`
+— the one place a failure is given a meaning. Every test runs against a loopback stub;
+measured under a network-denied sandbox, all three suites pass with outbound traffic blocked.
+Measured: agenda-test **404**, notes-test **39**, cockpit-test **117**, all ALL PASS. Nothing
+is waiting on the user.
 **Last updated:** 2026-08-28
-**Next `pir-work` will:** **implement T04** (Google client — OAuth, refresh, REST). The review
-queue is empty and T04 is the lowest-numbered ⬜ whose dependency (T01) is ✅.
+**Next `pir-work` will:** **review T04**. It is the only 🔍 and the review queue's sole entry.
 
 ## Tasks
 
@@ -30,7 +28,7 @@ done · ⛔ blocked, needs a human.
 | T01 | State files, lock, atomic writes, modes | T00 | ✅ | Reviewed; **one defect fixed**: `withLock` was not reentrant, so a compound write took 5035ms *and* dropped the lock mid-transaction. Harness's real-dir and dependency guards hardened — both read stronger than they were. All four deviations approved. 60 → **65** assertions. Probed: readState never throws on junk, quarantine races, 10-way concurrency. |
 | T02 | Normalise Google events; choose what shows | T00 | ✅ | Reviewed; **two defects fixed**: a `responseStatus` naming an Object property returned a *function* as `reply`, and an offset-less `dateTime` was read in the **machine's** zone — a §3.1 leak the grep cannot see. All four deviations approved. 157 → **163**. Probed: junk `now`, reversed and zero-length events, input mutation, +12:45 zones; grep re-armed by hand. |
 | T03 | Draw the column | T01, T02 | ✅ | Reviewed; **three defects fixed**, all lines escaping the `rows`/`width` contract: the **header was never clipped** (over-width below 11 cols, and the sweep started at 12); **two rows could both wear `NOW`** (one Google event id spans calendars — now compared by identity); an **event title could write control sequences** into the pane (a newline painted a 7th line out of 6). All seven deviations approved. 288 → **300**. Probed: narrow widths, wrapping loud lines vs `agendaHeight`, escape smuggling. |
-| T04 | Google client — OAuth, refresh, REST | T01 | ⬜ | Tests hit a loopback stub, never Google. |
+| T04 | Google client — OAuth, refresh, REST | T01 | 🔍 | Built `cockpit-agenda-google.mjs` + `google.test.mjs`; 300 → **404**. Deviations: no store import (task's own "Done when"); added `describeError`, `pkceChallenge`, per-call `timeoutMs`, optional `now`; `openBrowser` required, no default; `listCalendars` paginates too; rate-limit/429 → `network`. Two new run.sh guards, both proven to bite. |
 | T05 | The `agenda` command | T01–T04 | ⬜ | |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ⬜ | Touches `cockpit-welcome.mjs`; `notes-test` must stay green. |
 | T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
@@ -40,7 +38,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty).*
+**Review queue:** **T04** — the Google client.
 
 ## Blocked on the user
 

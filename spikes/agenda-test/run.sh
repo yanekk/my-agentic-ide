@@ -93,6 +93,26 @@ foreign="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/bin/cockpit-agenda-store.m
   | grep -oE "[\"'][^\"']+[\"']" | grep -vcE "^[\"']node:")"
 same "the store imports nothing outside node:*"   "$foreign" "0"
 
+# DESIGN 5 again, for the one module that is ALLOWED to reach the network: it may
+# use node: builtins and the built-in fetch, and nothing else. Same extraction as
+# above, so a new import of a library fails here rather than at run time on a
+# freshly cloned machine.
+GOOGLE="$ROOT/bin/cockpit-agenda-google.mjs"
+if [ -f "$GOOGLE" ]; then
+  gforeign="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$GOOGLE" \
+    | grep -oE "(from|import|require)[[:space:]]*\(?[[:space:]]*[\"'][^\"']+[\"']" \
+    | grep -oE "[\"'][^\"']+[\"']" | grep -vcE "^[\"']node:")"
+  same "the google client imports nothing outside node:*" "$gforeign" "0"
+
+  # The seatbelt that matters for THIS module (DESIGN 5.2): every test points it at
+  # a loopback stub. A test that quietly aimed at Google would open a real socket,
+  # burn a real quota and fail on a train -- and would be invisible in a green run,
+  # because a passing network call looks exactly like a passing stub call.
+  offbox="$(grep -oE "origin: *[^,)}]+" "$HERE"/*.test.mjs 2>/dev/null \
+    | grep -vE "origin: *(stub\.origin|\`http://127\.0\.0\.1)" | wc -l | tr -d ' ')"
+  same "no test points the client anywhere but loopback" "$offbox" "0"
+fi
+
 # DESIGN 3.1: the pure module may not touch the world. It arrives with T02 --
 # until then this says so out loud rather than passing silently.
 MODEL="$ROOT/bin/cockpit-agenda-model.mjs"
