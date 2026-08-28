@@ -637,5 +637,83 @@ section("34. no secrets, no browser, no internet");
   eq("...the broken file is kept", fs.readdirSync(dir).filter((f) => f.includes("corrupt-")).length, 1);
 }
 
+// ===========================================================================
+section("35. what came off the wire is not allowed to draw itself");
+
+{
+  // A calendar title is whatever the person who sent you the invitation typed,
+  // and an account name comes off an id_token. T03's review found three ways such
+  // a string escaped the PANE's drawing; the command draws the same strings into a
+  // TERMINAL, where an ESC retitles the window and a NEWLINE forges a row that
+  // reads exactly like another configured calendar.
+  const dir = freshDir("wire-escapes");
+  const ESC = String.fromCharCode(27), BEL = String.fromCharCode(7);
+  const nasty = `Team ${ESC}]0;PWNED${BEL} call\nFAKE  fake@evil.com  forged`;
+  fs.writeFileSync(path.join(dir, "agenda.json"), JSON.stringify({
+    version: 1, accounts: {},
+    calendars: [{ slug: "work", account: `a@b.c${ESC}[2J`, calendarId: "x", title: nasty, colour: "cyan", addedAt: 1 }],
+  }), { mode: 0o600 });
+
+  const l = await run(["ls"], { dir });
+  eq("`agenda ls` on a hostile title exits 0", l.status, 0);
+  eq("...and still draws exactly one line", l.out.trim().split("\n").length, 1);
+  ok("...with no escape character in it", !l.out.includes(ESC), JSON.stringify(l.out));
+  ok("...the readable part of the title survives", l.out.includes("Team") && l.out.includes("call"), l.out);
+
+  // Bare `agenda` draws the same title through the model AND the account through
+  // the CLI's own per-calendar lines -- both halves have to be safe.
+  const bare = await run([], { dir });
+  eq("bare `agenda` exits 0 on it", bare.status, 0);
+  ok("...printing no escape character either", !bare.out.includes(ESC), JSON.stringify(bare.out));
+
+  const gone = await run(["rm", "work"], { dir });
+  eq("`agenda rm` exits 0", gone.status, 0);
+  ok("...and its confirmation is clean too", !gone.all.includes(ESC), JSON.stringify(gone.all));
+}
+
+{
+  // Google's own error text reaches the terminal by two more routes: the first
+  // fetch after an add, and anything the top-level handler catches.
+  const dir = freshDir("wire-errors");
+  writeClientFile(dir);
+  const ESC = String.fromCharCode(27);
+  stub.set((req) => (req.path.includes("/events")
+    ? { status: 500, body: { error: { message: `boom ${ESC}[2J\nFORGED LINE` } } }
+    : defaultReply(req)));
+  const r = await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  eq("an add whose first fetch fails still exits 0", r.status, 0);
+  ok("...and Google's message cannot draw with it", !r.all.includes(ESC), JSON.stringify(r.all));
+  stub.set(null);
+}
+
+{
+  // `__proto__` is not tidiness. The cache is an object keyed by slug, so storing
+  // an entry under this one sets the object's PROTOTYPE and stores nothing --
+  // the calendar attaches, its events vanish on every fetch, and bare `agenda`
+  // reads Object.prototype back as the entry and dies on `entry.events.length`.
+  const dir = freshDir("proto-slug");
+  writeClientFile(dir);
+  stub.set(null);
+  const r = await run(["add", "__proto__"], { dir, tty: writeTty(dir, "1") });
+  eq("`agenda add __proto__` is refused", r.status, 1);
+  eq("...and nothing is attached", slugs(dir), []);
+  ok("...saying so by name", r.all.includes("__proto__"), r.all);
+
+  // And a state file that already carries one -- hand-edited, or written before
+  // this rule -- must still get an answer. DESIGN 6 sends you to bare `agenda`
+  // when the column looks wrong; dying is the one thing it may not do.
+  const legacy = freshDir("proto-legacy");
+  fs.writeFileSync(path.join(legacy, "agenda.json"), JSON.stringify({
+    version: 1, accounts: {},
+    calendars: [{ slug: "__proto__", account: "a@b.c", calendarId: "x", title: "T", colour: "cyan", addedAt: 1 }],
+  }), { mode: 0o600 });
+  const b = await run([], { dir: legacy });
+  eq("bare `agenda` on a state file that already has one exits 0", b.status, 0);
+  ok("...saying that calendar was never fetched", /never fetched/.test(b.out), b.out);
+  const rmv = await run(["rm", "__proto__"], { dir: legacy });
+  eq("...and it can still be removed", rmv.status, 0);
+  eq("...leaving none", slugs(legacy), []);
+}
+
 stub.stop();
 done();

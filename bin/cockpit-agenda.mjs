@@ -42,7 +42,7 @@ import { spawn } from "node:child_process";
 
 import {
   PALETTE, agendaHeight, dayBounds, normaliseEvent, parseGoogleClient,
-  pickColour, renderAgenda,
+  pickColour, renderAgenda, safeText,
 } from "./cockpit-agenda-model.mjs";
 import {
   CLIENT_FILE, STATE_FILE, putAccount, putCacheEntry, putCalendar, pruneCache,
@@ -58,10 +58,20 @@ const strip = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");
 // stripped -- this is the terminal's own courtesy, and it is also why the slug is
 // drawn beside the colour bar at all (DESIGN 2.8).
 const say = (s = "") => console.log(tty ? s : strip(s));
+// EVERY string that came off the wire goes through this before it is drawn --
+// calendar titles, account emails, Google's own error text. A title is whatever
+// the person who sent you the invitation typed: an ESC in one retitles your
+// window or clears the screen, and a NEWLINE forges a second line that reads
+// exactly like another configured calendar. The pane learned this in T03's
+// review (FINDINGS 2026-08-28); a terminal is no safer, and `strip` cannot help
+// -- it only removes colour, and the damage is done by the sequences it leaves.
+const wire = (s) => safeText(s);
 const dim = (s) => `${ESC}2m${s}${ESC}0m`;
 const bold = (s) => `${ESC}1m${s}${ESC}0m`;
 
 const die = (msg) => { console.error(`agenda: ${msg}`); process.exit(1); };
+// NOTE: callers pass wire()'d text for anything off the wire -- stderr is drawn on
+// the same terminal as stdout and an escape there does the same damage.
 
 const USAGE = `agenda -- today's calendars, in the cockpit's fleet view.
 
@@ -261,18 +271,21 @@ function day() {
   const slugW = Math.max(4, ...calendars.map((c) => c.slug.length));
   const acctW = Math.max(7, ...calendars.map((c) => (c.account || "").length));
   for (const cal of calendars) {
-    const entry = cache.calendars[cal.slug];
+    // hasOwn, not a plain lookup: a slug like `__proto__` in a hand-edited or
+    // older state file would otherwise hand back Object.prototype, and the whole
+    // command would die on it rather than saying that calendar was never fetched.
+    const entry = Object.hasOwn(cache.calendars, cal.slug) ? cache.calendars[cal.slug] : undefined;
     let state;
     if (!entry) state = dim("never fetched");
     else if (entry.error) {
       const kind = typeof entry.error === "string" ? entry.error : entry.error.kind;
-      const why = typeof entry.error === "object" && entry.error.detail ? ` (${entry.error.detail})` : "";
-      state = `${kind}${why}` + (entry.fetchedAt ? dim(` · last good ${ago(NOW - entry.fetchedAt)}`) : "");
+      const why = typeof entry.error === "object" && entry.error.detail ? ` (${wire(entry.error.detail)})` : "";
+      state = `${wire(kind)}${why}` + (entry.fetchedAt ? dim(` · last good ${ago(NOW - entry.fetchedAt)}`) : "");
     } else {
       const n = entry.events.length;
       state = dim(`${n} event${n === 1 ? "" : "s"} · updated ${ago(NOW - entry.fetchedAt)}`);
     }
-    say(`${swatch(cal.colour)} ${cal.slug.padEnd(slugW)}  ${(cal.account || "").padEnd(acctW)}  ${state}`);
+    say(`${swatch(cal.colour)} ${cal.slug.padEnd(slugW)}  ${wire(cal.account || "").padEnd(acctW)}  ${state}`);
   }
 }
 
@@ -286,8 +299,8 @@ function ls() {
   const colW = Math.max(6, ...calendars.map((c) => String(c.colour || "").length));
   const acctW = Math.max(7, ...calendars.map((c) => (c.account || "").length));
   for (const c of calendars) {
-    say(`${swatch(c.colour)} ${c.slug.padEnd(slugW)}  ${String(c.colour || "").padEnd(colW)}  ` +
-        `${(c.account || "").padEnd(acctW)}  ${c.title || ""}`);
+    say(`${swatch(c.colour)} ${c.slug.padEnd(slugW)}  ${wire(c.colour || "").padEnd(colW)}  ` +
+        `${wire(c.account || "").padEnd(acctW)}  ${wire(c.title || "")}`);
   }
 }
 
@@ -328,7 +341,7 @@ async function fetchOnce(cal, client, refreshToken) {
     // the column tell "sign-in expired" from "calendar permission not granted"
     // (FINDINGS 2026-08-28). No response body rides along with it.
     putCacheEntry(cal.slug, { fetchedAt: 0, events: [], error: { ...describeError(e), since: NOW } });
-    say(dim(`  (not fetched yet: ${e.message})`));
+    say(dim(`  (not fetched yet: ${wire(e.message)})`));
     return null;
   }
 }
@@ -340,13 +353,19 @@ async function fetchOnce(cal, client, refreshToken) {
 // it, and one with a control character would be invisible on the screen it has to
 // be read off. Both are refused at the one moment a person can still pick another
 // word -- and the empty string is refused with them.
-const badSlug = (s) => !s || /[\s\p{Cc}]/u.test(s);
+// `__proto__` is refused with them, and not for tidiness: the cache is an OBJECT
+// keyed by slug, so `cache.calendars["__proto__"] = entry` sets that object's
+// PROTOTYPE instead of storing anything. Measured: the calendar attaches, its
+// events are silently dropped on every fetch, and bare `agenda` then reads
+// Object.prototype back as the entry and dies on `entry.events.length` -- the one
+// command DESIGN 6 sends you to when the column looks wrong.
+const badSlug = (s) => !s || s === "__proto__" || /[\s\p{Cc}]/u.test(s);
 
 async function add(slug) {
   refuseIfAgent("add");
   if (!slug) die("`agenda add <slug>` needs a name for the calendar, e.g. `agenda add work`.");
   if (badSlug(slug)) {
-    die(`\`${slug}\` will not do as a slug: no spaces and no control characters.\n` +
+    die(`\`${wire(slug)}\` will not do as a slug: no spaces, no control characters, not \`__proto__\`.\n` +
         `      It is the handle you type at \`agenda rm\`, in full.`);
   }
 
@@ -385,16 +404,16 @@ async function add(slug) {
 
   const account = await connectAccount(fd, state.accounts, client);
   const refreshToken = readState().accounts[account]?.refreshToken;
-  if (!refreshToken) die(`signed in as ${account} but the sign-in was not stored -- nothing was added.`);
+  if (!refreshToken) die(`signed in as ${wire(account)} but the sign-in was not stored -- nothing was added.`);
 
   const { token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
   const items = await listCalendars({ token, origin: ORIGIN });
-  if (!items.length) die(`${account} has no calendars to attach.`);
+  if (!items.length) die(`${wire(account)} has no calendars to attach.`);
 
   say();
-  say(`Which calendar from ${bold(account)}?`);
+  say(`Which calendar from ${bold(wire(account))}?`);
   items.forEach((c, i) => {
-    say(`  ${String(i + 1).padStart(2)}  ${c.summary}` +
+    say(`  ${String(i + 1).padStart(2)}  ${wire(c.summary)}` +
         (c.primary ? dim("  (your own)") : "") +
         (c.accessRole === "freeBusyReader" ? dim("  (free/busy only)") : ""));
   });
@@ -408,7 +427,7 @@ async function add(slug) {
   putCalendar(cal, NOW);
 
   say();
-  say(`${swatch(colour)} ${bold(slug)}  ${chosen.summary}  ${dim(`· ${account} · ${colour}`)}`);
+  say(`${swatch(colour)} ${bold(slug)}  ${wire(chosen.summary)}  ${dim(`· ${wire(account)} · ${colour}`)}`);
   const n = await fetchOnce(cal, client, refreshToken);
   if (n !== null) say(dim(`  ${n} event${n === 1 ? "" : "s"} today and tomorrow.`));
 }
@@ -426,7 +445,7 @@ async function connectAccount(fd, accounts, client) {
   const known = Object.keys(accounts).sort();
   if (known.length) {
     say("Which Google account?");
-    known.forEach((e, i) => say(`  ${String(i + 1).padStart(2)}  ${e}`));
+    known.forEach((e, i) => say(`  ${String(i + 1).padStart(2)}  ${wire(e)}`));
     say(`  ${String(known.length + 1).padStart(2)}  ${dim("a different account (opens a browser)")}`);
     const n = askNumber(fd, known.length + 1, "account number: ");
     if (n <= known.length) return known[n - 1];
@@ -444,7 +463,7 @@ async function connectAccount(fd, accounts, client) {
   // Stored only once the whole flow has succeeded, so an abandoned or refused
   // sign-in leaves no half-connected account behind.
   putAccount(email, refreshToken, NOW);
-  say(`signed in as ${bold(email)}`);
+  say(`signed in as ${bold(wire(email))}`);
   return email;
 }
 
@@ -472,7 +491,7 @@ function rm(slug) {
           ? ` Configured: ${have.join(", ")}. The slug in full -- \`rm\` takes no prefixes.`
           : " None are configured."));
   }
-  say(`${swatch(removed.colour)} ${bold(slug)} ${dim("removed")}  ${removed.title || ""}`);
+  say(`${swatch(removed.colour)} ${bold(slug)} ${dim("removed")}  ${wire(removed.title || "")}`);
 }
 
 function color(slug) {
@@ -519,5 +538,5 @@ try {
   // Anything reaching here is a failure only the user can act on -- a refused
   // sign-in, a dead registration, an unreachable Google. One line and exit 1: a
   // stack trace belongs in the daemon log, not in a person's terminal.
-  die(e && e.message ? e.message : String(e));
+  die(wire(e && e.message ? e.message : String(e)));
 }

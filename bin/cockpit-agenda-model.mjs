@@ -473,7 +473,10 @@ function errorKind(error) {
 // move the cursor or retitle the window. Neither is anything the pane can undo
 // afterwards, so both are removed where the untrusted text enters the drawing.
 // One space each, so the width still counts what is on screen.
-const safe = (s) => String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+// Exported because the `agenda` command draws the same untrusted strings --
+// calendar titles, account emails, Google's own error text -- straight into a
+// terminal, where an ESC and a NEWLINE do exactly what they do in the pane.
+export const safeText = (s) => String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
 
 const BAR = "▌";
 const LABEL_W = 7;          // fits "ALL DAY"; "17:30" and "NOW" pad into it
@@ -540,7 +543,7 @@ function compose({ width, calendars, cache, now, tz }) {
       // day (DESIGN 2.7), which is why this is loud and why the OTHER calendars
       // keep their rows.
       const { message, fix } = LOUD[kind];
-      const slug = safe(cal.slug);
+      const slug = safeText(cal.slug);
       const tag = colourOf.get(cal.slug)
         ? `${ESC}${colourOf.get(cal.slug)}m${slug}${ESC}0m` : slug;
       const command = fix(slug);
@@ -597,8 +600,8 @@ function compose({ width, calendars, cache, now, tz }) {
       // still start their titles in the same place (DESIGN 2.4). No `✗` is ever
       // drawn -- declined events never reach here, chooseEvents dropped them.
       const flag = e.reply === "none" ? "?" : " ";
-      const title = clip(safe(e.title), titleW);
-      const tail = slugW ? "  " + dim(clip(safe(e.slug), slugW)) : "";
+      const title = clip(safeText(e.title), titleW);
+      const tail = slugW ? "  " + dim(clip(safeText(e.slug), slugW)) : "";
       return clip(`${bar} ${pad(labelStyle(label), LABEL_W)}${flag}  ` +
                   `${tail ? pad(title, titleW) : title}${tail}`, w);
     };
