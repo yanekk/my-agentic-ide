@@ -12,10 +12,14 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 the wire: loopback+PKCE sign-in, token refresh, `calendarList`, `events`, and `classifyError`
 — the one place a failure is given a meaning. Every test runs against a loopback stub;
 measured under a network-denied sandbox, all three suites pass with outbound traffic blocked.
-Measured: agenda-test **404**, notes-test **39**, cockpit-test **117**, all ALL PASS. Nothing
-is waiting on the user.
+Measured after rebasing onto `2ce144d`: agenda-test **404** ALL PASS, notes-test **39** ALL
+PASS — and **cockpit-test is RED**, 116 ok / **11 FAIL**. **That breakage is not T04's**: it
+reproduces at `2ce144d` with T04 absent, and bisects to that commit (`2390851` before it is
+green at 126). T04 touches nothing it tests. Nothing is waiting on the user.
 **Last updated:** 2026-08-28
 **Next `pir-work` will:** **review T04**. It is the only 🔍 and the review queue's sole entry.
+**Read the top FINDINGS row first:** the reviewer will meet a red cockpit-test that T04 did not
+cause and must not be asked to fix.
 
 ## Tasks
 
