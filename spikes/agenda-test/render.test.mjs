@@ -377,4 +377,62 @@ eq("naming no zone is UTC, not the machine's",
   renderAgenda({ width: W, rows: 14, calendars: CALS, cache: CACHE, now: NOW }).map(plain)[0],
   inUTC[0]);
 
+// ---------------------------------------------------------------------------
+section("23. what the review found");
+
+// `pad` only ever grows a string, so the header -- label plus clock -- was the one
+// line that could come back wider than the pane was told it had. A line over the
+// width wraps, which paints an extra terminal row out of one array entry and
+// pushes everything below the column down: the exact corruption `rows` prevents.
+const narrow = [];
+for (const width of [1, 2, 4, 6, 8, 9, 10, 11]) {
+  for (const l of renderAgenda({ width, rows: 6, calendars: CALS, cache: CACHE, now: NOW, tz: TZ })) {
+    if (visibleLen(l) > width) narrow.push([width, plain(l)]);
+  }
+}
+eq("the header obeys the width too, however narrow the pane", narrow, []);
+eq("...and still returns exactly the rows asked for",
+  renderAgenda({ width: 6, rows: 4, calendars: CALS, cache: CACHE, now: NOW, tz: TZ }).length, 4);
+
+// Google reuses one event id across calendars for the same invitation, so the same
+// meeting on your own calendar and on a shared team calendar you also added (which
+// DESIGN 2.1 exists to allow) arrived with the SAME id. Matching the NOW event by
+// id therefore labelled both rows. DESIGN 2.3 gives the label to one event.
+const twinCals = [{ slug: "work", colour: "teal" }, { slug: "team", colour: "rose" }];
+const twin = (slug) => ({ id: "sameEventId", title: "sprint review", allDay: false, reply: "yes", slug,
+  start: at("2026-08-26T14:00:00+02:00"), end: at("2026-08-26T15:00:00+02:00") });
+const twinned = renderAgenda({ width: W, rows: 10, calendars: twinCals, now: NOW, tz: TZ,
+  cache: cache({ work: { fetchedAt: FRESH, events: [twin("work")], error: null },
+                 team: { fetchedAt: FRESH, events: [twin("team")], error: null } }) }).map(plain);
+eq("one event id on two calendars gets exactly one NOW label",
+  twinned.filter((l) => l.includes("NOW")).length, 1);
+eq("...and exactly one until line", twinned.filter((l) => l.includes("until")).length, 1);
+eq("...while both rows are still drawn", twinned.filter((l) => l.includes("sprint review")).length, 2);
+eq("...the second as an ordinary timed row", /14:00\s+sprint review/.test(rowFor(twinned, "team")), true);
+
+// An event title is whatever whoever invited you typed, and it reaches here off the
+// wire unexamined. A newline paints a SECOND terminal line out of one array entry;
+// an ESC runs as a control sequence in the pane. Neither is anything the pane can
+// undo once it is written.
+const nasty = (title) => renderAgenda({ width: W, rows: 6, calendars: [CALS[0]], now: NOW, tz: TZ,
+  cache: cache({ work: { fetchedAt: FRESH, events: [{ id: "n", title, allDay: false, reply: "yes",
+    slug: "work", start: at("2026-08-26T14:00:00+02:00"), end: at("2026-08-26T15:00:00+02:00") }], error: null } }) });
+
+const newlined = nasty("stand\nup\tmeeting");
+eq("a newline in a title cannot paint an extra terminal line",
+  newlined.join("\n").split("\n").length, newlined.length);
+eq("...and the row still says what the meeting is", has(newlined.map(plain), "stand up"), true);
+eq("a tab cannot widen a row past the pane",
+  newlined.every((l) => visibleLen(l) <= W), true);
+
+// A title carrying its own escape would recolour the cockpit, move the cursor or
+// retitle the window -- from a meeting invitation.
+const escaped = nasty("\x1b[31mRED\x1b]0;pwned\x07 alert");
+eq("a title cannot smuggle a control sequence into the pane",
+  escaped.some((l) => /\x1b\](?:.*?)\x07/.test(l) || l.includes("\x1b[31m")), false);
+eq("...and its visible text survives", has(escaped.map(plain), "RED"), true);
+eq("...with the row's own styling still closed",
+  escaped.filter((l) => l.includes("sprint") || l.includes("RED"))
+    .every((l) => l.endsWith(`\x1b[0m`) || visibleLen(l) <= W), true);
+
 done();

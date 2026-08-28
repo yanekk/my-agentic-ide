@@ -465,6 +465,16 @@ function errorKind(error) {
 
 // --- the section -----------------------------------------------------------
 
+// An event title is whatever the person who sent you the invitation typed, and it
+// arrives from the wire unexamined. Two characters in one would escape the drawing
+// entirely: a NEWLINE paints a second terminal line out of a single array entry --
+// breaking the `rows` contract and pushing the column below it down -- and an ESC
+// runs as a control sequence in the pane, so a title could recolour the cockpit,
+// move the cursor or retitle the window. Neither is anything the pane can undo
+// afterwards, so both are removed where the untrusted text enters the drawing.
+// One space each, so the width still counts what is on screen.
+const safe = (s) => String(s ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+
 const BAR = "▌";
 const LABEL_W = 7;          // fits "ALL DAY"; "17:30" and "NOW" pad into it
 const GAP = 2;
@@ -493,7 +503,11 @@ function compose({ width, calendars, cache, now, tz }) {
   const trail = [];
 
   const clock = hhmm(now, zone);
-  head.push(pad(bold("AGENDA"), w - clock.length) + dim(clock));
+  // Clipped like every other line. `pad` only ever GROWS a string, so below about
+  // eleven columns the label and the clock together are wider than the pane and
+  // this was the one line that could overrun `width` -- which wraps in the pane and
+  // pushes the whole column down, the exact corruption `rows` exists to prevent.
+  head.push(clip(pad(bold("AGENDA"), w - clock.length) + dim(clock), w));
 
   if (!cals.length) {
     // A blank region with no explanation reads as a bug, so say what is missing
@@ -526,9 +540,10 @@ function compose({ width, calendars, cache, now, tz }) {
       // day (DESIGN 2.7), which is why this is loud and why the OTHER calendars
       // keep their rows.
       const { message, fix } = LOUD[kind];
+      const slug = safe(cal.slug);
       const tag = colourOf.get(cal.slug)
-        ? `${ESC}${colourOf.get(cal.slug)}m${cal.slug}${ESC}0m` : cal.slug;
-      const command = fix(cal.slug);
+        ? `${ESC}${colourOf.get(cal.slug)}m${slug}${ESC}0m` : slug;
+      const command = fix(slug);
       const one = `${tag}  ${message} ${dim("·")} ${bold(command)}`;
       // The COMMAND is the point of a loud line -- "nothing improves until you act"
       // is only useful if you can read what to do. `calendar permission not granted`
@@ -582,8 +597,8 @@ function compose({ width, calendars, cache, now, tz }) {
       // still start their titles in the same place (DESIGN 2.4). No `✗` is ever
       // drawn -- declined events never reach here, chooseEvents dropped them.
       const flag = e.reply === "none" ? "?" : " ";
-      const title = clip(String(e.title ?? ""), titleW);
-      const tail = slugW ? "  " + dim(clip(e.slug, slugW)) : "";
+      const title = clip(safe(e.title), titleW);
+      const tail = slugW ? "  " + dim(clip(safe(e.slug), slugW)) : "";
       return clip(`${bar} ${pad(labelStyle(label), LABEL_W)}${flag}  ` +
                   `${tail ? pad(title, titleW) : title}${tail}`, w);
     };
@@ -593,7 +608,12 @@ function compose({ width, calendars, cache, now, tz }) {
     for (const e of chosen.allDay) blocks.push({ events: 1, lines: [row(e, "ALL DAY", dim)] });
 
     for (const e of chosen.timed) {
-      const isNow = chosen.nowEvent && e.id === chosen.nowEvent.id;
+      // Identity, not `id`: chooseEvents hands back the very objects it was given,
+      // so `===` names exactly one row. Google reuses an event id across calendars
+      // for the same invitation, so comparing ids labelled BOTH the copy on your
+      // own calendar and the copy on a shared team calendar `NOW` -- two NOW rows
+      // and two `until` lines, where DESIGN 2.3 gives the label to one event.
+      const isNow = e === chosen.nowEvent;
       const lines = [row(e, isNow ? "NOW" : hhmm(e.start, zone), isNow ? bold : dim)];
       if (isNow) {
         // What you actually want at 14:20 is not the next meeting but when this one
