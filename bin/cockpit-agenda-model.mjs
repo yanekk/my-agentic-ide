@@ -696,3 +696,59 @@ export function renderAgenda({ width, rows, calendars, cache, now, tz } = {}) {
   while (out.length < n) out.push("");
   return out.slice(0, n);
 }
+
+// --- Google's downloaded client JSON ---------------------------------------
+// The other half of "turn a Google shape into ours", beside normaliseEvent: a
+// pure text-to-shape transform with half a dozen failure modes, which is exactly
+// what the pure side is for. The store stays dumb (DESIGN 3.1) and is handed the
+// normalised flat shape; what is on disk is ours, what is read here is Google's.
+//
+// Measured 2026-08-27 (T00, FINDINGS): a Desktop client downloads NESTED --
+//   { "installed": { "client_id": "...", "client_secret": "..." } }
+// -- and a web client uses "web" instead. The plan originally assumed a flat
+// { clientId, clientSecret } and the spike's probe rejected the real file, which
+// is why all three shapes and both key styles are accepted here.
+//
+// It returns { error } and never throws: `agenda setup` is the very first thing a
+// person runs, and a stack trace is a bad first impression of a tool that has not
+// been configured yet. The error names the FAULT; the CLI names the FILE, because
+// the failure actually hit is "right kind of file, wrong shape" or "wrong download
+// out of a folder full of them".
+
+const CLIENT_ID_KEYS = ["client_id", "clientId"];
+const CLIENT_SECRET_KEYS = ["client_secret", "clientSecret"];
+
+function pickKey(obj, names) {
+  for (const n of names) {
+    // hasOwn, not a plain lookup. A parsed JSON object still inherits
+    // Object.prototype, so a file missing the key entirely would hand back
+    // whatever the prototype has -- the same trap `responseStatus` fell into in
+    // T02's review, where a FUNCTION came back as a reply.
+    if (Object.hasOwn(obj, n) && typeof obj[n] === "string" && obj[n].trim()) return obj[n].trim();
+  }
+  return "";
+}
+
+/** Google's client JSON -> { clientId, clientSecret }, or { error }. */
+export function parseGoogleClient(text) {
+  let data;
+  try { data = JSON.parse(String(text ?? "")); }
+  catch { return { error: "that file is not JSON" }; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { error: "that file is JSON, but not an object" };
+  }
+
+  const wrapper = ["installed", "web"]
+    .find((k) => data[k] && typeof data[k] === "object" && !Array.isArray(data[k]));
+  const inner = wrapper ? data[wrapper] : data;
+
+  const clientId = pickKey(inner, CLIENT_ID_KEYS);
+  const clientSecret = pickKey(inner, CLIENT_SECRET_KEYS);
+  // Told apart on purpose: "no client id" means the wrong file, while "no client
+  // secret" means the right file downloaded for the wrong client type, and the two
+  // send you to different places in the console.
+  if (!clientId && !clientSecret) return { error: "no client id and no client secret in it" };
+  if (!clientId) return { error: "no client id in it" };
+  if (!clientSecret) return { error: "no client secret in it" };
+  return { clientId, clientSecret };
+}

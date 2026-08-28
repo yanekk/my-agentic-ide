@@ -55,14 +55,19 @@ command -v claude  >/dev/null || die "claude not on PATH"
 mkdir -p "$DIR"
 FLEET="$WEZTERM_PANE"
 
-# --- the `note` command -----------------------------------------------------
-# Notes are added from any cockpit terminal and from nowhere else. There is no
-# install step and nothing lands on your normal PATH: the command is a symlink in
+# --- the `note` and `agenda` commands ----------------------------------------
+# Both are used from any cockpit terminal and from nowhere else. There is no
+# install step and nothing lands on your normal PATH: each command is a symlink in
 # a directory only the cockpit's own shells ever see. Re-linked on every rebuild,
 # which is also how a moved or renamed checkout repairs itself.
+#
+# `agenda`, not `cal`: /usr/bin/cal already exists, this directory is PREPENDED to
+# PATH, and the agents inherit it -- so a `cal` symlink would shadow the month grid
+# in every cockpit terminal and in every agent (DESIGN 2.2).
 COCKPIT_BIN="$DIR/bin"
 mkdir -p "$COCKPIT_BIN"
 ln -sf "$HERE/cockpit-note.mjs" "$COCKPIT_BIN/note"
+ln -sf "$HERE/cockpit-agenda.mjs" "$COCKPIT_BIN/agenda"
 
 # Exported HERE, before anything is spawned, so it reaches (a) the daemon started
 # below, which passes it on to every terminal it opens, and (b) `claude agents` at

@@ -108,9 +108,20 @@ if [ -f "$GOOGLE" ]; then
   # a loopback stub. A test that quietly aimed at Google would open a real socket,
   # burn a real quota and fail on a train -- and would be invisible in a green run,
   # because a passing network call looks exactly like a passing stub call.
-  offbox="$(grep -oE "origin: *[^,)}]+" "$HERE"/*.test.mjs 2>/dev/null \
-    | grep -vE "origin: *(stub\.origin|\`http://127\.0\.0\.1)" | wc -l | tr -d ' ')"
+  # Case-insensitive, so the CLI's AGENDA_ORIGIN env seam is covered by the same
+  # net as the module's own `origin:` argument -- otherwise a suite that drives the
+  # command rather than the module could point it at Google and slip past.
+  offbox="$(grep -oiE "(agenda_)?origin: *[^,)}]+" "$HERE"/*.test.mjs 2>/dev/null \
+    | grep -viE "origin: *(stub\.origin|\`http://127\.0\.0\.1)" | wc -l | tr -d ' ')"
   same "no test points the client anywhere but loopback" "$offbox" "0"
+
+  # Two more of the same kind, for the CLI's other two seams. A browser is the one
+  # side effect a test cannot take back, and a prompt read from the REAL terminal
+  # would block the suite forever on a machine with a person at it.
+  browsers="$(grep -oE "AGENDA_BROWSER: *[^,)}]+" "$HERE"/*.test.mjs 2>/dev/null \
+    | grep -vE "AGENDA_BROWSER: *FAKE_BROWSER" | wc -l | tr -d ' ')"
+  same "no test can open a real browser"                 "$browsers" "0"
+  same "no test reads the real terminal"                 "$(grep -lF '/dev/tty' "$HERE"/*.test.mjs 2>/dev/null | wc -l | tr -d ' ')" "0"
 fi
 
 # DESIGN 3.1: the pure module may not touch the world. It arrives with T02 --
@@ -124,6 +135,28 @@ if [ -f "$MODEL" ]; then
 else
   echo "  --   the pure model does not exist yet (T02 adds it); its boundary check is skipped"
 fi
+
+echo
+echo "== 12. the agenda command exists inside the cockpit and nowhere else =="
+# Published exactly the way `note` is, and asserted through the REAL line out of
+# bin/cockpit-layout.sh rather than a copy of it: a copy drifts, and the drift
+# would be a command that quietly stopped existing after a rebuild.
+LINK_LINE="$(grep -F 'ln -sf "$HERE/cockpit-agenda.mjs"' "$ROOT/bin/cockpit-layout.sh" | head -1)"
+same "cockpit-layout.sh publishes it"  "$([ -n "$LINK_LINE" ] && echo yes || echo no)" "yes"
+
+S="$T/publish"; mkdir -p "$S/bin"
+HERE_BIN="$ROOT/bin"
+( HERE="$HERE_BIN" COCKPIT_BIN="$S/bin"; eval "$LINK_LINE" )
+same "...as a symlink to the CLI"      "$(readlink "$S/bin/agenda")" "$ROOT/bin/cockpit-agenda.mjs"
+
+# On PATH the way a cockpit shell gets it, and answering: the symlink is the whole
+# of "available inside the cockpit", so a broken one is a missing feature.
+help_out="$(PATH="$S/bin:$PATH" COCKPIT_DIR="$S" agenda help 2>&1)"
+same "...and it answers from PATH" "$(printf '%s' "$help_out" | grep -c 'agenda add <slug>')" "1"
+
+# And nowhere else: no wrapper, no shell function, no edit to anyone's ~/.zshrc.
+same "...while it is not a command outside one" \
+     "$(PATH="/usr/bin:/bin" command -v agenda >/dev/null 2>&1 && echo found || echo absent)" "absent"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
