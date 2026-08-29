@@ -8,19 +8,22 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T06 is implemented and **awaiting review** — the agenda is now on screen, under
-NOTES in the fleet view's right column, and the pane follows the cache without a restart. T07
-(the daemon's refresh) is the only thing between the feature and a column that fills itself in:
-today it draws whatever `agenda` last cached. Measured this session: agenda-test **579**,
-notes-test **39 → 88**, cockpit-test **134**, 801 assertions, three ALL PASS.
-**T06's screen half is closed** — the user looked at the rebuilt cockpit and confirmed the
-divider lines up down the whole pane and the two calendar colours are distinguishable on their
-theme (FINDINGS 2026-08-29). Nothing is waiting on the user.
+**Status:** T06 is **reviewed and done** — the agenda is on screen under NOTES in the fleet
+view's right column, and both halves of the task are closed: the suites are green and the user
+saw the real pane (FINDINGS 2026-08-29). **T07 (the daemon's 60s refresh) is the only thing
+between this and a column that fills itself in**; today it draws whatever `agenda` last cached.
+Measured this session: agenda-test **585**, notes-test **90**, cockpit-test **134** — 809
+assertions, three ALL PASS.
+**Not reviewed as a plan.** This plan carries no `Plan reviewed:` line — it predates the check.
+Six tasks have been built and reviewed clean off it; whether to run `/pir-review-plan` now is the
+user's call, and no session has decided it for them.
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T06**. Read its Notes cell for the eight deviations, and the
-top three FINDINGS rows: the screen half is already confirmed by hand and must not be re-asked;
-the frame harness gained a frozen clock and a `TZ`; and the resting pane can now quarantine a
-corrupt `agenda.json` — the one write this display pane makes.
+**Next `pir-work` will:** **implement T07** — the daemon's 60s tick and the on-return refresh, in
+`cockpitd.mjs`. Before it starts: **clear the throwaway preview agenda** (`rm
+~/.claude/cockpit/agenda.json ~/.claude/cockpit/agenda-cache.json`) or it will test against two
+calendars nobody signed in to; **re-measure `cockpit-test`** (134, and that number has moved four
+times); and read the three newest FINDINGS rows — the daemon must read state with
+`rescue: false`, must not widen the pane's import list, and must not chase the §9d flake.
 
 ## Tasks
 
@@ -35,7 +38,7 @@ done · ⛔ blocked, needs a human.
 | T03 | Draw the column | T01, T02 | ✅ | Reviewed; **three defects fixed**, all lines escaping the `rows`/`width` contract: the **header was never clipped** (over-width below 11 cols, and the sweep started at 12); **two rows could both wear `NOW`** (one Google event id spans calendars — now compared by identity); an **event title could write control sequences** into the pane (a newline painted a 7th line out of 6). All seven deviations approved. 288 → **300**. Probed: narrow widths, wrapping loud lines vs `agendaHeight`, escape smuggling. |
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
-| T06 | Right column: NOTES over AGENDA | T03, T05 | 🔍 | Built: the content-driven row budget, the rule, the bottom-anchored agenda, `agenda.json`/`agenda-cache.json` on the pane's directory watch. notes-test 39 → **88**, all 39 originals kept. Eight deviations, accounted for in the commit: model helpers imported; `tz` passed; scope line per DESIGN §2.3, not the doc's mock-up; §8's frame 16 → 24 rows; harness gained a frozen clock, a `TZ` and a `;` in its escape strip; agenda anchored to the foot; `agendaBlock` catches everything; two guard sections (§10, §11) the doc did not list. Screen half **verified by hand** (FINDINGS 2026-08-29). |
+| T06 | Right column: NOTES over AGENDA | T03, T05 | ✅ | Reviewed; **one defect fixed**: the resting pane called `readState()`, which **quarantines a corrupt `agenda.json`** — so the 2s repaint always won the race and moved the sign-ins aside with nobody to tell, killing DESIGN §2.7's announcement. Now `rescue: false`. All eight deviations approved; 39 originals kept by name. 801 → **809**. Probed: 640 renders across 1–40 rows × 4 widths (exact height, no over-width line, agenda never above notes, notes never below three), hostile event title, store side effects on import. |
 | T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
@@ -43,7 +46,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T06** — the only entry.
+**Review queue:** *(empty — T07 is next, and it implements.)*
 
 ## Blocked on the user
 
