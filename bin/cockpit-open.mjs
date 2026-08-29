@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+// cockpit-open — push a file from broot into the viewer beside it.
+//
+// This is the world-touching half of the push (DESIGN 3.1): it finds the viewer
+// pane, reads what that agent already has open, asks the pure model what to do
+// (cockpit-open-model.mjs), types the bytes into micro's command bar and writes
+// the tab list back. Nothing else in this project types into a pane it does not
+// own, so its REFUSALS matter more than its successes: the same keystrokes landing
+// in a revdiff pane would be a keybinding each.
+//
+//   cockpit-open <file> [line]
+//     exit 0   pushed, or switched to the tab that already holds it
+//     exit 1   refused, one line on stderr saying why
+//
+// It is run by broot's Enter verb (T03), never by hand, and it is deliberately
+// silent on success -- broot stays on screen and focus is never taken.
+//
+// EVERY check happens before the first send. A half-validated push that has
+// already typed `\x05` leaves micro's command bar open with nothing to submit,
+// which is a state the user has to notice and clear.
+//
+// Three keys in panes.json are read and all three must be present (DESIGN 3.4):
+// `viewer` (where to type), `viewerAgent` (the jobId whose tab list this is) and
+// `viewerRoot` (the worktree the tab label is relative to). The daemon publishes
+// them together and nulls them together, so any one missing means it does not
+// believe a viewer is showing -- refuse. Neither `terminals.json.agent` (a display
+// name, not a jobId) nor `panes.json.repo` (the projects root, not a repo root)
+// is a substitute; both were measured, and both are the wrong value.
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+import { planPush } from "./cockpit-open-model.mjs";
+import { withLock } from "./cockpit-agenda-store.mjs";
+
+const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
+const PANES = path.join(DIR, "panes.json");
+const TABS = path.join(DIR, "viewer-tabs.json");
+// Its own lock, not the agenda's: a calendar refresh and a file push have nothing
+// to say to each other and must not queue behind one another (DESIGN 3.5).
+const TABS_LOCK = path.join(DIR, "viewer-tabs.lock");
+
+const die = (msg) => { console.error(`cockpit-open: ${msg}`); process.exit(1); };
+
+// --- what was asked for ----------------------------------------------------
+
+const [rawFile, rawLine] = process.argv.slice(2);
+
+if (rawFile === undefined || rawFile === "") die("usage: cockpit-open <file> [line]");
+
+// A path holding a carriage return would SUBMIT micro's command bar half way
+// through the filename and run whatever the first half happened to spell; a
+// newline is the tamer version of the same accident. The model cannot refuse
+// anything -- it has no channel for it -- so the guard lives here, next to the
+// stat that has to happen anyway (FINDINGS, 2026-08-29).
+if (/[\r\n]/.test(rawFile)) die("path contains a newline or carriage return, refusing to send it");
+
+// A NUMBER, not the string argv hands over: `planPush` drops a non-integer line
+// silently, so parsing here is the difference between the cursor moving and not.
+// Anything unparseable degrades to "no jump" rather than losing the push -- the
+// file still opens, which is most of what was wanted.
+const line = /^\d+$/.test(rawLine ?? "") ? Number(rawLine) : null;
+
+// --- the viewer ------------------------------------------------------------
+
+let panes;
+try {
+  panes = JSON.parse(fs.readFileSync(PANES, "utf8"));
+} catch {
+  // Absent or unparseable both mean the same thing to us: there is no cockpit
+  // whose viewer we can be sure of.
+  die("no readable panes.json — is the cockpit running?");
+}
+
+const viewer = panes?.viewer;
+const viewerAgent = panes?.viewerAgent;
+const viewerRoot = panes?.viewerRoot;
+
+// The pane id has to survive being turned into an argument for `--pane-id`; a
+// string "12" from a hand-edited file is fine, anything else is not a pane.
+const paneId = Number(viewer);
+if (viewer === undefined || viewer === null || !Number.isInteger(paneId) || paneId < 0) {
+  die("no viewer pane — the attached agent is not in browse mode");
+}
+// Without the jobId there is no key to file the tab list under, and writing it
+// under "" would hand the next agent someone else's tabs.
+if (typeof viewerAgent !== "string" || viewerAgent === "") {
+  die("no viewerAgent — the cockpit does not know whose viewer this is");
+}
+if (typeof viewerRoot !== "string" || viewerRoot === "") {
+  die("no viewerRoot — the cockpit does not know which worktree this viewer shows");
+}
+
+// --- the file ---------------------------------------------------------------
+// realpath BOTH sides, and this is the whole reason the model hands the job to its
+// caller (DESIGN 3.1 -- it may not touch the filesystem). broot returns a
+// symlink-resolved path (`/private/var/...` on macOS) while an agent worktree
+// usually is not resolved (`/var/...`); relativising one against the other yields
+// a `../../../../..` chain, and the model deliberately degrades to the absolute
+// path rather than emit one. Resolving both here is what keeps tab labels short.
+let file;
+try {
+  file = fs.realpathSync(rawFile);
+} catch {
+  // micro would cheerfully open an empty buffer named after a file that is gone
+  // (DESIGN 2.n), so say which one instead.
+  die(`no such file: ${rawFile}`);
+}
+// A root that cannot be resolved is not fatal: the push still works, the label is
+// just longer. Losing the push over a cosmetic detail would be the worse trade.
+let root = viewerRoot;
+try { root = fs.realpathSync(viewerRoot); } catch { /* label may be absolute */ }
+
+// --- send, under the lock ---------------------------------------------------
+
+/** Corrupt is treated as empty and rewritten: a lost tab list costs a duplicate tab. */
+function readTabs() {
+  try {
+    const data = JSON.parse(fs.readFileSync(TABS, "utf8"));
+    if (data && typeof data === "object" && !Array.isArray(data)) return data;
+  } catch { /* absent, unreadable or broken */ }
+  return {};
+}
+
+/** Temp file plus rename, as panes.json and notes.json already do. */
+function writeTabs(data) {
+  fs.mkdirSync(DIR, { recursive: true });
+  // The pid keeps two writers off each other's temp file even in the window where
+  // one has just broken the other's stale lock.
+  const tmp = `${TABS}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  fs.renameSync(tmp, TABS);
+}
+
+/**
+ * `--no-paste` because bracketed paste would wrap the text in markers that micro's
+ * command bar reads as literal characters. The payload goes on the command line,
+ * which is the shape the pane probes measured working (spikes/browse-mode).
+ */
+function sendText(payload) {
+  execFileSync("wezterm", [
+    "cli", "send-text", "--pane-id", String(paneId), "--no-paste", payload,
+  ], { stdio: ["ignore", "ignore", "ignore"] });
+}
+
+// The lock covers the send as well as the read-modify-write, and it has to: two
+// pushes landing together (you and an agent, DESIGN 2.n) that both read an empty
+// list would both decide `open`, and the second would replace the first's buffer
+// instead of adding a tab. Serialising the whole transaction is what makes the
+// second one see the first's entry.
+let failure = null;
+withLock(() => {
+  const all = readTabs();
+  const openTabs = Array.isArray(all[viewerAgent]) ? all[viewerAgent] : [];
+  const plan = planPush({ openTabs, file, line, repoRoot: root });
+
+  for (const payload of plan.payloads) {
+    try {
+      sendText(payload);
+    } catch (e) {
+      // The tab list is NOT updated on a failed send. Believing in a tab that was
+      // never opened is the expensive mistake: every later push would `tabswitch`
+      // to a number micro does not have, silently landing on the wrong file.
+      failure = `wezterm send-text failed: ${String(e.message).split("\n")[0]}`;
+      return;
+    }
+  }
+
+  all[viewerAgent] = plan.openTabs;
+  writeTabs(all);
+}, TABS_LOCK);
+
+if (failure) die(failure);
