@@ -11,9 +11,10 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Status:** T07 is **implemented, awaiting review** — the daemon now refreshes the cache on a
 60s tick and on the return to the fleet list, so the column fills itself in. Measured this
 session: agenda-test **585**, notes-test **90**, cockpit-test **134 → 174** — **849** assertions,
-three ALL PASS. **T07's hands-on half is NOT closed**: nothing has been seen refreshing in a
-live cockpit, and no calendar is connected on this machine to see it with. The user chose to do
-that check now rather than leave it to T08 — see *Blocked on the user*.
+three ALL PASS. **T07's hands-on half is CLOSED** — the daemon was seen refreshing a real Google
+calendar on its own, twice, 300s apart, picking up an event created while nobody touched the
+cockpit; no token and no meeting title reached `daemon.log` (FINDINGS 2026-08-29 ✅). Both halves
+of T07 are therefore evidenced; only the review is outstanding.
 **Not reviewed as a plan.** This plan carries no `Plan reviewed:` line — it predates the check.
 Six tasks have been built and reviewed clean off it; whether to run `/pir-review-plan` now is the
 user's call, and no session has decided it for them.
@@ -38,7 +39,7 @@ done · ⛔ blocked, needs a human.
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ✅ | Reviewed; **one defect fixed**: the resting pane called `readState()`, which **quarantines a corrupt `agenda.json`** — so the 2s repaint always won the race and moved the sign-ins aside with nobody to tell, killing DESIGN §2.7's announcement. Now `rescue: false`. All eight deviations approved; 39 originals kept by name. 801 → **809**. Probed: 640 renders across 1–40 rows × 4 widths (exact height, no over-width line, agenda never above notes, notes never below three), hostile event title, store side effects on import. |
-| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half unverified.** |
+| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half verified by hand** — FINDINGS 2026-08-29 ✅. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
@@ -49,23 +50,18 @@ message.
 
 ## Blocked on the user
 
-**T07's hands-on half is open and the user has chosen to do it now** (rather than fold it into
-T08). It needs, in order: a Google desktop-client registration, `agenda setup` + `agenda add` in
-a cockpit terminal — which an agent may not run, `CLAUDECODE` refuses it — and then a **window
-rebuild**, because the running daemon predates this task. The two questions are whether the
-column fills itself in with nobody touching it, and whether `daemon.log` ever contains a token or
-a meeting title (it must not). The exact commands are in the session report.
+*(Empty. T07's hands-on half was done in the session that built it — the user connected a real
+Google calendar and the daemon was watched refreshing it twice, unattended.)*
 
-The rebuild kills every agent pane, so the session that hands this over does not survive it.
-**Whoever gets the answer writes it into FINDINGS as a dated ✅ row** — that row is the entire
-record, and the reviewer cannot re-run it.
-
-Hand-verifications so far: T00 in FINDINGS 2026-08-27, T05 in FINDINGS 2026-08-28, T06 in
+Hand-verifications: T00 in FINDINGS 2026-08-27, T05 in FINDINGS 2026-08-28, T06 and T07 in
 FINDINGS 2026-08-29.
 
-**The T06 preview fixture is already gone** — `~/.claude/cockpit/` holds no `agenda*.json` at
-all, so PROGRESS's old "clear it before T07" instruction is discharged and nothing was deleted.
-Nothing is signed in on this machine, which is why the check above starts at the registration.
+**Now true of this machine**, and worth knowing before T08: a Google desktop client is registered,
+one calendar (`home`) is attached, and `~/.claude/cockpit/` holds live `agenda.json`,
+`agenda-cache.json` and a real refresh token. The T06 fake-calendar fixture is long gone. So a
+session that wants a clean slate must say so rather than assume one — and **whether a *Testing*
+refresh token still works after a week is now a clock that has started**, which is the one open
+risk DESIGN §2.9 already covers either way.
 
 Left for the user's own machine, on their own schedule, not blocking anything: the probe's
 `~/.claude/cockpit/probe-client.json` can stay (T04 reuses the same registration) or be
