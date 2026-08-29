@@ -56,6 +56,15 @@ them into a final report.
 
 **1. Both calendars, for real:**
 
+> **Amended 2026-08-29, the user's decision.** The **work account cannot be used on this
+> machine**, so `agenda add work` — and with it the company half of this block — **moves to the
+> end of the plan**. It is not dropped and it is not assumed. `home` was already attached before
+> T08 began. In its place this block adds a **second calendar from the account already signed
+> in**, which delivers what the later blocks actually need (two colour-coded calendars, so block
+> 5 can show one breaking without the other) and additionally exercises DESIGN §2.1's
+> "reuses the stored sign-in and opens no browser", which no session had ever seen run.
+> FINDINGS 2026-08-29 🔄.
+
 ```
 agenda add home
 agenda add work

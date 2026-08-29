@@ -51,6 +51,15 @@ message.
 **Review queue:** *(empty)* — every implemented task has been reviewed. T08 is next, and it is an
 implementing session.
 
+## Deferred to the end of the plan
+
+**`agenda add work` — the company account cannot be used on this machine** (the user's call,
+2026-08-29, FINDINGS 🔄). It is deferred, not dropped: T00 already proved ✅ that the company
+account *connects*, so what is outstanding is the narrower `agenda add` run against it. T08's
+task sheet is amended in place. Everything else in T08 proceeds on the personal account, with a
+**second calendar added from the sign-in already stored** — which is what gives the later blocks
+the two-calendar column they need.
+
 ## Blocked on the user
 
 *(Empty. T07's hands-on half was done in the session that built it — the user connected a real
