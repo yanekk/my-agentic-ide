@@ -2,6 +2,11 @@
 
 **Phase:** 4 · **Depends on:** T04, T05 · **Weight:** medium
 
+> **Two lines below are superseded; this sheet is kept as the record of what was asked for.**
+> **DESIGN §2.5 is the authority.** (1) The window is **one minute**, not the five named in the
+> Goal and in `AGENDA_STALE_MS` — the user's decision, FINDINGS 2026-08-29. (2) The "and from
+> nowhere else" bullet under *Done when* is amended there, in place.
+
 ## Goal
 
 Keep the cache current. Every five minutes, and also the moment you come back to the fleet list
@@ -98,7 +103,11 @@ Through the existing wezterm-stubbed harness, with the T04 stub standing in for 
 
 - [ ] the full three-suite test command passes with no network access
 - [ ] `refreshAgenda` is called from both the tick and the existing `onExit`, and from nowhere
-      else
+      else — **amended 2026-08-29 by the user: a THIRD call site, `refreshAgenda("start")` at
+      boot, is required and approved.** `onExit` does not fire at window-open (it only runs when
+      an agent *was* attached, and at start-up none is), so the two-site rule cannot deliver
+      DESIGN §2.5's "you opened the window". Seen firing live: `agenda start: home ok`,
+      `daemon.log` 2026-08-29T10:54:42Z.
 - [ ] a cockpit with no calendars configured behaves exactly as it did before this task
 
 ## Needs a person

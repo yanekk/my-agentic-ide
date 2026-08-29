@@ -8,25 +8,24 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T07 is **implemented, awaiting review** — the daemon now refreshes the cache on a
-60s tick and on the return to the fleet list, so the column fills itself in. Measured this
-session: agenda-test **585**, notes-test **90**, cockpit-test **134 → 174** — **849** assertions,
-three ALL PASS. **T07's hands-on half is CLOSED** — the daemon was seen refreshing a real Google
-calendar on its own, twice, 300s apart, picking up an event created while nobody touched the
-cockpit; no token and no meeting title reached `daemon.log` (FINDINGS 2026-08-29 ✅). Both halves
-of T07 are therefore evidenced; only the review is outstanding. **One change landed after that
-verification**: the refresh window is now **one minute, not five** — the user's decision once they
-had felt the wait for an event they had just added (FINDINGS 2026-08-29 🔄). DESIGN §2.5 is
-amended; T07's task doc is not, and is out of date on that number.
+**Status:** **T07 is reviewed and done — all seven build tasks are ✅.** The review found **no
+defect** and made no fix commit. Re-measured: agenda-test **585**, notes-test **90**, cockpit-test
+**174** — **849**, three ALL PASS. Both of T07's halves are evidenced: the tests, and the live
+machine. The one open decision is **settled** — the **third call site** (`refreshAgenda("start")`
+at boot) **stays**, the user's call, and T07's task sheet is amended in place to say so
+(FINDINGS 2026-08-29 🔄). The review also read the *live* `daemon.log` and found the boot refresh
+and fourteen 60-second ticks on the current build, with no token in it (FINDINGS 2026-08-29 📌) —
+the earlier ✅ row predates the one-minute change and did not cover either.
 **Not reviewed as a plan.** This plan carries no `Plan reviewed:` line — it predates the check.
-Six tasks have been built and reviewed clean off it; whether to run `/pir-review-plan` now is the
-user's call, and no session has decided it for them.
+Seven tasks have now been built and reviewed clean off it; whether to run `/pir-review-plan`
+before T08 is the user's call, and no session has decided it for them.
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T07**. Start from the eight deviations in its Notes cell — the
-one that needs a decision rather than a check is the **third call site**, `refreshAgenda("start")`
-at boot, which T07's own "Done when" forbids and DESIGN §2.5 requires. Re-measure `cockpit-test`
-(**174** now; that number has moved five times) and **re-run the mutation sweep** described in
-FINDINGS before trusting a green section 11. Do not chase the §9d flake.
+**Next `pir-work` will:** **implement T08** — the last task, and the only one whose deliverable is
+FINDINGS rows and docs rather than code. Read the four ✅ rows in FINDINGS first: T00, T05, T06 and
+T07 are already closed by hand, so **T08 must not re-ask any of them**. What is genuinely unseen is
+the **sign-in flow's own ergonomics** (`agenda setup` → `agenda add`, and Google's two console
+traps, which FINDINGS 2026-08-28 routed here), plus whether a *Testing* refresh token still works
+after a week — a clock that started 2026-08-29.
 
 ## Tasks
 
@@ -42,22 +41,30 @@ done · ⛔ blocked, needs a human.
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ✅ | Reviewed; **one defect fixed**: the resting pane called `readState()`, which **quarantines a corrupt `agenda.json`** — so the 2s repaint always won the race and moved the sign-ins aside with nobody to tell, killing DESIGN §2.7's announcement. Now `rescue: false`. All eight deviations approved; 39 originals kept by name. 801 → **809**. Probed: 640 renders across 1–40 rows × 4 widths (exact height, no over-width line, agenda never above notes, notes never below three), hostile event title, store side effects on import. |
-| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half verified by hand** — FINDINGS 2026-08-29 ✅. Then a **ninth deviation, decided by the user after the fact**: the refresh window is one minute, not the five its task doc and the original DESIGN §2.5 both name. |
+| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ✅ | Reviewed; **no defect found, no fix commit**. All 16 test-doc cases present and biting; 849 re-measured. All nine deviations approved — the **third call site stays**, the user's call, and the task sheet is amended in place. Probed: mutation sweep re-run with four mutations the build session had not tried (each bit exactly its own assertions), the **live `daemon.log`** (boot refresh, fourteen 60s ticks, no token), backwards clock, `__proto__` slug, retry-for-ever. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T07** — and it is the whole of the next session's work.
+**Review queue:** *(empty)* — every implemented task has been reviewed. T08 is next, and it is an
+implementing session.
 
 ## Blocked on the user
 
 *(Empty. T07's hands-on half was done in the session that built it — the user connected a real
-Google calendar and the daemon was watched refreshing it twice, unattended.)*
+Google calendar and the daemon was watched refreshing it twice, unattended. The review then
+re-read the live `daemon.log` and found the boot refresh and fourteen 60-second ticks on the
+current build, which is what covers the one-minute change made after that verification.)*
 
 Hand-verifications: T00 in FINDINGS 2026-08-27, T05 in FINDINGS 2026-08-28, T06 and T07 in
 FINDINGS 2026-08-29.
+
+**One decision was taken during T07's review**, and it is the only thing that moved in the plan:
+the daemon's **third refresh trigger — once at start-up — stays**, because `onExit` does not fire
+when the window opens and DESIGN §2.5 counts that as a return. T07's task sheet is amended in
+place; DESIGN needed no change.
 
 **Now true of this machine**, and worth knowing before T08: a Google desktop client is registered,
 one calendar (`home`) is attached, and `~/.claude/cockpit/` holds live `agenda.json`,
