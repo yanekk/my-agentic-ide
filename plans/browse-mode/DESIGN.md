@@ -254,6 +254,9 @@ None of them prove the thing is usable. That is §5.1.
 spikes/browse-test/run.sh && spikes/cockpit-test/run.sh
 ```
 
+`spikes/browse-test/run.sh` does not exist until **T01 creates it**; until then the test
+command is `spikes/cockpit-test/run.sh` alone. Every task from T01 onward runs both.
+
 **It is the only evidence a session may produce on its own.** `spikes/notes-test/run.sh` and
 `spikes/agenda-test/run.sh` belong to other features and must also stay green if a shared file
 is touched.
