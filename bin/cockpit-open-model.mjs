@@ -107,18 +107,29 @@ export function planPush({ openTabs, file, line, repoRoot }) {
 const isAbsolute = (p) => p.startsWith("/");
 
 // POSIX only, which is the whole of this project's world (macOS, DESIGN 5).
-// Collapses `//`, drops `.`, and applies `..` where there is something to apply it
-// to -- a leading `..` on a relative path is kept, because there is no root here to
-// clamp it against.
+// Collapses `//`, drops `.`, and applies `..` where there is something to apply it to.
+//
+// An absolute path is CLAMPED at `/`, the way the filesystem itself clamps it:
+// `/x/../../etc/hosts` is `/etc/hosts`, not `/../etc/hosts`. Carrying the surplus
+// `..` upward would emit the one thing this module promises never to produce -- and
+// not only cosmetically: with `repoRoot` of `/` the leftover `..` survives the
+// prefix strip below and the label comes back as a `../..` chain outright.
+//
+// A relative path has no such floor, so a leading `..` is kept. relativise() then
+// joins it onto an absolute root and normalises again, which is where it gets
+// resolved; the only inputs that stay relative here are ones with no absolute root
+// to resolve against, and the caller owes an absolute `repoRoot` (DESIGN 3.4).
 function normalise(p) {
+  const absolute = isAbsolute(p);
   const out = [];
   for (const seg of p.split("/")) {
     if (seg === "" || seg === ".") continue;
-    if (seg === ".." && out.length && out[out.length - 1] !== "..") out.pop();
-    else out.push(seg);
+    if (seg !== "..") out.push(seg);
+    else if (out.length && out[out.length - 1] !== "..") out.pop();
+    else if (!absolute) out.push("..");
   }
   const joined = out.join("/");
-  return isAbsolute(p) ? `/${joined}` : joined;
+  return absolute ? `/${joined}` : joined;
 }
 
 function relativise(file, repoRoot) {

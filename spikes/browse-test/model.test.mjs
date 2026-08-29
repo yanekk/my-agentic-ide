@@ -143,6 +143,22 @@ eq("a relative path that climbs out of the root becomes absolute",
 eq("`/Users/j/src/proj-old` is not inside `/Users/j/src/proj`",
    P({ file: "/Users/j/src/proj-old/a.js" }).rel, "/Users/j/src/proj-old/a.js");
 
+// `..` that climbs PAST `/` is clamped there, exactly as the filesystem clamps it.
+// Found in review: the surplus `..` used to be carried upward, which is ugly on a
+// tab (`/../etc/hosts`) and, against a `repoRoot` of `/`, survives the prefix strip
+// and hands back a `..` chain outright -- the single thing this module promises not
+// to emit. The invariant is now structural rather than true of the cases tried.
+eq("`..` past the root is clamped, not carried",
+   P({ file: "/x/../../etc/hosts" }).rel, "/etc/hosts");
+eq("...however many of them there are",
+   P({ file: "../../../../../../etc/hosts" }).rel, "/etc/hosts");
+eq("...and against a root of `/` the label is still not a `..` chain",
+   P({ file: "/../etc/hosts", repoRoot: "/" }).rel, "etc/hosts");
+eq("a plain path under a root of `/` is relativised as usual",
+   P({ file: "/etc/hosts", repoRoot: "/" }).rel, "etc/hosts");
+eq("`..` INSIDE the root still resolves normally",
+   P({ file: `${ROOT}/src/../lib/a.js` }).rel, "lib/a.js");
+
 // The defect the planning probe found (FINDINGS, spikes/browse-mode RESULTS 4):
 // broot resolves symlinks, an agent worktree path usually is not resolved, and
 // the two strings then share no prefix. This module cannot fix that -- realpath
