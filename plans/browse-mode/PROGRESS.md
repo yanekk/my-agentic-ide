@@ -38,16 +38,16 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** Phase 0 built, awaiting review. Browse mode splits the diff slot in two — browser
-left, viewer right — and nothing is typed. **The pair in the slot is now measured, not
-asserted**: `spikes/browse-mode/` re-runs it in five scripts, including the three cases the
-plan-review probe never reached (two agents, the empty-slot rebuild, a resize while parked).
-**Read FINDINGS before T01** — it carries a defect T01 has to handle.
+**Status:** Phase 0 done and reviewed. Browse mode splits the diff slot in two — browser left,
+viewer right — and nothing is typed. **The pair in the slot is measured and the measurement
+re-runs**: `spikes/browse-mode/`, 80 checks across five scripts, green from a clean checkout.
+**Read FINDINGS before T01** — it carries a defect T01 has to handle (`planPush` must `realpath`
+both sides). Phase 1 starts now.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T00** — the spike and its RESULTS.md. Nothing outside
-`spikes/browse-mode/` was touched, so the review is about whether the assertions are the right
-ones and whether RESULTS says what was actually measured.
+**Next `pir-work` will:** **implement T01** — `cockpit-open-model.mjs`, the pure decision. It has
+no dependencies and is the first ⬜. Its tests must cover the symlink-resolution defect in
+FINDINGS, or tab labels come out worse than absolute paths.
 
 ## Tasks
 
@@ -56,7 +56,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | Pair-in-the-slot spike + promote the planning probes | — | 🔍 | `spikes/browse-mode/`, **79 checks** green across five probes. Pair holds at 120x15 / 47 / 72 through two agents, the empty-slot rebuild and a resize while parked; swap 26 ms vs 19 ms. Deviations: added `common.sh`; a true *window* resize is unreachable headlessly so the **slot** is resized instead (T07 keeps the window drag); `tui-render.py` left unpromoted. Two defects found — see FINDINGS. |
+| T00 | Pair-in-the-slot spike + promote the planning probes | — | ✅ | Reviewed: all five probes re-run from a clean checkout, **80 checks** green, no mux server or temp dir left behind, an inherited `WEZTERM_UNIX_SOCKET` ignored. Two defects fixed — the 26-vs-19 ms swap timing did not reproduce (REPS 6→20; direction holds, figure does not), and the 47/72 divider is **re-imposed** each restore, not preserved (T05's to decide). Deviations accepted. |
 | T01 | `cockpit-open-model.mjs` — the pure decision | — | ⬜ | |
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ⬜ | Reuses the agenda store's `withLock` (given a lock-file argument), rather than writing a third copy. `spikes/agenda-test` must stay green. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ⬜ | The `browse` command is **gone** — the daemon launches broot. Touches `install.sh`, `cockpit-layout.sh`, `CLAUDE.md`. |
@@ -69,7 +69,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** T00
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
