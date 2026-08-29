@@ -227,13 +227,26 @@ about it, with the only escape being to guess that "a different account" re-sign
 address. So an `auth` failure on that first token call signs the chosen account in again and
 carries on into the calendar picker, exactly as the repair path does.
 
-Three guards, because refusing is still right when nothing is wrong. The stored token is
-**probed before any browser opens**: a healthy calendar refuses as before, naming `agenda rm`. A
-failure that is **not** `auth` — wifi off, a 5xx — reports that it could not be checked and
-changes nothing, because sending somebody through a sign-in cannot fix their network. And a
-sign-in completed as a **different account** is refused with nothing written, since it would
-store a second account and leave this calendar pointing at the dead one, looking fixed and still
-broken.
+Guards, because refusing is still right when nothing is wrong. The calendar is **probed before
+any browser opens**, and the probe makes the **events** call, not just the token call — see the
+next paragraph for why the token call alone gives the wrong answer. The probe's verdict is read
+with the **model's own `errorKind`**, the same function the column classified the failure with,
+so the command and the line that sent you to it agree by construction rather than by two rules
+that can drift apart. Then: a calendar that is **working** refuses as before, naming `agenda rm`.
+A **transient** failure — wifi off, a 5xx, a rate limit — reports that it could not be checked
+and changes nothing, because sending somebody through a sign-in cannot fix their network. A
+**gone** calendar refuses too and names `agenda rm`, because no sign-in brings back a calendar
+that is no longer shared with you — and `gone` is the one loud line that does *not* say
+`agenda add`. And a sign-in completed as a **different account** is refused with nothing written,
+since it would store a second account and leave this calendar pointing at the dead one, looking
+fixed and still broken; the way out of *that* is worded by the caller, because only the account
+menu has a "different account" to pick and the repair path never showed one.
+
+**`AGENDA_DRY_RUN=1` binds the repair too.** The repair branch is decided before `add` reaches
+its own dry-run block, so it carries its own check: it prints the URL it would have opened and
+exits, writing nothing. Without it the flag silently stopped meaning anything on an
+already-connected slug — and §5.2's dry run is one of the two seatbelts every hands-on check in
+this project is handed over under.
 
 **A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a consent mistake, not a dead calendar,
 and must not say `calendar gone`.** Measured 2026-08-27 (T00): Google's consent screen carries a
@@ -241,6 +254,16 @@ and must not say `calendar gone`.** Measured 2026-08-27 (T00): Google's consent 
 whose calendar calls 403. The remedy is to sign in again and tick the box — so it classifies as
 `auth` and renders `work  calendar permission not granted · agenda add work`. Telling someone to
 `agenda rm` a calendar that is fine would destroy the configuration and fix nothing.
+
+**Which is exactly why the repair probes the events call and not the token call.** That grant
+*refreshes perfectly* — the 403 only appears when events are asked for. A token-only probe
+therefore reported "the sign-in works" and refused, pointing at `agenda rm`, at the very moment
+the column was drawing `calendar permission not granted · agenda add work`: the same dead end
+this section was amended to close, surviving in the one failure whose remedy is hardest to guess,
+and handing out the one instruction this paragraph forbids. Found in T08's review, 2026-08-29.
+The repair says so in its own words — *"never granted the calendar permission"*, not *"sign-in
+expired"* — and tells the user to tick the box on the screen it is about to open, because that is
+the whole of the fix and nothing else on the machine can do it for them.
 
 **Staleness is only reported when a fetch has actually failed.** A cache a minute or two old
 during normal operation is not stale, it is current; saying "5m ago" every time would make the

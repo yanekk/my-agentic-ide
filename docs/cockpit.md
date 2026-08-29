@@ -428,16 +428,27 @@ home  calendar permission not granted · agenda add home
 home  calendar gone · agenda rm home
 ```
 
-**The command on that line is the command you type**, and for an expired sign-in that means
-`agenda add <slug>` **repairs** it: it signs the account in again and leaves the calendar exactly
-as it was — same slug, same colour, same place in the list, none of which `agenda rm` followed by
-`agenda add` would have kept. What broke is the *account's* sign-in, so every calendar sharing it
-is re-fetched too and all their loud lines clear at once rather than a tick apart. The sign-in is
-**probed before any browser opens**: a calendar that is actually fine still refuses ("its sign-in
-works — `agenda rm` first"), and a failure that is not an expiry (wifi off, a 5xx) says so and
-changes nothing rather than spending a browser round trip on something it cannot fix. Signing in
-as a different account is refused too, since that would store a second sign-in and leave this
-calendar pointing at the dead one.
+**The command on that line is the command you type**, and for both of the lines that name
+`agenda add <slug>` that means it **repairs**: it signs the account in again and leaves the
+calendar exactly as it was — same slug, same colour, same place in the list, none of which
+`agenda rm` followed by `agenda add` would have kept. What broke is the *account's* sign-in, so
+every calendar sharing it is re-fetched too and all their loud lines clear at once rather than a
+tick apart.
+
+The calendar is **probed before any browser opens**, and the probe asks for **events**, not just
+a token. That distinction is the whole of the second line: a grant whose calendar checkbox was
+left unticked refreshes perfectly and only fails on events, so a token-only probe answered "the
+sign-in works" and refused — sending you to `agenda rm`, which for that failure destroys a
+calendar that is perfectly fine. The probe's verdict is read with the same function the column
+used to draw the line, so the two cannot disagree. A calendar that is genuinely **working** still
+refuses (`agenda rm` first); a **gone** one refuses too and names `agenda rm`, because no sign-in
+brings back a calendar that is no longer shared with you; and a transient failure (wifi off, a
+5xx) says it could not be checked and changes nothing rather than spending a browser round trip
+on something it cannot fix. Signing in as a different account is refused too, since that would
+store a second sign-in and leave this calendar pointing at the dead one.
+
+`AGENDA_DRY_RUN=1` covers the repair as well: it prints the URL it would have opened and stops,
+opening nothing and writing nothing, exactly as it does for a fresh `agenda add`.
 
 The same holds when you reach a dead sign-in through the **account menu** instead. `agenda rm`
 leaves the account behind on purpose — that is what saves a browser round trip next time — so
@@ -449,7 +460,10 @@ account" would have re-signed-in the same address.
 The middle one earns its own case. Google's consent screen carries a **per-scope checkbox**, and
 leaving the calendar box unticked yields a perfectly valid token whose calendar calls fail. That
 is a consent mistake, not a dead calendar — telling somebody to `agenda rm` a calendar that is
-fine would destroy the configuration and fix nothing.
+fine would destroy the configuration and fix nothing. `agenda add <slug>` says so in its own
+words for this case — *"never granted the calendar permission"*, not *"sign-in expired"* — and
+tells you to tick the calendar box on the consent screen it is about to open, which is the whole
+of the fix and the one part nothing on this machine can do for you.
 
 **Staleness is only reported when a fetch has actually failed.** A cache a minute or two old
 during normal operation is not stale, it is current; saying "5m ago" every time would make the
@@ -920,7 +934,7 @@ spikes/agenda-test/run.sh
 ```
 
 The agenda's own core: the state files and their lock, the event model, the
-column renderer, the Google client and the `agenda` command. 619 assertions, and
+column renderer, the Google client and the `agenda` command. 637 assertions, and
 **it never touches the network** — `AGENDA_ORIGIN` points Google's endpoints at a
 loopback stub, so the OAuth exchange, the refresh and the event fetch are all
 driven for real against a server the test owns. It asserts that a corrupt

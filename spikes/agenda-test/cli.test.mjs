@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { section, ok, eq, done } from "./harness.mjs";
-import { PALETTE, parseGoogleClient } from "../../bin/cockpit-agenda-model.mjs";
+import { PALETTE, errorKind, parseGoogleClient } from "../../bin/cockpit-agenda-model.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -487,7 +487,9 @@ section("30b. `agenda add <slug>` on a calendar that is already connected");
 
   const r = await run(["add", "work"], { dir, tty: NO_TTY });
   eq("a HEALTHY calendar still refuses", r.status, 1);
-  ok("...saying the sign-in works", /sign-in works/i.test(r.all), r.all);
+  // "it is working", not "its sign-in works": the probe now asks the events call
+  // too, so this sentence is claiming more than it used to and has to say so.
+  ok("...saying it is working", /is working/i.test(r.all), r.all);
   ok("...and pointing at the command that frees the slug", r.all.includes("agenda rm work"), r.all);
   eq("...opening no browser at all", browserLog(dir).length, browsers);
 }
@@ -538,6 +540,98 @@ section("30b. `agenda add <slug>` on a calendar that is already connected");
   ok("...naming the account the calendar actually belongs to", r.all.includes("me@corp.com"), r.all);
   eq("...and stores no second sign-in", Object.keys(state(dir).accounts), ["me@corp.com"]);
   eq("...leaving the old token exactly as it was", state(dir).accounts["me@corp.com"].refreshToken, tokenBefore);
+  // The escape offered has to exist on the path that printed it. `agenda add work`
+  // on an existing slug shows NO account menu -- it goes straight to the repair --
+  // so "pick a different account" would name a picker the user never saw. Same
+  // species as the `agenda rm` browser sentence T08 itself fixed.
+  ok("...and the way out names no menu this path never showed",
+     !/different account/i.test(r.all) && r.all.includes("agenda rm work"), r.all);
+}
+
+// The consent screen's PER-SCOPE checkbox (T00, measured 2026-08-27) leaves a
+// grant that refreshes PERFECTLY and 403s only on the events call. The column
+// therefore draws `calendar permission not granted · agenda add work` -- and a
+// repair that probed only the TOKEN saw nothing wrong and refused, which is the
+// exact dead end DESIGN 2.7 forbids and worse: it pointed at `agenda rm`, which
+// would destroy a working configuration and fix nothing.
+{
+  const dir = freshDir("repair-missing-scope");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const browsers = browserLog(dir).length;
+
+  // The token call keeps working throughout -- that is the whole trap.
+  const scope403 = { status: 403, body: { error: { status: "PERMISSION_DENIED",
+    message: "Request had insufficient authentication scopes.",
+    details: [{ reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }] } } };
+  let consented = false;
+  stub.set((req) => {
+    if (req.path === "/token" && req.form.grant_type === "authorization_code") consented = true;
+    if (req.path.includes("/events") && !consented) return scope403;
+    return defaultReply(req);
+  });
+
+  // What the pane is drawing at that moment, from the same classification the
+  // command is about to make: it must be the scope wording, naming `agenda add`.
+  eq("the column calls it a permission, not an expiry",
+     errorKind({ kind: "auth", reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", code: "", detail: "" }), "scope");
+
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  eq("`agenda add` on a scope-less grant exits 0", r.status, 0);
+  ok("...saying the permission was never granted, not that a sign-in expired",
+     /permission/i.test(r.all) && !/sign-in .*expired/i.test(r.all), r.all);
+  ok("...telling the user the one thing that fixes it", /tick/i.test(r.all), r.all);
+  ok("...never sending them to `agenda rm`, which would destroy a fine calendar",
+     !/agenda rm/.test(r.all), r.all);
+  eq("...and it opened a browser to re-consent", browserLog(dir).length, browsers + 1);
+  eq("...the calendar is not re-added", slugs(dir), ["work"]);
+  eq("...and its events arrive once the box is ticked", cache(dir).calendars.work.error, null);
+}
+
+// A calendar that is genuinely GONE is not signed back into existence, and the
+// column says `agenda rm` for it -- so the repair must agree rather than opening a
+// browser that cannot help.
+{
+  const dir = freshDir("repair-gone");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const browsers = browserLog(dir).length;
+
+  stub.set((req) => (req.path.includes("/events")
+    ? { status: 404, body: { error: { status: "NOT_FOUND", message: "Not Found" } } }
+    : defaultReply(req)));
+
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  eq("a gone calendar refuses", r.status, 1);
+  ok("...saying it is gone", /gone/i.test(r.all), r.all);
+  ok("...and pointing at `agenda rm`, the only thing that helps", r.all.includes("agenda rm work"), r.all);
+  eq("...opening no browser", browserLog(dir).length, browsers);
+}
+
+// DESIGN 5.2: `AGENDA_DRY_RUN=1` opens no browser. It is one of the two seatbelts
+// every hands-on check in this project is handed over under, and the repair branch
+// sits ABOVE `add`'s own dry-run block -- so it needs its own check or the flag
+// silently stops meaning anything on exactly the command T08 added.
+{
+  const dir = freshDir("repair-dry-run");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const browsers = browserLog(dir).length;
+  const tokenBefore = state(dir).accounts["me@corp.com"].refreshToken;
+
+  stub.set((req) => (req.path === "/token" && req.form.grant_type === "refresh_token"
+    ? { status: 400, body: { error: "invalid_grant" } }
+    : defaultReply(req)));
+
+  const r = await run(["add", "work"], { dir, tty: NO_TTY, env: { AGENDA_DRY_RUN: "1" } });
+  eq("a dry-run repair exits 0", r.status, 0);
+  ok("...printing the URL it would have opened", /https?:\/\/\S*oauth2\S*auth/.test(r.all), r.all);
+  eq("...and opening no browser at all", browserLog(dir).length, browsers);
+  eq("...writing nothing", state(dir).accounts["me@corp.com"].refreshToken, tokenBefore);
+  eq("...and leaving the calendars alone", slugs(dir), ["work"]);
 }
 
 // ===========================================================================

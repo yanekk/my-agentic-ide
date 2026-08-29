@@ -41,7 +41,7 @@ import { randomInt } from "node:crypto";
 import { spawn } from "node:child_process";
 
 import {
-  PALETTE, agendaHeight, dayBounds, normaliseEvent, parseGoogleClient,
+  PALETTE, agendaHeight, dayBounds, errorKind, normaliseEvent, parseGoogleClient,
   pickColour, renderAgenda, safeText,
 } from "./cockpit-agenda-model.mjs";
 import {
@@ -426,7 +426,10 @@ async function add(slug) {
     // (invalid_grant)") naming nothing to do about it. The only escape would have
     // been to guess that "a different account" re-signs-in the SAME address.
     say(dim(`the stored sign-in for ${wire(account)} has expired.`));
-    refreshToken = await signInAgain(client, account, "you chose");
+    refreshToken = await signInAgain(client, account, {
+      belongs: "you chose",
+      escape: (email) => `pick "a different account" to connect ${wire(email)} separately`,
+    });
     ({ token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW }));
   }
   const items = await listCalendars({ token, origin: ORIGIN });
@@ -469,38 +472,72 @@ async function add(slug) {
  * calendar that shared the sign-in, so all their loud lines clear at once instead
  * of one tick later.
  *
- * The sign-in is PROBED before any browser opens, because refusing is still the
- * right answer when nothing is wrong. Only a genuine `auth` failure is an expiry:
- * a network failure must not be read as one, or a person with wifi off is sent
- * through a browser round trip that fixes nothing.
+ * The calendar is PROBED before any browser opens, because refusing is still the
+ * right answer when nothing is wrong -- and the probe asks the EVENTS call, not
+ * just the token call, for the reason in `probeCalendar` below. Only a `scope` or
+ * `auth` verdict is something signing in again can fix: a network failure must not
+ * be read as one, or a person with wifi off is sent through a browser round trip
+ * that fixes nothing, and a `gone` calendar cannot be signed back into existence.
  */
 async function repair(cal, state) {
   const client = readClient();
   if (!client) die("no Google client registered yet -- `agenda setup <path-to-downloaded-json>` first.");
 
+  if (DRY_RUN) {
+    // DESIGN 5.2: a dry run "opens no browser", and it is one of the two seatbelts
+    // the whole hands-on verification protocol is handed over under. This branch
+    // sits ABOVE `add`'s own dry-run block, so without a check of its own a dry run
+    // aimed at an already-connected slug opened a real browser and signed in for
+    // real -- the opposite of what the flag promises.
+    const { dryRunUrl } = await signIn({ ...client, origin: ORIGIN, dryRun: true });
+    say(dim(`AGENDA_DRY_RUN=1 -- \`${cal.slug}\` is already connected, so this would re-sign-in ${wire(cal.account)}.`));
+    say(dim("Nothing opened, nothing bound, nothing written. This is the URL:"));
+    say(dryRunUrl);
+    return;
+  }
+
+  // Absent entirely means there is nothing to probe and nothing to lose: the
+  // sign-in this calendar names is simply not on the machine.
   const refreshToken = state.accounts[cal.account]?.refreshToken;
+  let missingScope = false;
   if (refreshToken) {
-    let failure = null;
-    try {
-      await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
-    } catch (e) {
-      failure = describeError(e);
-    }
+    const failure = await probeCalendar(cal, client, refreshToken);
     if (!failure) {
-      die(`\`${cal.slug}\` is already connected and its sign-in works.\n` +
+      die(`\`${cal.slug}\` is already connected and it is working.\n` +
           `      \`agenda rm ${cal.slug}\` first, or pick another name.`);
     }
-    // Not an expiry, so nothing here would fix it and a browser would only waste
-    // the round trip. Say what was wrong and change nothing.
-    if (failure.kind !== "auth") {
-      die(`\`${cal.slug}\` is already connected, and its sign-in could not be checked ` +
+    // Classified with the model's own function, so this agrees with the loud line
+    // that sent the user here by construction rather than by coincidence.
+    const kind = errorKind(failure);
+    if (kind === "gone") {
+      die(`\`${cal.slug}\` is connected, but that calendar is gone from ${wire(cal.account)}.\n` +
+          `      Signing in again cannot bring it back -- \`agenda rm ${cal.slug}\`.`);
+    }
+    if (kind === "transient") {
+      die(`\`${cal.slug}\` is already connected, and it could not be checked ` +
           `(${wire(failure.reason || failure.kind)}).\n` +
           `      Nothing was changed -- try again once that clears.`);
     }
+    missingScope = kind === "scope";
   }
 
-  say(`${bold(cal.slug)} is connected, but the sign-in for ${wire(cal.account)} has expired.`);
-  const refreshed = await signInAgain(client, cal.account, `\`${cal.slug}\` belongs to`);
+  // Two different failures reach here and they are not the same sentence. Telling
+  // somebody whose consent checkbox was unticked that their "sign-in expired" sends
+  // them looking for the wrong thing -- and the one instruction that actually fixes
+  // it is on the consent screen they are about to be shown.
+  if (missingScope) {
+    say(`${bold(cal.slug)} is connected, but ${wire(cal.account)} never granted the calendar permission.`);
+    say(dim("Tick the calendar box on the consent screen this time."));
+  } else {
+    say(`${bold(cal.slug)} is connected, but the sign-in for ${wire(cal.account)} has expired.`);
+  }
+  const refreshed = await signInAgain(client, cal.account, {
+    belongs: `\`${cal.slug}\` belongs to`,
+    // No picker was shown on this path -- `agenda add <slug>` on an existing slug
+    // goes straight here -- so "pick a different account" would name a menu the
+    // user never saw.
+    escape: () => `\`agenda rm ${cal.slug}\` and add it again from the other account`,
+  });
 
   // Every calendar on that account was dark for the same reason, so they are all
   // re-fetched here rather than left to heal a tick apart.
@@ -514,6 +551,35 @@ async function repair(cal, state) {
 }
 
 /**
+ * Is this calendar actually broken, and how? Returns `describeError`'s object, or
+ * null when nothing is wrong.
+ *
+ * The TOKEN call alone cannot answer this. Google's consent screen carries a
+ * per-scope checkbox (T00, FINDINGS 2026-08-27), so a grant with the calendar box
+ * left unticked refreshes PERFECTLY and only 403s when events are asked for. A
+ * token-only probe therefore reported "the sign-in works" at the exact moment the
+ * column was drawing `calendar permission not granted · agenda add work` -- the
+ * command on the loud line refusing to do anything, which is the whole defect
+ * DESIGN 2.7 forbids. The pane's verdict comes from the events call, so the probe
+ * has to make the events call too.
+ *
+ * One extra request against a calendar the user has just asked to repair, and only
+ * on that path. Nothing is written: this reads, `fetchOnce` is what caches.
+ */
+async function probeCalendar(cal, client, refreshToken) {
+  const { todayStart, dayAfterStart } = dayBounds(NOW, { tz: TZ });
+  try {
+    const { token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
+    await fetchEvents({
+      token, calendarId: cal.calendarId, timeMin: todayStart, timeMax: dayAfterStart, origin: ORIGIN,
+    });
+    return null;
+  } catch (e) {
+    return describeError(e);
+  }
+}
+
+/**
  * Sign in again to an account this machine already knows, and store the result.
  *
  * Shared by `repair()` and by `add` when the account picked off the menu turns out
@@ -523,11 +589,13 @@ async function repair(cal, state) {
  *
  * Only the account already named can help, so a sign-in completed as somebody else
  * is refused with nothing written -- storing it would leave the caller pointing at
- * the dead account, fixed to look at and still broken. `belongs` is how the caller
- * words that refusal, because "`home` belongs to" and "you chose" are the same
- * mistake described from two directions. Returns the fresh refresh token.
+ * the dead account, fixed to look at and still broken. `belongs` and `escape` are
+ * the caller's own wording for that refusal: "`home` belongs to" and "you chose"
+ * are the same mistake described from two directions, and the way OUT of it differs
+ * too -- only `add` has shown the user an account menu to pick from. Returns the
+ * fresh refresh token.
  */
-async function signInAgain(client, account, belongs) {
+async function signInAgain(client, account, { belongs, escape }) {
   const opener = process.env.AGENDA_BROWSER || "/usr/bin/open";
   const openBrowser = async (url) => {
     spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
@@ -536,8 +604,7 @@ async function signInAgain(client, account, belongs) {
   const fresh = await signIn({ ...client, origin: ORIGIN, openBrowser });
   if (fresh.email !== account) {
     die(`signed in as ${wire(fresh.email)}, but ${belongs} ${wire(account)}.\n` +
-        `      Nothing was changed. Sign in as ${wire(account)}, or pick ` +
-        `"a different account" to connect ${wire(fresh.email)} separately.`);
+        `      Nothing was changed. Sign in as ${wire(account)}, or ${escape(fresh.email)}.`);
   }
   putAccount(fresh.email, fresh.refreshToken, NOW);
   return fresh.refreshToken;

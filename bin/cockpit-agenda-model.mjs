@@ -448,7 +448,12 @@ const LOUD = {
   gone: { message: "calendar gone", fix: (slug) => `agenda rm ${slug}` },
 };
 
-function errorKind(error) {
+// Exported because `agenda add <slug>` has to reach the SAME verdict this does.
+// The column draws the loud line from here and prints the command that fixes it;
+// if the command classified the failure with a rule of its own the two would drift
+// apart, and the drift is precisely the T08 defect -- a line naming a command that
+// then disagreed about whether anything was wrong.
+export function errorKind(error) {
   if (!error) return null;
   const kind = String((typeof error === "string" ? error : error.kind) ?? "").toLowerCase();
   if (kind === "gone") return "gone";
