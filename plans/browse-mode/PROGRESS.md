@@ -38,18 +38,20 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** Phase 0 and T01 reviewed; **T02 built and awaiting review**. The whole push now
-exists end to end below the daemon: broot's Enter would run `cockpit-open <file> [line]`, which
-finds the viewer, refuses unless `panes.json` carries all three viewer keys, and types micro's
-command bar under `viewer-tabs.lock`. All four contracts FINDINGS handed T01's caller are
-honoured and asserted. `spikes/browse-test` **148 checks**; agenda, cockpit and notes suites
-green. **Nothing launches it yet** — the `viewer` key is published by T04, the verb by T03.
+**Status:** **Phase 1 is done and reviewed.** The whole push exists end to end below the
+daemon: broot's Enter runs `cockpit-open <file> [line]`, which finds the viewer, refuses unless
+`panes.json` carries all three viewer keys *in the right shape*, and types micro's command bar
+under `viewer-tabs.lock`. `spikes/browse-test` **176 checks**; agenda, notes and cockpit suites
+green. **Nothing launches it yet** — the verb arrives with T03, the `viewer` key with T04.
+
+**T04 owes `viewer` as a number or null** — never `""` or `false`. The review found those
+coercing to pane 0 and pushing there; see FINDINGS, top row.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T02** — `bin/cockpit-open.mjs`, the `withLock` change in
-`bin/cockpit-agenda-store.mjs`, and `spikes/browse-test/open.test.mjs`. Re-run `agenda-test`
-**alone** before believing a red one. Worth a hard look: the lock now covers the sending, and a
-`viewerRoot` that cannot be resolved degrades instead of refusing.
+**Next `pir-work` will:** **implement T03** — the broot verb layer, plus micro and broot as
+installer prerequisites. Touches `bin/install.sh`, `bin/cockpit-layout.sh` and `CLAUDE.md`.
+There is no `browse` command to build: plan review deleted it. Re-run `agenda-test` **alone**
+before believing a red one, and `cockpit-test` at `COCKPIT_TEST_SPEED=1.0`.
 
 ## Tasks
 
@@ -60,7 +62,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | Pair-in-the-slot spike + promote the planning probes | — | ✅ | Reviewed: all five probes re-run from a clean checkout, **80 checks** green, no mux server or temp dir left behind, an inherited `WEZTERM_UNIX_SOCKET` ignored. Two defects fixed — the 26-vs-19 ms swap timing did not reproduce (REPS 6→20; direction holds, figure does not), and the 47/72 divider is **re-imposed** each restore, not preserved (T05's to decide). Deviations accepted. |
 | T01 | `cockpit-open-model.mjs` — the pure decision | — | ✅ | Reviewed: every doc row verified, both deviations accepted (`realpath` is genuinely T02's), and the boundary grep proven able to fail against a control module that imports `node:fs`. One defect fixed — `..` climbing past `/` was carried upward, emitting a real `..` chain against a root of `/`. Probed empty/CR paths → T02. **62 checks**, not the 59 claimed (was 57). |
-| T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | 🔍 | Built: the push, every refusal, `withLock` given a lock-file argument and per-file depth. **148 checks** (was 62); agenda, cockpit and notes suites green. Three deviations: the lock covers the **send** too, not just the read-modify-write (else two pushes both `open`); the stubbed `wezterm` lives in `open.test.mjs`, not `run.sh`; an unresolvable `viewerRoot` degrades to a long label rather than refusing. |
+| T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ⬜ | The `browse` command is **gone** — the daemon launches broot. Touches `install.sh`, `cockpit-layout.sh`, `CLAUDE.md`. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ⬜ | Carries the pane detection T06 used to own — without it the 1 s healer types over a healthy pair. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ⬜ | Heavy. The slot has always held one pane per agent. |
@@ -71,8 +73,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T02** — `cockpit-open.mjs`, the `withLock` lock-file argument, and
-`spikes/browse-test/open.test.mjs`.
+**Review queue:** *(empty — T03 is next to build, and its review is the session after that.)*
 
 ## Blocked on the user
 
