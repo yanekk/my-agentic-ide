@@ -350,6 +350,12 @@ None of them prove the thing is usable. That is §5.1.
 
 ## 5. Environment — read this before running anything
 
+**This plan is built in a worktree, not on `main`.** `CLAUDE.md § Where sessions run` is
+suspended for its duration by the user's decision of 2026-08-29: work, commit and push on
+`worktree-browse-mode-review` in `.claude/worktrees/browse-mode-review`, and leave `main` alone.
+The full rule, and the trap it creates for T07's live check, are at the top of
+[PROGRESS.md](PROGRESS.md). Folding back is the user's decision, never a session's.
+
 | | |
 |---|---|
 | OS | macOS 26.5.1 (25F80), Apple Silicon |

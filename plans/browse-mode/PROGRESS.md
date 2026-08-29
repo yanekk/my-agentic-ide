@@ -1,5 +1,32 @@
 # Progress
 
+> ## ⚠️ READ FIRST — this plan is built in a worktree, not on `main`
+>
+> **`CLAUDE.md § Where sessions run` is suspended for the whole of this plan.** The user lifted
+> it deliberately on 2026-08-29, for the duration of browse-mode's execution and no longer.
+>
+> | | |
+> |---|---|
+> | Worktree | `.claude/worktrees/browse-mode-review` |
+> | Branch | `worktree-browse-mode-review` |
+> | Commit and push | **there**, on every task, exactly as the main rule says — just not to `main` |
+> | `main` | **do not touch it.** No commit, no merge, no rebase, no fast-forward |
+>
+> **If your session did not start in that worktree, enter it before doing anything else** —
+> `EnterWorktree` with that path, or work from that directory. A task committed to `main` by
+> accident is history the user then has to unpick.
+>
+> **Folding back into `main` at the end is the user's decision, not a session's.** When T07 is
+> done, say so and stop. Do not merge, and do not offer to as though it were routine — the whole
+> reason this file says so is that it is a decision about history.
+>
+> **The trap this creates, and it is not theoretical:** the live cockpit runs whatever
+> `~/.claude/cockpit/config.lua` records, which today is the **main checkout**
+> (`/Users/jan.krolikowski/src/agentic-ide`), and `~/.wezterm.lua` symlinks into it. So a
+> re-opened WezTerm window runs `main`'s code, **not this branch's**. Every automated test is
+> unaffected — they run from the checkout you are in — but **T07's hands-on verification would
+> silently check the wrong code.** T07 carries the fix; do not improvise one.
+
 **Update this file whenever a task changes state.** It is the handoff between sessions — a
 stale tracker costs the next session more time than keeping it current ever saves.
 

@@ -30,8 +30,39 @@ smuggled into the verification.
 left at the end of a report. Everything that does not depend on the answer is finished first,
 but the session ends when the answer is in.
 
-Re-open the WezTerm window first — that is the supported way to rebuild everything, and it is
-the seatbelt here: nothing in this check runs against a half-migrated cockpit.
+### First: point the cockpit at this branch, or you will verify the wrong code
+
+This plan is built in a worktree (PROGRESS.md, top). The live cockpit runs whatever
+`~/.claude/cockpit/config.lua` records — the **main checkout** — and `~/.wezterm.lua` symlinks
+into it. Re-opening the window would therefore run `main`, where browse mode does not exist, and
+every answer below would be about the wrong code.
+
+Use the supported mechanism, not a hand-edited config:
+
+```
+# from inside the worktree
+bin/install.sh --check      # confirm what it plans to relink, before it does anything
+bin/install.sh              # rewrites config.lua and repoints ~/.wezterm.lua here
+```
+
+`--check` is the seatbelt: it reports the prerequisites and the planned relink and **writes
+nothing**, so the repoint is seen before it happens. It will report a *relink* of
+`~/.wezterm.lua` from the main checkout to this one; that is expected and is not the
+`--force` case, because the symlink is already the cockpit's own.
+
+**Put it back when the check is done**, whatever the outcome:
+
+```
+# from the MAIN checkout
+bin/install.sh
+```
+
+Leaving the user's daily cockpit pointed at a review worktree is a worse outcome than an
+unverified task. Say plainly in the report which checkout the cockpit is pointed at when the
+session ends.
+
+Then re-open the WezTerm window — that is the supported way to rebuild everything, and it is
+the second seatbelt here: nothing in this check runs against a half-migrated cockpit.
 
 ```
 1. Open a fresh WezTerm window and enter an agent in the fleet list.
@@ -76,3 +107,6 @@ None. This task exists precisely because no test reaches it.
 - [ ] any defect found is recorded as a new task, not fixed here
 - [ ] PROGRESS says plainly which half of the plan is test-proven and which half is
       person-proven
+- [ ] **the cockpit is pointed back at the main checkout**, and the report says so
+- [ ] the report says the plan is finished on `worktree-browse-mode-review` and that folding it
+      into `main` is the user's call — and does not fold it
