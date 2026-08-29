@@ -441,6 +441,41 @@ section("30b. `agenda add <slug>` on a calendar that is already connected");
      cache(dir).calendars.home.fetchedAt > 0, JSON.stringify(cache(dir).calendars));
 }
 
+// The exact sequence a person hit by hand in T08: revoke the cockpit's access at
+// Google, `agenda rm` the calendar, then add it again and pick the known account.
+// Removing the calendar leaves the ACCOUNT behind -- deliberately, it is what saves
+// a browser round trip normally -- so the menu offers a sign-in that is already
+// dead, and nothing on this machine can know that until a call fails. It used to
+// surface Google's own words ("token call failed with HTTP 400 (invalid_grant)")
+// and name nothing to do about it.
+{
+  const dir = freshDir("dead-account-on-menu");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "home"], { dir, tty: writeTty(dir, "1") });
+  await run(["rm", "home"], { dir });
+  eq("removing the calendar leaves the sign-in behind", Object.keys(state(dir).accounts), ["me@corp.com"]);
+  eq("...and no calendars", slugs(dir), []);
+
+  let reSignedIn = false;
+  stub.set((req) => {
+    if (req.path === "/token" && req.form.grant_type === "refresh_token" && !reSignedIn) {
+      return { status: 400, body: { error: "invalid_grant", error_description: "Token has been expired or revoked." } };
+    }
+    if (req.path === "/token" && req.form.grant_type === "authorization_code") reSignedIn = true;
+    return defaultReply(req);
+  });
+
+  // Account 1 (the known, dead one), then calendar 2.
+  const r = await run(["add", "home"], { dir, tty: writeTty(dir, "1", "2") });
+  eq("picking an account whose sign-in was revoked still exits 0", r.status, 0);
+  ok("...saying the stored sign-in expired", /sign-in for .*expired|stored sign-in .*expired/i.test(r.all), r.all);
+  ok("...never showing Google's raw words", !/invalid_grant/i.test(r.all), r.all);
+  eq("...and the calendar is attached after all", slugs(dir), ["home"]);
+  eq("...on the same account, not a second one", Object.keys(state(dir).accounts), ["me@corp.com"]);
+  eq("...with its events fetched", cache(dir).calendars.home.error, null);
+}
+
 // Refusing is still right when nothing is wrong: a working calendar must not be
 // dragged through a browser round trip by a mistyped slug.
 {

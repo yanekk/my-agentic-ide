@@ -411,10 +411,24 @@ async function add(slug) {
   }
 
   const account = await connectAccount(fd, state.accounts, client);
-  const refreshToken = readState().accounts[account]?.refreshToken;
+  let refreshToken = readState().accounts[account]?.refreshToken;
   if (!refreshToken) die(`signed in as ${wire(account)} but the sign-in was not stored -- nothing was added.`);
 
-  const { token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
+  let token;
+  try {
+    ({ token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW }));
+  } catch (e) {
+    if (describeError(e).kind !== "auth") throw e;
+    // The account came off a menu that cannot know its sign-in is dead -- revoking
+    // the cockpit's access does not touch this machine. Measured by hand in T08:
+    // revoke, `agenda rm home`, `agenda add home`, pick the known account, and
+    // Google's raw words came out ("token call failed with HTTP 400
+    // (invalid_grant)") naming nothing to do about it. The only escape would have
+    // been to guess that "a different account" re-signs-in the SAME address.
+    say(dim(`the stored sign-in for ${wire(account)} has expired.`));
+    refreshToken = await signInAgain(client, account, "you chose");
+    ({ token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW }));
+  }
   const items = await listCalendars({ token, origin: ORIGIN });
   if (!items.length) die(`${wire(account)} has no calendars to attach.`);
 
@@ -486,22 +500,7 @@ async function repair(cal, state) {
   }
 
   say(`${bold(cal.slug)} is connected, but the sign-in for ${wire(cal.account)} has expired.`);
-  const opener = process.env.AGENDA_BROWSER || "/usr/bin/open";
-  const openBrowser = async (url) => {
-    spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
-  };
-  say(dim("opening a browser to sign in again…"));
-  const fresh = await signIn({ ...client, origin: ORIGIN, openBrowser });
-
-  // Signing in as somebody else would store a second account and leave this
-  // calendar pointing at the dead one -- fixing nothing while looking like it
-  // worked. Nothing is written unless the address matches.
-  if (fresh.email !== cal.account) {
-    die(`signed in as ${wire(fresh.email)}, but \`${cal.slug}\` belongs to ${wire(cal.account)}.\n` +
-        `      Nothing was changed. Sign in as ${wire(cal.account)}, or ` +
-        `\`agenda rm ${cal.slug}\` and add it again from the other account.`);
-  }
-  putAccount(fresh.email, fresh.refreshToken, NOW);
+  const refreshed = await signInAgain(client, cal.account, `\`${cal.slug}\` belongs to`);
 
   // Every calendar on that account was dark for the same reason, so they are all
   // re-fetched here rather than left to heal a tick apart.
@@ -509,9 +508,39 @@ async function repair(cal, state) {
   say();
   for (const c of shared) {
     say(`${swatch(c.colour)} ${bold(c.slug)}  ${wire(c.title)}  ${dim(`· ${wire(c.account)} · ${c.colour}`)}`);
-    const n = await fetchOnce(c, client, fresh.refreshToken);
+    const n = await fetchOnce(c, client, refreshed);
     if (n !== null) say(dim(`  ${n} event${n === 1 ? "" : "s"} today and tomorrow.`));
   }
+}
+
+/**
+ * Sign in again to an account this machine already knows, and store the result.
+ *
+ * Shared by `repair()` and by `add` when the account picked off the menu turns out
+ * to have a dead token. Both reach here for the same reason: revoking the cockpit's
+ * access happens at Google and touches nothing on this machine, so the stored
+ * refresh token is dead and nothing local knows it until a call fails.
+ *
+ * Only the account already named can help, so a sign-in completed as somebody else
+ * is refused with nothing written -- storing it would leave the caller pointing at
+ * the dead account, fixed to look at and still broken. `belongs` is how the caller
+ * words that refusal, because "`home` belongs to" and "you chose" are the same
+ * mistake described from two directions. Returns the fresh refresh token.
+ */
+async function signInAgain(client, account, belongs) {
+  const opener = process.env.AGENDA_BROWSER || "/usr/bin/open";
+  const openBrowser = async (url) => {
+    spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
+  };
+  say(dim("opening a browser to sign in again…"));
+  const fresh = await signIn({ ...client, origin: ORIGIN, openBrowser });
+  if (fresh.email !== account) {
+    die(`signed in as ${wire(fresh.email)}, but ${belongs} ${wire(account)}.\n` +
+        `      Nothing was changed. Sign in as ${wire(account)}, or pick ` +
+        `"a different account" to connect ${wire(fresh.email)} separately.`);
+  }
+  putAccount(fresh.email, fresh.refreshToken, NOW);
+  return fresh.refreshToken;
 }
 
 /**

@@ -217,6 +217,16 @@ and leaves the calendar row untouched: same slug, same colour, same position, al
 `agenda rm` + `agenda add` would have cost. Every calendar on that account is re-fetched in the
 same run, so their loud lines clear together rather than a tick apart.
 
+**The same applies when the dead sign-in is reached through the account MENU.** `agenda rm`
+removes a calendar and deliberately leaves its account behind — that is what saves a browser
+round trip on the next `agenda add` — so after a revocation the menu offers an account whose
+token is already dead, and nothing on this machine can know that until a call fails. Measured by
+hand in T08: revoke, `agenda rm home`, `agenda add home`, pick the known account, and Google's
+own words came out — `token call failed with HTTP 400 (invalid_grant)` — naming nothing to do
+about it, with the only escape being to guess that "a different account" re-signs-in the *same*
+address. So an `auth` failure on that first token call signs the chosen account in again and
+carries on into the calendar picker, exactly as the repair path does.
+
 Three guards, because refusing is still right when nothing is wrong. The stored token is
 **probed before any browser opens**: a healthy calendar refuses as before, naming `agenda rm`. A
 failure that is **not** `auth` — wifi off, a 5xx — reports that it could not be checked and

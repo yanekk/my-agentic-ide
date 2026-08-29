@@ -439,6 +439,13 @@ changes nothing rather than spending a browser round trip on something it cannot
 as a different account is refused too, since that would store a second sign-in and leave this
 calendar pointing at the dead one.
 
+The same holds when you reach a dead sign-in through the **account menu** instead. `agenda rm`
+leaves the account behind on purpose — that is what saves a browser round trip next time — so
+after a revocation the menu still offers it, and nothing here can know it is dead until a call
+fails. Picking it signs that account in again and carries straight on to the calendar picker,
+rather than surfacing Google's `invalid_grant` and leaving you to guess that "a different
+account" would have re-signed-in the same address.
+
 The middle one earns its own case. Google's consent screen carries a **per-scope checkbox**, and
 leaving the calendar box unticked yields a perfectly valid token whose calendar calls fail. That
 is a consent mistake, not a dead calendar — telling somebody to `agenda rm` a calendar that is
@@ -913,7 +920,7 @@ spikes/agenda-test/run.sh
 ```
 
 The agenda's own core: the state files and their lock, the event model, the
-column renderer, the Google client and the `agenda` command. 611 assertions, and
+column renderer, the Google client and the `agenda` command. 619 assertions, and
 **it never touches the network** — `AGENDA_ORIGIN` points Google's endpoints at a
 loopback stub, so the OAuth exchange, the refresh and the event fetch are all
 driven for real against a server the test owns. It asserts that a corrupt

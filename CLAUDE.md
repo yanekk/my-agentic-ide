@@ -151,7 +151,7 @@ bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
-spikes/agenda-test/     the agenda's store, model, Google client and command (611)
+spikes/agenda-test/     the agenda's store, model, Google client and command (619)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
