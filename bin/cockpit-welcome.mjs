@@ -243,7 +243,7 @@ setInterval(render, 2000);                          // repaint if a resize is mi
 // Watch the state DIRECTORY, not the files: `note` and the agenda's store both
 // replace them atomically (temp + rename), so a file watch would go deaf after
 // the first write -- the same reason the strip and the review watcher watch
-// directories. agenda-cache.json is what the daemon rewrites every five minutes,
+// directories. agenda-cache.json is what the daemon rewrites every minute,
 // and agenda.json is what `agenda add` writes, so both belong here: a calendar
 // attached in a terminal should appear up here without waiting for the 2s tick.
 const INTERESTING = new Set([

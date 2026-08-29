@@ -14,7 +14,10 @@ session: agenda-test **585**, notes-test **90**, cockpit-test **134 → 174** �
 three ALL PASS. **T07's hands-on half is CLOSED** — the daemon was seen refreshing a real Google
 calendar on its own, twice, 300s apart, picking up an event created while nobody touched the
 cockpit; no token and no meeting title reached `daemon.log` (FINDINGS 2026-08-29 ✅). Both halves
-of T07 are therefore evidenced; only the review is outstanding.
+of T07 are therefore evidenced; only the review is outstanding. **One change landed after that
+verification**: the refresh window is now **one minute, not five** — the user's decision once they
+had felt the wait for an event they had just added (FINDINGS 2026-08-29 🔄). DESIGN §2.5 is
+amended; T07's task doc is not, and is out of date on that number.
 **Not reviewed as a plan.** This plan carries no `Plan reviewed:` line — it predates the check.
 Six tasks have been built and reviewed clean off it; whether to run `/pir-review-plan` now is the
 user's call, and no session has decided it for them.
@@ -39,7 +42,7 @@ done · ⛔ blocked, needs a human.
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ✅ | Reviewed; **one defect fixed**: the resting pane called `readState()`, which **quarantines a corrupt `agenda.json`** — so the 2s repaint always won the race and moved the sign-ins aside with nobody to tell, killing DESIGN §2.7's announcement. Now `rescue: false`. All eight deviations approved; 39 originals kept by name. 801 → **809**. Probed: 640 renders across 1–40 rows × 4 widths (exact height, no over-width line, agenda never above notes, notes never below three), hostile event title, store side effects on import. |
-| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half verified by hand** — FINDINGS 2026-08-29 ✅. |
+| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half verified by hand** — FINDINGS 2026-08-29 ✅. Then a **ninth deviation, decided by the user after the fact**: the refresh window is one minute, not the five its task doc and the original DESIGN §2.5 both name. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and

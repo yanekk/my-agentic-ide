@@ -1661,16 +1661,25 @@ async function onExit() {
 // the strip already consumes terminals.json.
 //
 // ONE TICK, NOT TWO TIMERS: a 60-second tick fetches any calendar whose last
-// fetch is older than five minutes, and the on-return trigger calls the same
-// function. A single "is anything stale?" predicate is easier to reason about
-// than a periodic timer racing an event.
+// fetch is older than the staleness window, and the on-return trigger calls the
+// same function. A single "is anything stale?" predicate is easier to reason
+// about than a periodic timer racing an event.
+//
+// The window was five minutes until the user measured the cost of it by hand
+// (FINDINGS 2026-08-29): an event you have just created takes up to six minutes
+// to appear, and the wait is at its worst exactly when you are watching for it.
+// At one minute the window and the tick coincide, so this is now effectively a
+// once-a-minute poll -- deliberately. A calendar fetch is two small requests, so
+// even that is a few thousand calls a day against a quota measured in millions.
+// The predicate is kept rather than dropped: it is what stops the ON-RETURN
+// trigger re-fetching on every hop between agents.
 // ---------------------------------------------------------------------------
 
 // Overridable for the same reason COCKPIT_REAP_MS is: a suite cannot wait a
 // minute for a tick, let alone five for a staleness edge. An unset or bogus value
 // falls through the ||, so production and a plain run are the documented numbers.
 const AGENDA_TICK_MS = Number(process.env.COCKPIT_AGENDA_TICK_MS) || 60_000;
-const AGENDA_STALE_MS = Number(process.env.COCKPIT_AGENDA_STALE_MS) || 5 * 60_000;
+const AGENDA_STALE_MS = Number(process.env.COCKPIT_AGENDA_STALE_MS) || 60_000;
 // The loopback-stub seam, spelled exactly as the `agenda` CLI spells it so one
 // test can point both at the same fake Google. Empty means the real endpoints.
 const AGENDA_ORIGIN = process.env.AGENDA_ORIGIN || "";

@@ -1118,7 +1118,7 @@ same "no line in this suite names a real Google host" \
 # The two timing seams are test-only. Unset, the daemon must be on the numbers
 # DESIGN 2.5 states -- so the defaults are asserted in the source, not trusted.
 same "the tick defaults to 60s"        "$(grep -c 'COCKPIT_AGENDA_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
-same "staleness defaults to 5 minutes" "$(grep -c 'COCKPIT_AGENDA_STALE_MS) || 5 \* 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "staleness defaults to one minute" "$(grep -c 'COCKPIT_AGENDA_STALE_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
 
 kill $D3PID 2>/dev/null; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""

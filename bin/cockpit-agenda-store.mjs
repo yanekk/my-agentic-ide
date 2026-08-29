@@ -21,7 +21,7 @@
 //   * 0600 on all three, the cache included -- it holds your meeting titles.
 //   * a corrupt agenda.json is MOVED ASIDE rather than silently replaced: it holds
 //     the sign-ins, and discarding a refresh token costs two browser round trips.
-//     The cache gets no such treatment; it is re-fetchable in five minutes.
+//     The cache gets no such treatment; it is re-fetchable within a minute.
 //
 // This module is the dumb end of the boundary (DESIGN 3.1): it stores what it is
 // given and guesses at nothing. Google's downloaded client JSON is nested
@@ -267,7 +267,7 @@ export function setColour(slug, colour) {
 
 /**
  * Never throws either, and -- unlike the state -- a corrupt cache is simply
- * ignored, not moved aside. It is re-fetchable in five minutes, so a pile of
+ * ignored, not moved aside. It is re-fetchable within a minute, so a pile of
  * agenda-cache.json.corrupt-* files would be litter with nothing in it.
  */
 export function readCache() {

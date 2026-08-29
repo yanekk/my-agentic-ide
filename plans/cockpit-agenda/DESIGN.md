@@ -142,8 +142,10 @@ your calendar any more, they are tombstones in the API response.
 
 ### 2.5 Refreshing
 
-**Every five minutes, and on return to the cockpit if the last fetch is older than five
-minutes.** "On return" is the transition back to the fleet *list* — you opened the window, or
+**Every minute, and on return to the cockpit if the last fetch is older than a minute.**
+(Five minutes until 2026-08-29, when the user measured the wait by hand and changed it --
+FINDINGS. An event you have just added took up to six minutes to appear, which is precisely the
+moment the delay is least acceptable.) "On return" is the transition back to the fleet *list* — you opened the window, or
 you stepped out of an agent — which the daemon already detects (`onExit` in `cockpitd.mjs`).
 
 The window fetched is **from the start of today to the end of tomorrow**, local time, so the
@@ -157,7 +159,7 @@ and the pane watches the state directory and redraws, exactly as the strip alrea
 `terminals.json`.
 
 **One tick, not two timers.** The daemon runs a 60-second tick that fetches any calendar whose
-last fetch is older than five minutes; the on-return trigger calls the same function. A single
+last fetch is older than a minute; the on-return trigger calls the same function. A single
 "is anything stale?" predicate is easier to reason about than a periodic timer racing an event.
 
 **Nothing is scheduled when nothing is configured.** With no calendars the tick returns
@@ -214,7 +216,7 @@ whose calendar calls 403. The remedy is to sign in again and tick the box — so
 `auth` and renders `work  calendar permission not granted · agenda add work`. Telling someone to
 `agenda rm` a calendar that is fine would destroy the configuration and fix nothing.
 
-**Staleness is only reported when a fetch has actually failed.** A cache five minutes old
+**Staleness is only reported when a fetch has actually failed.** A cache a minute or two old
 during normal operation is not stale, it is current; saying "5m ago" every time would make the
 line meaningless.
 
