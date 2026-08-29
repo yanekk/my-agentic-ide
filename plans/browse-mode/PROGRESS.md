@@ -38,16 +38,18 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** Phase 0 done and reviewed; T01 built and awaiting review. Browse mode splits the diff
-slot in two — browser left, viewer right — and nothing is typed. The push decision is now pure
-and exhaustively tested (`spikes/browse-test/`, 59 checks); `spikes/cockpit-test`,
-`notes-test` and `agenda-test` all still green. **Read FINDINGS before T02** — it carries the
-two contracts the model deliberately pushed onto its caller.
+**Status:** Phase 0 and T01 done and reviewed. Browse mode splits the diff slot in two — browser
+left, viewer right — and nothing is typed. The push decision is pure and exhaustively tested
+(`spikes/browse-test/`, 62 checks); `spikes/cockpit-test`, `notes-test` and `agenda-test` all
+still green. **Read FINDINGS before T02** — it now carries **four** contracts the model cannot
+enforce and hands to its caller: realpath both sides, a numeric `line`, and reject a path that is
+empty or holds `\r`/`\n`.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T01** — the only 🔍. Check the payload bytes (`\x05`, `\r`,
-never `\n`), the 1-based `tabswitch`, and the call the implementer made on `realpath`: the model
-is pure, so it degrades to an absolute label and hands both resolutions to T02.
+**Next `pir-work` will:** **implement T02** — `cockpit-open.mjs`: pane lookup, the locked tab-list
+state, and the sending. Reuse the agenda store's `withLock` (lock-file argument) rather than
+writing a third copy; `spikes/agenda-test` must stay green, and re-run it **alone** before
+believing a red one.
 
 ## Tasks
 
@@ -57,7 +59,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | Pair-in-the-slot spike + promote the planning probes | — | ✅ | Reviewed: all five probes re-run from a clean checkout, **80 checks** green, no mux server or temp dir left behind, an inherited `WEZTERM_UNIX_SOCKET` ignored. Two defects fixed — the 26-vs-19 ms swap timing did not reproduce (REPS 6→20; direction holds, figure does not), and the 47/72 divider is **re-imposed** each restore, not preserved (T05's to decide). Deviations accepted. |
-| T01 | `cockpit-open-model.mjs` — the pure decision | — | 🔍 | `planPush` + `spikes/browse-test/` (**59 checks**, all rows of the doc's list). Deviations: the suite is `run.sh` + `harness.mjs` + `model.test.mjs`, matching `spikes/agenda-test`, not one file. **`realpath` cannot live here** (pure side) — the model degrades to an absolute label, never a `..` chain; **T02 owes both realpaths**. See FINDINGS. |
+| T01 | `cockpit-open-model.mjs` — the pure decision | — | ✅ | Reviewed: every doc row verified, both deviations accepted (`realpath` is genuinely T02's), and the boundary grep proven able to fail against a control module that imports `node:fs`. One defect fixed — `..` climbing past `/` was carried upward, emitting a real `..` chain against a root of `/`. Probed empty/CR paths → T02. **62 checks**, not the 59 claimed (was 57). |
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ⬜ | Reuses the agenda store's `withLock` (given a lock-file argument), rather than writing a third copy. `spikes/agenda-test` must stay green. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ⬜ | The `browse` command is **gone** — the daemon launches broot. Touches `install.sh`, `cockpit-layout.sh`, `CLAUDE.md`. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ⬜ | Carries the pane detection T06 used to own — without it the 1 s healer types over a healthy pair. |
@@ -69,7 +71,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** T01
+**Review queue:** *(empty — T02 is next to be built)*
 
 ## Blocked on the user
 
