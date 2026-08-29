@@ -704,6 +704,12 @@ Each agent gets its own terminals **and its own revdiff**, and so does the fleet
 list (cwd = the cockpit repo). Only the diff and the active terminal are on screen
 at a time, in the two slots; the strip is always present on the terminal's edge.
 
+The list's set is a set like any other: `⌥t` / `[+ add]`, `⌥[` / `⌥]`, `⌥w` / `[x]`
+and `select-<n>` all work there, opening at `panes.repo` instead of a worktree, and
+its extra shells park and return on an agent switch the same way. `terminalCommand`
+was once guarded to attached agents only, which left the strip drawing buttons that
+did nothing whenever the list was up.
+
 Switching does **not** open a new shell, `cd` a shared one, or restart revdiff.
 The outgoing pane is moved into a tab of its own and the incoming pane is moved
 back into the slot:

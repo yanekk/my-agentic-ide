@@ -683,6 +683,47 @@ check "repo shell moved back into the slot"      "--move-pane-id 30" "$CALLS"
 refute "no agent pane was killed on detach"      "kill-pane" "$CALLS"
 
 echo
+echo "== 6b. the fleet LIST has terminals of its own: ⌥t / [+ add] work unattached =="
+# The list's shells are a terminal set like any agent's -- the strip draws its
+# [+ add] and each row's [x] whether an agent is entered or not, and the footer
+# always legends ⌥t. These used to be silently dropped when no agent was attached,
+# so every one of those buttons was drawn and dead. A new one opens at the cockpit
+# repo ($WT here, panes.repo), NOT at some agent's worktree.
+# Nets to zero: the fresh pane is closed again, leaving pane 30 in the slot for the
+# sections below.
+: > "$CALLS"
+echo new >> "$T/state/cmd"                        # ⌥t / [+ add], at the list
+nap 2
+check "a second repo shell was opened"           '"n":2' "$T/state/terminals.json"
+check "...for the repo, not an agent"            '"agent":"repo"' "$T/state/terminals.json"
+check "...at the cockpit repo, not a worktree"    "--cwd $WT --" "$CALLS"
+check "...and it can leave notes on that repo"   "COCKPIT_REPO=$WT" "$CALLS"
+check "opening it was logged against 'repo'"     "for repo (2 total) at $WT" "$T/daemon.log"
+
+# Cycling works too: prev shows #1 again and parks #2, both still alive.
+: > "$CALLS"
+echo prev >> "$T/state/cmd"
+nap 2
+check "cycling back showed repo shell #1"        '"n":1,"active":true' "$T/state/terminals.json"
+check "repo shell #2 was parked, not killed"     "move-pane-to-new-tab" "$CALLS"
+refute "no repo shell was killed by cycling"     "kill-pane" "$CALLS"
+
+# And closing by number, the strip's [x] on a parked one.
+: > "$CALLS"
+echo close-2 >> "$T/state/cmd"
+nap 2
+check "[x] closed the parked repo shell"         "closed parked terminal pane" "$T/daemon.log"
+refute "back to one repo shell"                  '"n":2' "$T/state/terminals.json"
+
+# The last one is refused here exactly as it is for an agent: the slot must always
+# hold a terminal.
+: > "$CALLS"
+echo close >> "$T/state/cmd"                      # ⌥w on the lone repo shell
+nap 2
+refute "closing the last repo shell killed nothing" "kill-pane" "$CALLS"
+check "refusing the last was logged against 'repo'" "refusing to close the last terminal for repo" "$T/daemon.log"
+
+echo
 echo "== 7. an agent that leaves the fleet has BOTH its panes reaped =="
 # Two consecutive misses are required, so one bad read cannot kill a shell.
 : > "$CALLS"

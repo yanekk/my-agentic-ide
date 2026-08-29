@@ -288,7 +288,9 @@ const REAP_STRIKES = 2;
  *
  * An agent has ONE diff but MANY terminals -- VSCode's terminal-tab model. Only
  * `cur`'s pane is in the slot at a time; the rest are parked in tabs of their
- * own, still running. The repo (fleet-list) context keeps a single shell.
+ * own, still running. The repo (fleet-list) context is one of these sets like any
+ * other: it starts with the single shell the layout script made, and ⌥t / [+ add]
+ * give it more, parked and restored on the same path as an agent's.
  */
 const terminals = new Map([[REPO_KEY, { panes: [panes.shell], cur: 0 }]]);
 /**
@@ -697,12 +699,19 @@ async function showTerminal(key, cwd, label) {
 }
 
 /**
- * new / next / prev / close, applied to the VISIBLE agent's terminals. Agents
- * only: at the fleet list the slot holds the single repo shell, so these are
- * ignored. Shares the reconcile lock so a keypress can never race a pane swap.
+ * new / next / prev / close, applied to the VISIBLE terminal set -- an agent's, or
+ * the fleet list's own repo shells.
+ *
+ * These used to be agents-only, on the assumption that the list's slot held ONE
+ * repo shell. Nothing else in here believed that: `terminals` is keyed the same
+ * way for REPO_KEY as for a job id, the strip draws its [+ add] and [x] buttons
+ * off that list whether an agent is entered or not, and the footer legend says
+ * `⌥t new` on every screen. So the guard did not simplify anything -- it just made
+ * every one of those gestures a button that visibly does nothing.
+ *
+ * Shares the reconcile lock so a keypress can never race a pane swap.
  */
 async function terminalCommand(verb, attempt = 0) {
-  if (!attached || visibleKey === REPO_KEY) return;
   // A keystroke must not be lost just because a reconcile happens to be running:
   // back off and retry rather than dropping it. reconcile holds the lock only for
   // the length of one pane swap, so a handful of tries covers it.
@@ -713,6 +722,12 @@ async function terminalCommand(verb, attempt = 0) {
   reconciling = true;
   try {
     const key = visibleKey;
+    // Where a NEW shell is opened. Read inside the lock, off the visible key, so
+    // it cannot disagree with `key` -- at the fleet list that is the cockpit repo
+    // (same cwd the first repo shell was spawned at), attached it is the agent's
+    // live worktree.
+    const cwd = key === REPO_KEY ? panes.repo : attached?.worktree;
+    const label = key === REPO_KEY ? "repo" : key;
     const table = paneTable();
     if (!table) return;
     const live = new Set(table.map((p) => p.pane_id));
@@ -724,14 +739,15 @@ async function terminalCommand(verb, attempt = 0) {
     const anchor = inCockpit(current, table, cockpitTab) ? current : undefined;
 
     if (verb === "new") {
-      if (entry.panes.length >= MAX_TERMS) return log(`terminal cap (${MAX_TERMS}) reached for ${key}`);
-      const id = insertIntoSlot(anchor, { cwd: attached.worktree }, cockpitTab);
-      if (id === undefined) return log(`could not open a new terminal for ${key}`);
-      if (anchor !== undefined) parkPane(anchor, key, cockpitTab);
+      if (entry.panes.length >= MAX_TERMS) return log(`terminal cap (${MAX_TERMS}) reached for ${label}`);
+      if (cwd === undefined) return log(`no cwd to open a terminal for ${label}`);
+      const id = insertIntoSlot(anchor, { cwd }, cockpitTab);
+      if (id === undefined) return log(`could not open a new terminal for ${label}`);
+      if (anchor !== undefined) parkPane(anchor, label, cockpitTab);
       entry.panes.push(id);
       entry.cur = entry.panes.length - 1;
-      termSpawnCwd.set(id, attached.worktree);
-      log(`opened terminal pane ${id} for ${key} (${entry.panes.length} total)`);
+      termSpawnCwd.set(id, cwd);
+      log(`opened terminal pane ${id} for ${label} (${entry.panes.length} total) at ${cwd}`);
     } else if (verb === "next" || verb === "prev") {
       if (entry.panes.length < 2 || anchor === undefined) return;
       const delta = verb === "next" ? 1 : -1;
@@ -741,12 +757,12 @@ async function terminalCommand(verb, attempt = 0) {
       }
       parkPane(anchor, key, cockpitTab);
       entry.cur = entry.panes.indexOf(incoming);
-      log(`switched to terminal pane ${incoming} for ${key}`);
+      log(`switched to terminal pane ${incoming} for ${label}`);
     } else if (/^select-\d+$/.test(verb)) {
       // `select-<n>` (clicking a terminal's label in the strip) shows that
       // 1-indexed terminal outright, rather than cycling to it like next/prev.
       const idx = Number(/^select-(\d+)$/.exec(verb)[1]) - 1;
-      if (idx < 0 || idx >= entry.panes.length) return log(`no terminal #${idx + 1} for ${key}`);
+      if (idx < 0 || idx >= entry.panes.length) return log(`no terminal #${idx + 1} for ${label}`);
       if (idx === entry.cur || anchor === undefined) return;   // already shown, or no slot to swap
       const incoming = entry.panes[idx];
       if (insertIntoSlot(anchor, { moveId: incoming }, cockpitTab) === undefined) {
@@ -754,14 +770,14 @@ async function terminalCommand(verb, attempt = 0) {
       }
       parkPane(anchor, key, cockpitTab);
       entry.cur = entry.panes.indexOf(incoming);
-      log(`selected terminal pane ${incoming} for ${key}`);
+      log(`selected terminal pane ${incoming} for ${label}`);
     } else if (verb === "close" || /^close-\d+$/.test(verb)) {
-      if (entry.panes.length < 2) return log(`refusing to close the last terminal for ${key}`);
+      if (entry.panes.length < 2) return log(`refusing to close the last terminal for ${label}`);
       // `close-<n>` (a strip [x]) names a 1-indexed terminal; bare `close` (⌥w) is
       // whichever is on screen.
       const cm = /^close-(\d+)$/.exec(verb);
       const target = cm ? entry.panes[Number(cm[1]) - 1] : anchor;
-      if (target === undefined) return cm ? log(`no terminal #${cm[1]} for ${key}`) : undefined;
+      if (target === undefined) return cm ? log(`no terminal #${cm[1]} for ${label}`) : undefined;
       if (target === anchor) {
         // On screen: show a sibling (the previous one, or the next if this is the
         // first), then kill the pane being closed -- restoring collapses the split
@@ -772,7 +788,7 @@ async function terminalCommand(verb, attempt = 0) {
         wez(["kill-pane", "--pane-id", String(anchor)]);
         removeTerminal(entry, anchor);
         entry.cur = entry.panes.indexOf(incoming);
-        log(`closed terminal pane ${anchor} for ${key} (${entry.panes.length} left)`);
+        log(`closed terminal pane ${anchor} for ${label} (${entry.panes.length} left)`);
       } else {
         // A parked terminal (not on screen): no slot dance -- just kill it. Pin cur
         // back onto the terminal that IS shown, since removing an earlier index
@@ -781,7 +797,7 @@ async function terminalCommand(verb, attempt = 0) {
         wez(["kill-pane", "--pane-id", String(target)]);
         removeTerminal(entry, target);
         entry.cur = Math.max(0, entry.panes.indexOf(shown));
-        log(`closed parked terminal pane ${target} for ${key} (${entry.panes.length} left)`);
+        log(`closed parked terminal pane ${target} for ${label} (${entry.panes.length} left)`);
       }
     } else {
       return;
@@ -1950,7 +1966,10 @@ tail(CMD_FILE, (line) => {
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
   // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.
-  if ((verb === "next" || verb === "prev") && diffPaneFocused()) {
+  // Unattached there IS no diff mode -- the top pane is the welcome/notes display,
+  // not a revdiff -- so focus there must not swallow the keys: at the fleet list
+  // they always mean terminals, which is the only thing up there that can cycle.
+  if ((verb === "next" || verb === "prev") && attached && visibleDiff !== REPO_KEY && diffPaneFocused()) {
     if (customPromptOpen) return;       // the prompt owns the pane; keys are swallowed until it resolves
     diffModeCommand(verb);
   } else terminalCommand(verb);
