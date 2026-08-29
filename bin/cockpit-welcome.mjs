@@ -4,14 +4,15 @@
 // sit here, whose only content was a one-line echo and a prompt showing the
 // repo's directory name -- which read as "the cockpit is just a git prompt".
 //
-// It is split down the middle: the cockpit's own greeting on the left, the
-// NOTES list on the right. Both halves are drawn by THIS ONE PROCESS -- the
-// notes column is a virtual pane, not a WezTerm one. That is deliberate: the
-// diff slot is swapped by parking exactly one pane and splitting the incoming
-// one into it (see insertIntoSlot/rebuildDiffSlot in cockpitd.mjs, and the
-// measurements in spikes/pane-swap), and a real second pane up here would make
-// every one of those swaps a two-pane dance for a list that nothing types into.
-// Drawing it costs one string; splitting it would cost the invariant.
+// It is split down the middle: the cockpit's own greeting on the left, and on
+// the right the NOTES list over a rule over the AGENDA. All of it is drawn by
+// THIS ONE PROCESS -- the right column is a virtual pane, not a WezTerm one, and
+// so are the two sections inside it. That is deliberate: the diff slot is
+// swapped by parking exactly one pane and splitting the incoming one into it
+// (see insertIntoSlot/rebuildDiffSlot in cockpitd.mjs, and the measurements in
+// spikes/pane-swap), and a real second or third pane up here would make every one
+// of those swaps a two- or three-pane dance for lists that nothing types into.
+// Drawing them costs one string; splitting them would cost the invariant.
 //
 // So attaching an agent still parks this whole pane and swaps in revdiff at full
 // width, exactly as before -- the notes column goes with it and comes back
@@ -20,13 +21,17 @@
 // Like cockpit-strip.mjs this is PURE DISPLAY: it never runs a shell command and
 // never moves a pane, so cockpitd can own the pane as the REPO_KEY diff slot.
 // Notes are added and edited from the `note` command in any cockpit terminal
-// (bin/cockpit-note.mjs); this only ever reads them.
+// (bin/cockpit-note.mjs); this only ever reads them. The agenda is the same
+// shape: `agenda` (bin/cockpit-agenda.mjs) configures it and cockpitd fetches
+// it, and this reads the two state files and draws what they say.
 //
 // Started for you by bin/cockpit-layout.sh.
 
 import fs from "node:fs";
 
 import { DIR, cockpitRepo, readNotes, relTime } from "./cockpit-notes.mjs";
+import { agendaHeight, clip, pad, renderAgenda, visibleLen } from "./cockpit-agenda-model.mjs";
+import { readCache, readState } from "./cockpit-agenda-store.mjs";
 
 const ESC = "\x1b[";
 
@@ -47,17 +52,12 @@ const GREETING_SHORT = [
 ];
 const greeting = (w) => (w >= 58 ? GREETING_LONG : GREETING_SHORT);
 
-// Visible width ignores the escape sequences, so centring and clipping line up
-// with what is actually on screen.
-const visibleLen = (s) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
-const pad = (s, w) => s + " ".repeat(Math.max(0, w - visibleLen(s)));
-
-/** Clip to `w` VISIBLE columns, marking the cut so a truncated note reads as one. */
-function clip(s, w) {
-  if (w <= 0) return "";
-  if (visibleLen(s) <= w) return s;
-  return `${s.slice(0, Math.max(0, w - 1))}…`;
-}
+// visibleLen/pad/clip come from the model now, where T03 put them, rather than
+// being kept in a second copy here: both sections of the right column must
+// measure a string identically or the rule between them will not line up with
+// the rows above and below it. The model's `clip` is also the better one -- it
+// walks the string, where this file's copy sliced raw bytes and could cut an
+// escape in half, spilling `[38;5;37m` into the pane.
 
 // --- the notes column ------------------------------------------------------
 // Fixed-width id and date columns so the texts line up as a block and the eye can
@@ -68,7 +68,7 @@ const ID_W = 6;
 const DATE_W = 6;
 const GAP = 2;
 
-function notesColumn(width, rows) {
+function notesColumn(width, rows, now) {
   const repo = cockpitRepo();
   const notes = repo ? readNotes(repo) : [];
   const out = [];
@@ -96,7 +96,6 @@ function notesColumn(width, rows) {
   const overflow = notes.length > room;
   const shown = overflow ? notes.slice(0, room - 1) : notes;
 
-  const now = Date.now();
   const textW = width - ID_W - DATE_W - GAP * 2;
   for (const n of shown) {
     if (textW < 8) {                       // too narrow for columns: text only
@@ -119,6 +118,74 @@ function notesColumn(width, rows) {
   return out;
 }
 
+// --- the agenda section ----------------------------------------------------
+// Below the notes, under a rule. Everything it draws is decided by the model's
+// one call (DESIGN 3.3); this half only reads the two state files, budgets the
+// rows and hands over the arguments the model may not read for itself.
+
+const SEP = 1;              // the rule between the two sections
+const MIN_NOTES = 3;        // a heading, a rule and one note. Below that the
+                            // section is not a list, it is a label.
+
+// The machine's zone, read ONCE and on this side of the boundary. Without it the
+// model places every day boundary and every clock in UTC (DESIGN 3.1: reading
+// Intl's default zone inside the model is the environment read the purity grep
+// cannot see). It defaults to UTC, so forgetting it is a wrong column rather than
+// a crash and nothing would fail for you.
+const TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+  catch { return "UTC"; }
+})();
+
+/**
+ * The agenda's lines, or null when it gets no rows at all and the notes take the
+ * whole column.
+ *
+ * The split is CONTENT-DRIVEN rather than a fixed half: in the evening the agenda
+ * is two lines, and a fixed half would show `nothing left today` over four blank
+ * rows while the notes overflowed below it (DESIGN 2.6). `agendaHeight` answers
+ * how many rows it wants without rendering twice and measuring.
+ *
+ * Nothing in here may throw: this is the resting screen of the whole cockpit, and
+ * a pane that will not paint because a JSON file lost a brace is worse than one
+ * that has forgotten a calendar (DESIGN 2.7). The store already starts clean on a
+ * corrupt file; the catch is for everything nobody thought of.
+ */
+function agendaBlock(width, rows, now) {
+  try {
+    const calendars = readState().calendars;
+    const cache = readCache();
+    const wanted = agendaHeight({ width, calendars, cache, now, tz: TZ });
+    const cap = Math.max(4, Math.floor((rows - SEP) / 2));
+    let n = Math.min(wanted, cap);
+    // The notes' floor wins over the agenda's share: three rows is the least that
+    // still reads as a list.
+    if (rows - SEP - n < MIN_NOTES) n = Math.max(0, rows - SEP - MIN_NOTES);
+    if (n <= 0) return null;
+    return renderAgenda({ width, rows: n, calendars, cache, now, tz: TZ });
+  } catch {
+    return null;
+  }
+}
+
+/** NOTES over a rule over AGENDA, in exactly `rows` lines. */
+function rightColumn(width, rows, now) {
+  const agenda = agendaBlock(width, rows, now);
+  const notesRows = agenda ? rows - SEP - agenda.length : rows;
+
+  // Sliced AND padded: the notes' empty state draws four lines whatever it is
+  // given, and a section that returned one line too many would push the rule and
+  // the agenda off the bottom of the pane.
+  const out = notesColumn(width, notesRows, now).slice(0, notesRows);
+  while (out.length < notesRows) out.push("");
+
+  if (agenda) {
+    out.push(`${ESC}2m${"─".repeat(width)}${ESC}0m`);
+    out.push(...agenda);
+  }
+  return out;
+}
+
 // --- the frame -------------------------------------------------------------
 // Recomputed on every render so it tracks resizes -- the pane is resized to the
 // full tab and back on every agent switch, so it takes two SIGWINCHes per swap.
@@ -126,6 +193,10 @@ function notesColumn(width, rows) {
 function render() {
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
+  // The ONE clock read in this process (DESIGN 3.4 -- the daemon's tick is the
+  // other one in the whole feature). Both sections are drawn from this single
+  // instant, so a note's age and the agenda's `NOW` row can never disagree.
+  const now = Date.now();
 
   // Below this the notes column would be a few characters wide and unreadable, so
   // the pane keeps its old single-column greeting rather than showing two useless
@@ -149,7 +220,7 @@ function render() {
   if (!split) {
     for (let r = 0; r < rows; r++) lines.push(centre(left[r] ?? "", cols));
   } else {
-    const right = notesColumn(rightW, rows);
+    const right = rightColumn(rightW, rows, now);
     for (let r = 0; r < rows; r++) {
       const l = pad(centre(clip(left[r] ?? "", leftW), leftW), leftW);
       lines.push(`${l} ${ESC}2m│${ESC}0m ${clip(right[r] ?? "", rightW)}`);
@@ -164,12 +235,18 @@ process.stdout.write(`${ESC}?25l`);                // hide the cursor
 render();
 process.stdout.on("resize", render);
 setInterval(render, 2000);                          // repaint if a resize is missed
-// Watch the state DIRECTORY, not notes.json: the `note` command replaces it
-// atomically (temp + rename), so a file watch would go deaf after the first
-// write -- the same reason the strip and the review watcher watch directories.
+// Watch the state DIRECTORY, not the files: `note` and the agenda's store both
+// replace them atomically (temp + rename), so a file watch would go deaf after
+// the first write -- the same reason the strip and the review watcher watch
+// directories. agenda-cache.json is what the daemon rewrites every five minutes,
+// and agenda.json is what `agenda add` writes, so both belong here: a calendar
+// attached in a terminal should appear up here without waiting for the 2s tick.
+const INTERESTING = new Set([
+  "notes.json", "panes.json", "agenda.json", "agenda-cache.json",
+]);
 try {
   fs.watch(DIR, (_e, name) => {
-    if (!name || name === "notes.json" || name === "panes.json") render();
+    if (!name || INTERESTING.has(name)) render();
   });
 } catch { /* the 2s repaint covers it */ }
 

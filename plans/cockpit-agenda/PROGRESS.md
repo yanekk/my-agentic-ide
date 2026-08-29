@@ -8,23 +8,18 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T05 is reviewed and done; **the whole command surface is finished and the
-feature is usable end to end from a terminal**, with nothing yet drawn in the pane. That is what
-T06 renders and T07 refreshes, and both are now unblocked. The review found **two defects and
-fixed them**, both in lines the CLI builds itself and the model therefore never sees: untrusted
-Google text (a calendar title, an account email, an error message) drew straight into the
-terminal, and `agenda add __proto__` attached a calendar whose cache write silently vanished and
-then killed bare `agenda`. The model's sanitiser is now **exported as `safeText`** and **T06 and
-T07 must use it too** — that is the top FINDINGS row. Measured this session with outbound traffic
-denied: agenda-test **579** (was 562), notes-test **39**, cockpit-test **134**, 752 assertions,
-three ALL PASS. Nothing is waiting on the user.
-**Last updated:** 2026-08-28
-**Next `pir-work` will:** **implement T06** — the right column, NOTES over AGENDA, in
-`cockpit-welcome.mjs`; `notes-test` (39) must stay green. **Read the top four FINDINGS rows
-first:** sanitise everything off the wire with the model's `safeText`; `cockpit-welcome.mjs`
-still has its own `clip`, which behaves differently from the model's; the scope line reads
-`TODAY · Wed 26 Aug`, not the bare date its task doc draws; and a red `cockpit-test` §9d is
-probably a flake, not you.
+**Status:** T06 is implemented and **awaiting review** — the agenda is now on screen, under
+NOTES in the fleet view's right column, and the pane follows the cache without a restart. T07
+(the daemon's refresh) is the only thing between the feature and a column that fills itself in:
+today it draws whatever `agenda` last cached. Measured this session: agenda-test **579**,
+notes-test **39 → 88**, cockpit-test **134**, 801 assertions, three ALL PASS.
+**One half of T06 is unverified and only the user can close it** — see *Blocked on the user*:
+nothing here can see the screen, so whether the divider lines up and whether the two calendars'
+colours are distinguishable on their theme are both open.
+**Last updated:** 2026-08-29
+**Next `pir-work` will:** **review T06**. Read its Notes cell for the eight deviations, and the
+top two FINDINGS rows: the frame harness gained a frozen clock and a `TZ`, and the resting pane
+can now quarantine a corrupt `agenda.json` — the one write this display pane makes.
 
 ## Tasks
 
@@ -39,7 +34,7 @@ done · ⛔ blocked, needs a human.
 | T03 | Draw the column | T01, T02 | ✅ | Reviewed; **three defects fixed**, all lines escaping the `rows`/`width` contract: the **header was never clipped** (over-width below 11 cols, and the sweep started at 12); **two rows could both wear `NOW`** (one Google event id spans calendars — now compared by identity); an **event title could write control sequences** into the pane (a newline painted a 7th line out of 6). All seven deviations approved. 288 → **300**. Probed: narrow widths, wrapping loud lines vs `agendaHeight`, escape smuggling. |
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
-| T06 | Right column: NOTES over AGENDA | T03, T05 | ⬜ | Touches `cockpit-welcome.mjs`; `notes-test` must stay green. |
+| T06 | Right column: NOTES over AGENDA | T03, T05 | 🔍 | Built: the content-driven row budget, the rule, the bottom-anchored agenda, `agenda.json`/`agenda-cache.json` on the pane's directory watch. notes-test 39 → **88**, all 39 originals kept. Eight deviations, accounted for in the commit: model helpers imported; `tz` passed; scope line per DESIGN §2.3, not the doc's mock-up; §8's frame 16 → 24 rows; harness gained a frozen clock, a `TZ` and a `;` in its escape strip; agenda anchored to the foot; `agendaBlock` catches everything; two guard sections (§10, §11) the doc did not list. **Hands-on half unverified.** |
 | T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
@@ -47,12 +42,19 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty — T06 is next, and it is an implementation.)*
+**Review queue:** **T06** — the only entry.
 
 ## Blocked on the user
 
-*(Empty. T00's hand-verification is recorded in FINDINGS 2026-08-27, T05's in FINDINGS
-2026-08-28. Nothing waiting.)*
+**T06's hands-on half is open.** The three suites prove the string; nothing here can see the
+pane. Close the WezTerm window and reopen it (the supported rebuild), then look at the fleet
+view's top pane and answer two things: does the divider between the greeting and the right
+column line up down the whole pane, and are the two calendars' colours actually distinguishable
+on your terminal theme? Neither can be automated, and the answer goes in `FINDINGS.md` with the
+date. **Until it is answered, T06's screen half is unverified**: a review can confirm the
+string the tests assert, never the pixels.
+
+*(T00's hand-verification is recorded in FINDINGS 2026-08-27, T05's in FINDINGS 2026-08-28.)*
 
 The user's `~/.claude/cockpit/bin/agenda` symlink was created by hand for that check; every
 cockpit rebuild relinks it anyway, so there is nothing to undo.
