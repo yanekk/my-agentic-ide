@@ -78,10 +78,19 @@ const viewer = panes?.viewer;
 const viewerAgent = panes?.viewerAgent;
 const viewerRoot = panes?.viewerRoot;
 
-// The pane id has to survive being turned into an argument for `--pane-id`; a
-// string "12" from a hand-edited file is fine, anything else is not a pane.
-const paneId = Number(viewer);
-if (viewer === undefined || viewer === null || !Number.isInteger(paneId) || paneId < 0) {
+// A pane id is a NUMBER (DESIGN 3.4), and `Number()` on its own is far too
+// generous about what counts as one: "", " ", false and [] all coerce to 0 --
+// which is a REAL pane, and on a fresh mux the first one. A `viewer` of any of
+// those would type micro's command bar into whatever holds pane 0, where in a
+// revdiff every character is a keybinding: precisely the accident every refusal
+// in this file exists to prevent. So the accepted shapes are named rather than
+// coerced -- a non-negative integer, or the all-digits string a hand-edited
+// panes.json might carry.
+const paneId =
+  typeof viewer === "number" ? viewer
+    : (typeof viewer === "string" && /^\d+$/.test(viewer)) ? Number(viewer)
+      : NaN;
+if (!Number.isInteger(paneId) || paneId < 0) {
   die("no viewer pane — the attached agent is not in browse mode");
 }
 // Without the jobId there is no key to file the tab list under, and writing it
@@ -108,6 +117,15 @@ try {
   // (DESIGN 2.n), so say which one instead.
   die(`no such file: ${rawFile}`);
 }
+// The guard on `rawFile` sees the ARGUMENT; what goes into the payload is the
+// RESOLVED path, and a symlink can resolve into a directory whose own name holds
+// a carriage return -- `plain.js` -> `.../we\rird/f.js` sends `open we\rird/f.js`,
+// which micro submits at the `\r` as `open we`. Measured in review. So check the
+// bytes that are actually going to be sent, not only the ones that were typed.
+if (/[\r\n]/.test(file)) {
+  die("resolved path contains a newline or carriage return, refusing to send it");
+}
+
 // A root that cannot be resolved is not fatal: the push still works, the label is
 // just longer. Losing the push over a cosmetic detail would be the worse trade.
 let root = viewerRoot;
@@ -169,7 +187,14 @@ withLock(() => {
   }
 
   all[viewerAgent] = plan.openTabs;
-  writeTabs(all);
+  try {
+    writeTabs(all);
+  } catch (e) {
+    // The push itself landed; only the record of it failed -- a full or read-only
+    // state dir. This command promises exit 1 and ONE line on stderr, and an
+    // uncaught throw here would break that interface with a stack trace instead.
+    failure = `viewer-tabs.json could not be written: ${String(e.message).split("\n")[0]}`;
+  }
 }, TABS_LOCK);
 
 if (failure) die(failure);

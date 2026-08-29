@@ -199,6 +199,30 @@ const file = path.join(REAL, "src/a.js");
 refuses("no viewer key", [file], { panes: goodPanes({ viewer: undefined }) });
 refuses("viewer is null", [file], { panes: goodPanes({ viewer: null }) });
 refuses("viewer is not a pane id", [file], { panes: goodPanes({ viewer: "not-a-pane" }) });
+// Found in review: `Number()` coerces every one of these to 0, which is a REAL
+// pane and on a fresh mux the FIRST one -- so the push landed in whatever holds
+// pane 0 instead of refusing. A pane id is a number (DESIGN 3.4); these are not.
+refuses("viewer is an empty string", [file], { panes: goodPanes({ viewer: "" }) });
+refuses("viewer is a blank string", [file], { panes: goodPanes({ viewer: " " }) });
+refuses("viewer is false", [file], { panes: goodPanes({ viewer: false }) });
+refuses("viewer is true", [file], { panes: goodPanes({ viewer: true }) });
+refuses("viewer is an empty array", [file], { panes: goodPanes({ viewer: [] }) });
+refuses("viewer is an array holding a number", [file], { panes: goodPanes({ viewer: [7] }) });
+refuses("viewer is fractional", [file], { panes: goodPanes({ viewer: 12.5 }) });
+refuses("viewer is negative", [file], { panes: goodPanes({ viewer: -1 }) });
+refuses("viewer is padded with spaces", [file], { panes: goodPanes({ viewer: " 12 " }) });
+
+// ...but the digit string a hand-edited panes.json might carry is still a pane.
+reset({ panes: goodPanes({ viewer: "42" }) });
+const strId = run([file]);
+ok("a digit string is still accepted as a pane id",
+   strId.code === 0 && strId.calls.every((c) => c[c.indexOf("--pane-id") + 1] === "42"),
+   `exit ${strId.code} ${JSON.stringify(strId.calls)}`);
+reset({ panes: goodPanes({ viewer: 0 }) });
+const paneZero = run([file]);
+ok("...and a real 0 is accepted, since only the coercions were the problem",
+   paneZero.code === 0 && paneZero.calls.every((c) => c[c.indexOf("--pane-id") + 1] === "0"),
+   `exit ${paneZero.code} ${JSON.stringify(paneZero.calls)}`);
 refuses("viewerAgent missing", [file], { panes: goodPanes({ viewerAgent: undefined }) });
 refuses("viewerAgent null", [file], { panes: goodPanes({ viewerAgent: null }) });
 refuses("viewerAgent empty", [file], { panes: goodPanes({ viewerAgent: "" }) });
@@ -219,6 +243,18 @@ ok("...and stderr names it", gone.stderr.includes("ghost.js"), gone.stderr);
 const cr = refuses("a path holding a carriage return", [`${REAL}/src/a.js\rquit`]);
 ok("...and says so", /carriage return|newline/.test(cr.stderr), cr.stderr);
 refuses("a path holding a newline", [`${REAL}/src/a.js\nquit`]);
+
+// Found in review: the guard saw the ARGUMENT, but what is sent is the RESOLVED
+// path -- and a symlink can resolve into a directory whose own name holds one.
+// Measured before the fix: `open we\rird/f.js` went out, which micro submits at
+// the `\r` as `open we`.
+const crDir = path.join(REAL, "we\rird");
+fs.mkdirSync(crDir, { recursive: true });
+fs.writeFileSync(path.join(crDir, "f.js"), "x\n");
+const crLink = path.join(REAL, "innocent.js");
+fs.symlinkSync(path.join(crDir, "f.js"), crLink);
+const viaLink = refuses("a symlink resolving into a carriage return", [crLink]);
+ok("...and says it was the resolved path", /resolved path/.test(viaLink.stderr), viaLink.stderr);
 
 // Refusing must not leave state behind either -- a tab list written under an empty
 // key would hand the next agent someone else's tabs.
@@ -244,6 +280,16 @@ reset({ panes: goodPanes({ viewerRoot: LINKED }) });
 eq("...and both unresolved at once",
    run([path.join(LINKED, "src/b.js")]).sent, ["\x05", "open src/b.js", "\r"]);
 
+// The third recorded deviation, which nothing asserted until this review: a
+// viewerRoot that does not resolve is NOT a refusal. Losing the push over a
+// cosmetic detail is the worse trade, and an unresolvable root is no evidence
+// that the viewer is wrong -- so the push lands with a longer label.
+reset({ panes: goodPanes({ viewerRoot: path.join(WORK, "no", "such", "root") }) });
+const noRoot = run([path.join(REAL, "src/a.js")]);
+ok("an unresolvable viewerRoot still pushes", noRoot.code === 0, `exit ${noRoot.code} ${noRoot.stderr}`);
+eq("...with the absolute path as the label",
+   noRoot.sent, ["\x05", `open ${fs.realpathSync(path.join(REAL, "src/a.js"))}`, "\r"]);
+
 // Outside the root there is nothing to shorten, and an absolute label is the
 // deliberate degrade -- micro can still open it.
 const outside = path.join(WORK, "real", "elsewhere.txt");
@@ -268,6 +314,21 @@ ok("...and it stops at the first failure rather than typing on", failed.calls.le
 reset({ tabs: { [AGENT]: ["src/a.js"] } });
 const failed2 = run([path.join(REAL, "src/b.js")], { STUB_FAIL: "1" });
 eq("an existing list is left exactly as it was", failed2.tabs, { [AGENT]: ["src/a.js"] });
+
+// Found in review: a state dir that cannot be written (full, read-only) threw out
+// of `writeTabs` uncaught, so the command answered with a stack trace instead of
+// the ONE line on stderr its own interface promises. A directory where the file
+// belongs is the cheapest way to make the rename fail without breaking the lock.
+reset();
+fs.mkdirSync(TABS, { recursive: true });
+const unwritable = run([file]);
+ok("an unwritable tab list still exits 1", unwritable.code === 1, `exit ${unwritable.code}`);
+ok("...with one line, not a stack trace",
+   unwritable.stderr.split("\n").length === 1 && /could not be written/.test(unwritable.stderr),
+   JSON.stringify(unwritable.stderr));
+ok("...and the push itself had already gone out", unwritable.calls.length === 3,
+   JSON.stringify(unwritable.calls));
+fs.rmSync(TABS, { recursive: true, force: true });
 
 // ---------------------------------------------------------------------------
 section("16. the tab list is per agent, and survives corruption");
