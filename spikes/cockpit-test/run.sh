@@ -84,9 +84,16 @@ retitle() {
 
 case "$sub" in
   send-text)
-    # Launching revdiff makes it the pane's foreground process, so WezTerm
-    # retitles the pane -- which is the signal the daemon reads back.
-    case "$payload" in *revdiff*) retitle "$(flag --pane-id "$@")" revdiff ;; esac
+    # Launching a program makes it the pane's foreground process, so WezTerm
+    # retitles the pane -- which is the signal the daemon reads back. For the two
+    # browse-mode halves it is the ONLY signal: measured, neither broot nor micro
+    # draws a single framed line, so get-text below deliberately answers them with
+    # a bare shell prompt and the title has to carry the whole decision.
+    case "$payload" in
+      *revdiff*) retitle "$(flag --pane-id "$@")" revdiff ;;
+      *broot*)   retitle "$(flag --pane-id "$@")" broot ;;
+      *micro*)   retitle "$(flag --pane-id "$@")" micro ;;
+    esac
     ;;
   get-text)
     pane=$(flag --pane-id "$@")
@@ -262,6 +269,22 @@ check() {  # check <description> <pattern> <file>
 }
 refute() {
   if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else echo "  ok   $1"; fi
+}
+# before <description> <earlier> <later> <file>: both present, in that order. The
+# browse-mode pane dances are ORDERED -- split the incoming occupant in, dispose of
+# the outgoing one afterwards -- and a plain grep passes just as happily backwards,
+# which is the mistake that brings a pane back at half width.
+before() {
+  local a b
+  a=$(grep -nF -- "$2" "$4" | head -1 | cut -d: -f1)
+  b=$(grep -nF -- "$3" "$4" | head -1 | cut -d: -f1)
+  if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then
+    echo "  ok   $1"
+  else
+    echo "  FAIL $1"
+    echo "       expected [$2] (line ${a:-none}) before [$3] (line ${b:-none})"
+    fail=1
+  fi
 }
 
 echo
@@ -474,9 +497,13 @@ echo "== 5d. cycling into Custom opens the ASCII prompt, unset revdiff until ans
 # Custom asks for a branch/SHA every time you cycle in (pre-filled per agent).
 # The daemon quits revdiff and types the prompt script into the SAME pane; it
 # does NOT launch revdiff until the answer comes back through the cmd channel.
-: > "$CALLS"
+# Two steps forward, because BROWSE is now the fourth stop and sits between
+# custom and uncommitted -- one `prev` from uncommitted lands on browse (11 below).
 echo 31 > "$ACTIVE"                       # focus the diff pane
-echo prev >> "$T/state/cmd"               # uncommitted -> custom (custom is last in the cycle)
+echo next >> "$T/state/cmd"               # uncommitted -> lastcommit
+nap 2
+: > "$CALLS"
+echo next >> "$T/state/cmd"               # lastcommit -> custom
 nap 2
 check "the running revdiff was quit first"        "STDIN:q\n" "$CALLS"
 check "the custom-range prompt was launched"      "cockpit-custom-prompt.mjs" "$CALLS"
@@ -498,20 +525,23 @@ check "the base was set was logged"               "custom range set for abc12345
 
 echo
 echo "== 5d''. cancelling the prompt reverts to the previous mode =="
-# Leave custom (now the mode is uncommitted), then cycle back in so the prompt
-# opens with uncommitted as the mode to fall back to, and answer with a cancel.
-echo next >> "$T/state/cmd"               # custom -> uncommitted
+# Leave custom (backwards, to last-commit -- forwards is browse now), then cycle
+# back in so the prompt opens with last-commit as the mode to fall back to, and
+# answer with a cancel.
+echo prev >> "$T/state/cmd"               # custom -> lastcommit
 nap 2
 : > "$CALLS"
-echo prev >> "$T/state/cmd"               # uncommitted -> custom, opens the prompt again
+echo next >> "$T/state/cmd"               # lastcommit -> custom, opens the prompt again
 nap 2
 check "the prompt opened again"                   "cockpit-custom-prompt.mjs" "$CALLS"
 : > "$CALLS"
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
 nap 2
-check "cancel reverted to the prior mode"         '"diffMode":"uncommitted"' "$T/state/terminals.json"
-check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+check "cancel reverted to the prior mode"         '"diffMode":"lastcommit"' "$T/state/terminals.json"
+check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
+echo prev >> "$T/state/cmd"               # back to the uncommitted default for 5e
+nap 2
 
 echo
 echo "== 5e. the diff mode is PER AGENT: a new agent is never carried into another's mode =="
@@ -824,6 +854,309 @@ sleep 3
 check "the quit was noticed and revdiff reinstated" "reinstated it" "$T/daemon.log"
 check "revdiff relaunched in the same diff pane"     "send-text --pane-id $DP" "$CALLS"
 check "...on the current range"                      "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
+
+# ===========================================================================
+# Browse mode -- the fourth stop in the diff-slot cycle (T04)
+#
+# The slot holds TWO panes here: the browser (broot) on the left and the read-only
+# viewer (micro) on the right. Everything below drives the daemon exactly as the
+# keys and the footer do, through the cmd channel, and reads the pane ids back out
+# of panes.json rather than assuming them -- by this point in the suite the slot
+# has been rebuilt once (section 8) and the ids are no longer the ones section 1
+# handed out.
+# ===========================================================================
+
+# The pane ids the daemon is publishing right now.
+pane_key() { grep -oE "\"$1\":[0-9]+" "$T/state/panes.json" | grep -oE '[0-9]+' | tail -1; }
+
+echo
+echo "== 11. ⌥[ from uncommitted lands on BROWSE and launches both halves =="
+# Browse is the fourth stop, so one step BACK from uncommitted is browse -- and it
+# must not open the custom-range prompt on the way: that is keyed on the transition
+# into `custom` specifically.
+DP="$(pane_key diff)"
+: > "$CALLS"
+echo "$DP" > "$ACTIVE"                    # focus the diff pane
+echo prev >> "$T/state/cmd"
+nap 3
+
+check  "the mode is now browse"                   '"diffMode":"browse"' "$T/state/terminals.json"
+refute "cycling into browse opens no ref prompt"  "cockpit-custom-prompt.mjs" "$CALLS"
+BR="$(pane_key diff)"; VW="$(pane_key viewer)"
+check  "the BROWSER was split into the slot"      "--top --percent 50 --pane-id $DP" "$CALLS"
+check  "...and the pane that held the slot disposed of afterwards, so it inherits it" \
+                                                  "kill-pane --pane-id $DP" "$CALLS"
+before "...in that order, or the browser comes back at half width" \
+       "--top --percent 50 --pane-id $DP" "kill-pane --pane-id $DP" "$CALLS"
+check  "the VIEWER was split off the browser's right at 60%" \
+                                                  "--right --percent 60 --pane-id $BR" "$CALLS"
+before "...only once the browser held the whole slot (60% of half a slot is not 60%)" \
+       "kill-pane --pane-id $DP" "--right --percent 60 --pane-id $BR" "$CALLS"
+check  "broot launched, with the cockpit's verb file FIRST in the --conf chain" \
+                                                  "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
+check  "micro launched read-only, with NO file argument and no review file" \
+                                                  'micro -readonly true\n' "$CALLS"
+check  "both halves start in the agent's own worktree" "--cwd $MOVED4 --" "$CALLS"
+# A split inherits NO environment, and broot's Enter verb runs `cockpit-open` by
+# name -- which exists only in the cockpit's own bin directory.
+check  "both spawned through /usr/bin/env"        "-- /usr/bin/env" "$CALLS"
+check  "...with the cockpit's bin directory on PATH, where cockpit-open lives" \
+                                                  "/state/bin:" "$CALLS"
+check  "...and COCKPIT_REPO named with it"        "COCKPIT_REPO=" "$CALLS"
+check  "the BROWSER holds focus -- that is where the gesture continues" \
+                                                  "activate-pane --pane-id $BR" "$CALLS"
+refute "...not the viewer"                        "activate-pane --pane-id $VW" "$CALLS"
+check  "panes.json names the viewer pane"         "\"viewer\":$VW" "$T/state/panes.json"
+check  "...its agent by JOB ID, not the display name" \
+                                                  '"viewerAgent":"abc12345"' "$T/state/panes.json"
+refute "...(the display name would be this)"      '"viewerAgent":"test agent"' "$T/state/panes.json"
+check  "...and its root as the agent's WORKTREE"  "\"viewerRoot\":\"$MOVED4\"" "$T/state/panes.json"
+refute "...not panes.repo, which is the projects root" \
+                                                  "\"viewerRoot\":\"$WT\"" "$T/state/panes.json"
+
+echo
+echo "== 11a. nothing revdiff-shaped is aimed at a browse pane =="
+# The worktree watch is still running (it belongs to the agent, not the mode), and
+# `R` in broot is a character typed into its filter box, not a reload.
+: > "$CALLS"
+echo "the agent keeps working" >> "$MOVED4/file.txt"
+nap 3
+refute "an agent write sends no reload to the browser" "STDIN:R\n" "$CALLS"
+refute "nothing at all was typed into the browser"     "send-text --pane-id $BR" "$CALLS"
+refute "nor into the viewer"                           "send-text --pane-id $VW" "$CALLS"
+
+echo
+echo "== 11b. the 1s healer leaves a HEALTHY pair alone =="
+# The whole reason detection lands with the mode: neither broot nor micro draws a
+# framed line, so without this both halves read as a quit revdiff and the healer
+# types a command line into two live programs, once a second. Not scaled: the
+# relaunch cooldown has to expire first.
+: > "$CALLS"
+sleep 5
+check  "the browser is seen as RUNNING, not a bare shell" \
+                                                  "browse browser pane $BR for abc12345: running" "$T/daemon.log"
+check  "the viewer is seen as RUNNING too"        "browse viewer pane $VW for abc12345: running" "$T/daemon.log"
+refute "nothing was typed into the browser"       "send-text --pane-id $BR" "$CALLS"
+refute "nothing was typed into the viewer"        "send-text --pane-id $VW" "$CALLS"
+refute "no revdiff was reinstated over either half" "revdiff --wrap" "$CALLS"
+
+echo
+echo "== 11c. a half that really was quit still reads as a shell =="
+# micro quit with Ctrl+Q: the pane falls back to a shell prompt and its title with
+# it. Healing it is T06; being able to SEE it is this task's half of the bargain.
+: > "$CALLS"
+awk -v p="$VW" '{ if ($1 == p) print $1, $2, "sh"; else print }' "$PANESTATE" > "$PANESTATE.b" \
+    && mv "$PANESTATE.b" "$PANESTATE"
+sleep 3
+check  "the quit half is reported as a shell"     "browse viewer pane $VW for abc12345: shell" "$T/daemon.log"
+refute "...and nothing was typed into it anyway"  "send-text --pane-id $VW" "$CALLS"
+refute "...nor into the browser that was fine"    "send-text --pane-id $BR" "$CALLS"
+# Put it back so the rest of the section sees a healthy pair.
+awk -v p="$VW" '{ if ($1 == p) print $1, $2, "micro"; else print }' "$PANESTATE" > "$PANESTATE.b" \
+    && mv "$PANESTATE.b" "$PANESTATE"
+
+echo
+echo "== 11d. ⌥] out of browse, from the BROWSER half -- the trap case =="
+# Focus starts in the browser, so if ⌥[/⌥] only answered to the single slot pane
+# there would be no way out of browse mode without clicking the other half first.
+: > "$CALLS"
+echo "$BR" > "$ACTIVE"                    # the browser holds focus
+echo next >> "$T/state/cmd"               # browse -> uncommitted (browse is last)
+nap 3
+check  "the keys cycled the MODE with the browser focused" \
+                                                  '"diffMode":"uncommitted"' "$T/state/terminals.json"
+check  "the browser was disposed of first, so the viewer inherited the slot" \
+                                                  "kill-pane --pane-id $BR" "$CALLS"
+check  "revdiff's pane was split into the VIEWER" "--top --percent 50 --pane-id $VW" "$CALLS"
+before "...after the browser went, not before"    "kill-pane --pane-id $BR" "--top --percent 50 --pane-id $VW" "$CALLS"
+check  "and the viewer was disposed of last"      "kill-pane --pane-id $VW" "$CALLS"
+before "...after the incoming pane was split into it" \
+       "--top --percent 50 --pane-id $VW" "kill-pane --pane-id $VW" "$CALLS"
+check  "revdiff came back in the slot"            "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
+check  "all three viewer keys were cleared together" \
+                                                  '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
+
+echo
+echo "== 11e. ⌥[/⌥] cycle modes from the VIEWER half as well =="
+: > "$CALLS"
+echo "$(pane_key diff)" > "$ACTIVE"
+echo prev >> "$T/state/cmd"               # uncommitted -> browse again
+nap 3
+BR2="$(pane_key diff)"; VW2="$(pane_key viewer)"
+check "back in browse with a fresh pair"          '"diffMode":"browse"' "$T/state/terminals.json"
+: > "$CALLS"
+echo "$VW2" > "$ACTIVE"                   # the VIEWER holds focus this time
+echo next >> "$T/state/cmd"
+nap 3
+check "the keys cycled the MODE with the viewer focused" \
+                                                  '"diffMode":"uncommitted"' "$T/state/terminals.json"
+
+echo
+echo "== 11f. a TERMINAL focused still cycles terminals, in browse mode too =="
+: > "$CALLS"
+echo "$(pane_key diff)" > "$ACTIVE"
+echo prev >> "$T/state/cmd"               # back into browse
+nap 3
+BR3="$(pane_key diff)"
+: > "$CALLS"
+echo 32 > "$ACTIVE"                       # focus the agent's terminal
+echo next >> "$T/state/cmd"
+nap 2
+check  "the mode is untouched"                    '"diffMode":"browse"' "$T/state/terminals.json"
+refute "no half was disposed of"                  "kill-pane" "$CALLS"
+refute "and no revdiff was launched"              "revdiff --wrap" "$CALLS"
+
+# ⌥t/⌥w are always terminals, from either half. Nets to zero: the fresh terminal
+# opened here is closed again, leaving the agent's original terminal 32.
+: > "$CALLS"
+echo "$BR3" > "$ACTIVE"                   # from the BROWSER half
+echo new >> "$T/state/cmd"
+nap 2
+check "⌥t opened a terminal from the browser half" '"n":2' "$T/state/terminals.json"
+echo close-2 >> "$T/state/cmd"
+nap 2
+refute "⌥w closed it again"                        '"n":2' "$T/state/terminals.json"
+
+echo
+echo "== 11g. the mode is PER AGENT: browse is never inherited =="
+# The second agent was reaped in section 7; bring it back so a switch has somewhere
+# to go. It has never been in browse and must open in the uncommitted default.
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED4","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
+ {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
+  "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+VW3="$(pane_key viewer)"
+: > "$CALLS"; : > "$ACTIVE"
+echo "second agent" > "$FLEETSTATE"
+nap 4
+check  "the other agent opens in the uncommitted default" \
+                                                  '"diffMode":"uncommitted"' "$T/state/terminals.json"
+refute "no browser was launched for it"           "broot --conf" "$CALLS"
+check  "the browsing agent's viewer was disposed of on the way out" \
+                                                  "kill-pane --pane-id $VW3" "$CALLS"
+check  "...and said so"                           "disposed viewer pane $VW3" "$T/daemon.log"
+check  "the viewer keys went with it"             '"viewer":null' "$T/state/panes.json"
+
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"
+nap 4
+check "the browsing agent kept its OWN browse mode" '"diffMode":"browse"' "$T/state/terminals.json"
+check "and its pair was rebuilt on return"          "entered browse for abc12345" "$T/daemon.log"
+check "panes.json names a viewer again"             '"viewerAgent":"abc12345"' "$T/state/panes.json"
+
+echo
+echo "== 11h. detaching to the fleet list clears all three keys =="
+: > "$CALLS"
+echo list > "$FLEETSTATE"
+nap 3
+check "the viewer keys are cleared on detach"     '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
+
+echo
+echo "== 11i. clicking the footer's Browse label =="
+# The footer appends `diff-browse`; like the other labels it names the mode outright
+# and must not depend on which pane is focused.
+echo "test agent" > "$FLEETSTATE"
+nap 4
+: > "$CALLS"; : > "$ACTIVE"
+echo diff-uncommitted >> "$T/state/cmd"   # leave browse by clicking, not by key
+nap 3
+check "clicking Uncommitted left browse"          '"diffMode":"uncommitted"' "$T/state/terminals.json"
+check "...and the pair went with it"              "left browse for abc12345" "$T/daemon.log"
+
+: > "$CALLS"
+echo diff-browse >> "$T/state/cmd"
+nap 3
+check "clicking Browse switched, unfocused"       '"diffMode":"browse"' "$T/state/terminals.json"
+check "...and launched the pair"                  "broot --conf" "$CALLS"
+check "...publishing the viewer with it"          '"viewerAgent":"abc12345"' "$T/state/panes.json"
+
+: > "$CALLS"
+echo diff-browse >> "$T/state/cmd"        # the ALREADY-active label
+nap 3
+refute "clicking Browse again launches nothing"   "broot --conf" "$CALLS"
+refute "...and disposes of nothing"               "kill-pane" "$CALLS"
+
+echo
+echo "== 12. the footer draws -- and clicks -- a fourth label =="
+# The strip renderer is a separate process reading terminals.json, so this section
+# runs it directly rather than through the daemon. It never exits on its own (it
+# watches the state dir), so every run is backgrounded and killed.
+SD="$T/strip"; mkdir -p "$SD"
+# The capture goes OUTSIDE the state dir: the renderer watches that directory, so a
+# capture file written into it makes the renderer repaint on its own output for ever.
+RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
+# Escapes take no columns, so a click column is measured on the STRIPPED frame --
+# and stripped by node, in utf8: the legend is full of multi-byte characters (⌥, ·,
+# ←↑↓→) that a byte-oriented reader counts several times over, which lands the
+# click ~35 columns to the right of the label it was aimed at.
+STRIP_ANSI='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(process.argv[2] ? String(s.indexOf(process.argv[2]) + 1) : s)'
+
+footer() {   # footer <diffMode>: render one frame with that mode into $RAW/$PLAIN
+  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' \
+      "$1" > "$SD/terminals.json"
+  ( COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+  local p=$!
+  sleep 0.8
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
+
+footer browse
+check  "the footer draws a Browse label"          "Browse" "$PLAIN"
+check  "...highlighted while the agent is browsing" "$(printf '\033[7m Browse ')" "$RAW"
+# Why the label is not optional: the highlight falls back to uncommitted for a mode
+# it has no label for, so a missing entry lights up the WRONG range rather than
+# merely leaving browse unlisted.
+refute "...and Uncommitted is NOT highlighted instead" \
+                                                  "$(printf '\033[7m Uncommitted Changes ')" "$RAW"
+footer nonsense
+check  "an unknown mode still falls back to Uncommitted" \
+                                                  "$(printf '\033[7m Uncommitted Changes ')" "$RAW"
+check  "...and Browse is drawn fourth, after Custom" \
+                                                  "Last Commit | Custom | Browse" "$PLAIN"
+
+# The click path. The footer needs a real terminal to read a mouse report, so it
+# gets one from script(1) -- the same trick spikes/browse-test uses for broot. The
+# column comes from the frame just rendered, so the test cannot drift out of step
+# with the layout.
+if ! command -v script >/dev/null; then
+  echo "  FAIL script(1) is missing -- a footer click cannot be delivered without a terminal"
+  fail=1
+else
+# Run the click through a COPY of the renderer, under this run's own temp path.
+# Killing script(1) does not kill the node it spawned, so each click has to be
+# cleaned up by name -- and matching on the real path could kill the footer of a
+# live cockpit running from this very checkout.
+CLICKER="$T/strip-under-test.mjs"
+cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"
+
+footer uncommitted                        # Browse drawn plain, as it would be clicked
+click() {  # click <label>: send a left-click at that label's column, echo the verb
+  local col p i=0
+  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
+  : > "$SD/cmd"
+  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
+  | ( COCKPIT_DIR="$SD" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
+  p=$!
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  wait "$p" 2>/dev/null
+  pkill -f "$CLICKER" 2>/dev/null
+  tr -d '\n' < "$SD/cmd"
+}
+same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+
+same "clicking Browse appends diff-browse"        "$(click Browse)" "diff-browse"
+# The three that were already there must keep their columns and their hit zones: a
+# fourth label inserted anywhere but the end would silently move them.
+same "clicking Custom still appends diff-custom"  "$(click Custom)" "diff-custom"
+same "clicking Last Commit still appends diff-lastcommit" \
+                                                  "$(click 'Last Commit')" "diff-lastcommit"
+same "clicking Uncommitted Changes still appends diff-uncommitted" \
+                                                  "$(click 'Uncommitted Changes')" "diff-uncommitted"
+fi
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

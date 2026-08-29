@@ -38,7 +38,14 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **Phase 1 is built and reviewed.** Everything below the daemon now exists:
+**Status:** **Phase 1 is reviewed; T04 is built and awaiting review.** `⌥[`/`⌥]` now reach
+`browse` as a fourth stop, both halves launch into the slot (broot left, micro right at
+`--percent 60`), either half routes the keys, the footer draws and clicks a `Browse` label, and
+`diffPaneStatus` reports a healthy pair as *running* so the 1 s healer leaves it alone. The pair
+is **launched and disposed of, not parked** — that is T05. `spikes/cockpit-test` **205 checks**
+(was 134); browse, agenda and notes suites green.
+
+Everything below the daemon was already there:
 broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews anything
 else; `cockpit-open` finds the viewer, refuses unless
 `panes.json` carries all three viewer keys *in the right shape*, and types micro's command bar
@@ -46,16 +53,19 @@ under `viewer-tabs.lock`. micro and broot are hard prerequisites in both the ins
 layout script. `spikes/browse-test` **238 checks**; agenda, notes and cockpit suites green.
 **Nothing launches it yet** — the `viewer` key and the two panes arrive with T04.
 
-**T04 owes `viewer` as a number or null** — never `""` or `false`. The review found those
-coercing to pane 0 and pushing there; see FINDINGS.
+**T05 inherits a deliberate placeholder.** Entering browse splits the browser into the slot and
+**disposes of** the outgoing revdiff pane; leaving disposes of both halves. The *order* is
+already the measured one (RESULTS §1) and asserted, so T05's job is to replace two `kill-pane`
+calls with a park — not to redesign the dance.
 
-**T04 launches broot with `browseConfChain(home, repo)`** from `bin/cockpit-browse-conf.mjs`,
-and needs `~/.claude/cockpit/bin` on the browser's PATH — that is where `cockpit-open` is
-published, and the verb calls it by that name. **The cockpit's verb file is FIRST in that
-chain, not last** — broot takes the first matching verb, so do not "fix" the order.
+**`spikes/cockpit-test` is timing-based end to end.** A red run at
+`COCKPIT_TEST_SPEED=1.0` on a loaded machine is evidence about the machine: re-run it before
+believing it (one of five runs failed here, in **section 1**, at load 44). Re-run `agenda-test`
+**alone** for the same reason. `browse-test` needs the **broot binary** and `script(1)`; so does
+`cockpit-test` now, for the footer-click checks.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **implement T04** — `browse` as the fourth mode: both halves, focus, strip, footer and the pane detection that keeps the 1 s healer off a healthy pair. `spikes/browse-test/run.sh` needs the **broot binary** and `script(1)`; re-run `agenda-test` **alone** before believing a red one (it reproduced again, red beside another suite, green twice alone), and `cockpit-test` at `COCKPIT_TEST_SPEED=1.0` (~2 min).
+**Next `pir-work` will:** **review T04** — the fourth mode, the pair launch, the strip/footer label and the browse-pane detection. Then T05 (park the pair) is next to implement.
 
 ## Tasks
 
@@ -68,7 +78,7 @@ done · ⛔ blocked, needs a human.
 | T01 | `cockpit-open-model.mjs` — the pure decision | — | ✅ | Reviewed: every doc row verified, both deviations accepted (`realpath` is genuinely T02's), and the boundary grep proven able to fail against a control module that imports `node:fs`. One defect fixed — `..` climbing past `/` was carried upward, emitting a real `..` chain against a root of `/`. Probed empty/CR paths → T02. **62 checks**, not the 59 claimed (was 57). |
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ✅ | Reviewed, four deviations accepted, **two defects fixed**: the `--conf` chain was the wrong way round (the **first** file wins, so a user's own `enter` beat the cockpit's), and `{line}` is `0`, not empty. Enter is now pressed **for real** — push, `c/` line, directory descent, binary and unreadable files. **223 → 238 checks**, each proven to fail. Enter on a non-text file now opens broot's preview, **per the user**. |
-| T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ⬜ | Carries the pane detection T06 used to own — without it the 1 s healer types over a healthy pair. |
+| T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | 🔍 | Built: the fourth stop, the pair launch, either-half focus, the `Browse` label and its click, broot/micro detection. **205 checks** (+71), four mutants proven to fail. Deviations, six in all — commit message has them: both halves are **typed into spawned shells**, not spawned as pane programs (T00's finding); the pair is **disposed of, not parked** (T05); `reloadDiff` guarded — it would have typed `R` into broot. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ⬜ | Heavy. The slot has always held one pane per agent. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ⬜ | Two independent heals: never rebuild the pair to fix one half. |
 | T07 | Verified by hand with the user | T03, T06 | ⬜ | Cannot be closed by any test. The session waits for the answer. |
@@ -77,7 +87,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* T04 is next, and is implemented — not reviewed — by the session that picks it up.
+**Review queue:** **T04**, and it is reviewed — not extended — by the session that picks it up.
 
 ## Blocked on the user
 
