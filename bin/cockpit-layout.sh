@@ -51,6 +51,12 @@ command -v wezterm >/dev/null || die "wezterm cli not on PATH"
 command -v revdiff >/dev/null || die "revdiff not on PATH"
 command -v node    >/dev/null || die "node not on PATH"
 command -v claude  >/dev/null || die "claude not on PATH"
+# Browse mode's two halves (DESIGN 2.3). Guarded here as well as in install.sh
+# because the installer runs once and this runs on every window: a Homebrew
+# upgrade that removed either one would otherwise show up as half the top pane
+# failing a command once a second, with nothing saying why.
+command -v micro   >/dev/null || die "micro not on PATH (brew install micro)"
+command -v broot   >/dev/null || die "broot not on PATH (brew install broot)"
 
 mkdir -p "$DIR"
 FLEET="$WEZTERM_PANE"
@@ -68,6 +74,12 @@ COCKPIT_BIN="$DIR/bin"
 mkdir -p "$COCKPIT_BIN"
 ln -sf "$HERE/cockpit-note.mjs" "$COCKPIT_BIN/note"
 ln -sf "$HERE/cockpit-agenda.mjs" "$COCKPIT_BIN/agenda"
+# Not a command anyone types: broot's Enter verb runs `cockpit-open {file} {line}`
+# (bin/cockpit-browse-verbs.hjson), and a verb naming a command that is not on the
+# browser's PATH fails silently -- broot with `leave_broot: false` shows no output.
+# It lives here because this is the directory the daemon already names on a split's
+# command line, splits inheriting no environment of their own.
+ln -sf "$HERE/cockpit-open.mjs" "$COCKPIT_BIN/cockpit-open"
 
 # Exported HERE, before anything is spawned, so it reaches (a) the daemon started
 # below, which passes it on to every terminal it opens, and (b) `claude agents` at

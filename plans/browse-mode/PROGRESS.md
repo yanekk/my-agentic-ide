@@ -38,20 +38,25 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **Phase 1 is done and reviewed.** The whole push exists end to end below the
-daemon: broot's Enter runs `cockpit-open <file> [line]`, which finds the viewer, refuses unless
+**Status:** **Phase 1 is built; T03 awaits review.** Everything below the daemon now exists:
+broot's Enter verb runs `cockpit-open <file> [line]`, which finds the viewer, refuses unless
 `panes.json` carries all three viewer keys *in the right shape*, and types micro's command bar
-under `viewer-tabs.lock`. `spikes/browse-test` **176 checks**; agenda, notes and cockpit suites
-green. **Nothing launches it yet** — the verb arrives with T03, the `viewer` key with T04.
+under `viewer-tabs.lock`. micro and broot are hard prerequisites in both the installer and the
+layout script. `spikes/browse-test` **223 checks**; agenda, notes and cockpit suites green.
+**Nothing launches it yet** — the `viewer` key and the two panes arrive with T04.
 
 **T04 owes `viewer` as a number or null** — never `""` or `false`. The review found those
-coercing to pane 0 and pushing there; see FINDINGS, top row.
+coercing to pane 0 and pushing there; see FINDINGS.
+
+**T04 launches broot with `browseConfChain(home, repo)`** from `bin/cockpit-browse-conf.mjs`,
+and needs `~/.claude/cockpit/bin` on the browser's PATH — that is where `cockpit-open` is
+published, and the verb calls it by that name.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **implement T03** — the broot verb layer, plus micro and broot as
-installer prerequisites. Touches `bin/install.sh`, `bin/cockpit-layout.sh` and `CLAUDE.md`.
-There is no `browse` command to build: plan review deleted it. Re-run `agenda-test` **alone**
-before believing a red one, and `cockpit-test` at `COCKPIT_TEST_SPEED=1.0`.
+**Next `pir-work` will:** **review T03** — the verb file, the `--conf` chain, the two
+prerequisites and the guards. `spikes/browse-test/run.sh` now needs the **broot binary**. Re-run
+`agenda-test` **alone** before believing a red one, and `cockpit-test` at
+`COCKPIT_TEST_SPEED=1.0` (~2 min).
 
 ## Tasks
 
@@ -63,7 +68,7 @@ done · ⛔ blocked, needs a human.
 | T00 | Pair-in-the-slot spike + promote the planning probes | — | ✅ | Reviewed: all five probes re-run from a clean checkout, **80 checks** green, no mux server or temp dir left behind, an inherited `WEZTERM_UNIX_SOCKET` ignored. Two defects fixed — the 26-vs-19 ms swap timing did not reproduce (REPS 6→20; direction holds, figure does not), and the 47/72 divider is **re-imposed** each restore, not preserved (T05's to decide). Deviations accepted. |
 | T01 | `cockpit-open-model.mjs` — the pure decision | — | ✅ | Reviewed: every doc row verified, both deviations accepted (`realpath` is genuinely T02's), and the boundary grep proven able to fail against a control module that imports `node:fs`. One defect fixed — `..` climbing past `/` was carried upward, emitting a real `..` chain against a root of `/`. Probed empty/CR paths → T02. **62 checks**, not the 59 claimed (was 57). |
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
-| T03 | The broot verb layer + micro/broot as prerequisites | T02 | ⬜ | The `browse` command is **gone** — the daemon launches broot. Touches `install.sh`, `cockpit-layout.sh`, `CLAUDE.md`. |
+| T03 | The broot verb layer + micro/broot as prerequisites | T02 | 🔍 | Built: the Enter verb, the `--conf` chain, both prerequisites, both guards. **223 checks**, each new one proven to fail against a mutant. Four deviations, all in the commit message: a new `cockpit-browse-conf.mjs` (the chain needs a home T04 can import); a `cockpit-open` symlink (the verb names it); `broot --help` does **not** parse configs, so broot is launched headless and the suite now needs the binary; three argv-shape checks added to T02's suite. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ⬜ | Carries the pane detection T06 used to own — without it the 1 s healer types over a healthy pair. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ⬜ | Heavy. The slot has always held one pane per agent. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ⬜ | Two independent heals: never rebuild the pair to fix one half. |
@@ -73,7 +78,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty — T03 is next to build, and its review is the session after that.)*
+**Review queue:** **T03** — reviewed next, by a session that did not write it.
 
 ## Blocked on the user
 

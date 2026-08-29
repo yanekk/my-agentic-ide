@@ -111,6 +111,12 @@ check_tool revdiff "brew tap umputun/apps && brew install revdiff"
 check_tool node    "brew install node"
 check_tool claude  "https://claude.com/product/claude-code"
 check_tool git     "xcode-select --install"
+# Browse mode's two halves. Required, not optional: with `micro` absent, entering
+# browse mode leaves half the top pane sitting at a failed command, which the 1s
+# healer then retries for the life of the window. Both are single Homebrew
+# binaries, so "required" costs nothing anyone would notice.
+check_tool micro   "brew install micro"
+check_tool broot   "brew install broot"
 
 # --- 2. where the fleet view opens ----------------------------------------
 #

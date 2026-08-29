@@ -89,7 +89,7 @@ makes typing-without-submitting possible.
 
 ## Running it
 
-Once per machine: `bin/install.sh`. It checks the five tools, records where this
+Once per machine: `bin/install.sh`. It checks the seven tools, records where this
 checkout is and which projects root to open in, and points `~/.wezterm.lua` here.
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
 remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
@@ -107,6 +107,8 @@ bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes colu
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
+bin/cockpit-browse-verbs.hjson broot's Enter verb: push the file into the viewer
+bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (134 assertions)
 spikes/notes-test/      the `note` command and the notes column (39 assertions)

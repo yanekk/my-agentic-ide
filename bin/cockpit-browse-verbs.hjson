@@ -1,0 +1,38 @@
+# The cockpit's own broot verbs. Layered over YOUR ~/.config/broot files with
+# `--conf a;b;c` (bin/cockpit-browse-conf.mjs builds the chain) -- broot LAYERS
+# those files rather than replacing them, so your own config and key bindings keep
+# working and the cockpit never writes into ~/.config/broot/. This file is last in
+# the chain, so it wins on a key clash.
+#
+# One verb, and deliberately only one: Enter on a file pushes it into the viewer
+# next door instead of handing it to macOS. broot's stock `enter` on a file is
+# `open_stay`, which on macOS opens whatever GUI app owns the extension -- a window
+# over the terminal, which is the entire reason this binding exists.
+#
+# Hjson, not JSON: an unquoted value runs to the END OF THE LINE, so every field
+# must sit on its own line. `{ key: enter, apply_to: text_file }` on one line is a
+# parse error, and broot then refuses to start at all (measured, broot 1.59).
+{
+    verbs: [
+        {
+            # Files only. Enter on a DIRECTORY must keep descending into it -- that
+            # is broot's normal navigation and the whole way you get anywhere.
+            key: enter
+            apply_to: text_file
+
+            # {file} is absolute. Do NOT relativise it here: the tab label is the
+            # pure side's decision (cockpit-open-model.mjs), which resolves both the
+            # file and the repo root before comparing them.
+            #
+            # {line} is the matching line when a `c/` content search is running, and
+            # EMPTY otherwise. Nothing special-cases that: the model treats a null,
+            # zero, empty or non-integer line as "no jump", so a plain Enter just
+            # opens the file.
+            external: "cockpit-open {file} {line}"
+
+            # Stay in the tree, still filtered, still searching. The push never takes
+            # focus (measured), so the loop is: filter, Enter, read, filter again.
+            leave_broot: false
+        }
+    ]
+}

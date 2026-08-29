@@ -164,6 +164,24 @@ reset();
 eq("nor is a fractional one", run([path.join(REAL, "src/a.js"), "12.5"]).sent,
    ["\x05", "open src/a.js", "\r"]);
 
+// The two shapes broot's Enter verb actually produces (T03). `{line}` is the
+// matching line only while a `c/` content search is running and is EMPTY the rest
+// of the time, so `cockpit-open {file} {line}` arrives either as two arguments or
+// as three with a blank one -- depending on whether broot passes an empty token
+// through as an argv element. Asserted rather than assumed: a plain Enter is the
+// commonest gesture in browse mode and must open the file with no jump.
+reset();
+eq("an EMPTY line argument -- broot's `{line}` with no content search",
+   run([path.join(REAL, "src/a.js"), ""]).sent, ["\x05", "open src/a.js", "\r"]);
+
+reset();
+eq("no line argument at all", run([path.join(REAL, "src/a.js")]).sent,
+   ["\x05", "open src/a.js", "\r"]);
+
+reset();
+eq("a blank-space line argument is not a line either",
+   run([path.join(REAL, "src/a.js"), " "]).sent, ["\x05", "open src/a.js", "\r"]);
+
 // ---------------------------------------------------------------------------
 section("12. every call is aimed at the viewer, unpasted");
 // --no-paste because bracketed paste wraps the text in markers micro's command bar
