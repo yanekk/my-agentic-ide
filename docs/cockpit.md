@@ -428,6 +428,17 @@ home  calendar permission not granted · agenda add home
 home  calendar gone · agenda rm home
 ```
 
+**The command on that line is the command you type**, and for an expired sign-in that means
+`agenda add <slug>` **repairs** it: it signs the account in again and leaves the calendar exactly
+as it was — same slug, same colour, same place in the list, none of which `agenda rm` followed by
+`agenda add` would have kept. What broke is the *account's* sign-in, so every calendar sharing it
+is re-fetched too and all their loud lines clear at once rather than a tick apart. The sign-in is
+**probed before any browser opens**: a calendar that is actually fine still refuses ("its sign-in
+works — `agenda rm` first"), and a failure that is not an expiry (wifi off, a 5xx) says so and
+changes nothing rather than spending a browser round trip on something it cannot fix. Signing in
+as a different account is refused too, since that would store a second sign-in and leave this
+calendar pointing at the dead one.
+
 The middle one earns its own case. Google's consent screen carries a **per-scope checkbox**, and
 leaving the calendar box unticked yields a perfectly valid token whose calendar calls fail. That
 is a consent mistake, not a dead calendar — telling somebody to `agenda rm` a calendar that is
@@ -902,7 +913,7 @@ spikes/agenda-test/run.sh
 ```
 
 The agenda's own core: the state files and their lock, the event model, the
-column renderer, the Google client and the `agenda` command. 589 assertions, and
+column renderer, the Google client and the `agenda` command. 611 assertions, and
 **it never touches the network** — `AGENDA_ORIGIN` points Google's endpoints at a
 loopback stub, so the OAuth exchange, the refresh and the event fetch are all
 driven for real against a server the test owns. It asserts that a corrupt

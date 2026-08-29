@@ -209,6 +209,22 @@ agenda rm work`. Other calendars are unaffected and keep showing their events. *
 improves until you act, and a silent gap in a two-calendar view is indistinguishable from a
 quiet day.
 
+**The command on that line must work when you type it, so `agenda add <slug>` on a calendar that
+already exists is a REPAIR.** Decided 2026-08-29 by the user, after T08 found by hand that it
+exited 1 with "already connected" — the column was naming a command that turns you away. What
+broke is the **account's** refresh token, not the slug, so the repair signs that account in again
+and leaves the calendar row untouched: same slug, same colour, same position, all of which
+`agenda rm` + `agenda add` would have cost. Every calendar on that account is re-fetched in the
+same run, so their loud lines clear together rather than a tick apart.
+
+Three guards, because refusing is still right when nothing is wrong. The stored token is
+**probed before any browser opens**: a healthy calendar refuses as before, naming `agenda rm`. A
+failure that is **not** `auth` — wifi off, a 5xx — reports that it could not be checked and
+changes nothing, because sending somebody through a sign-in cannot fix their network. And a
+sign-in completed as a **different account** is refused with nothing written, since it would
+store a second account and leave this calendar pointing at the dead one, looking fixed and still
+broken.
+
 **A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is a consent mistake, not a dead calendar,
 and must not say `calendar gone`.** Measured 2026-08-27 (T00): Google's consent screen carries a
 **per-scope checkbox**, and leaving the calendar box unticked yields a perfectly valid token

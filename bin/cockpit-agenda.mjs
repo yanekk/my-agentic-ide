@@ -379,9 +379,8 @@ async function add(slug) {
   }
 
   const state = readState();
-  if (state.calendars.some((c) => c.slug === slug)) {
-    die(`\`${slug}\` is already connected. \`agenda rm ${slug}\` first, or pick another name.`);
-  }
+  const existing = state.calendars.find((c) => c.slug === slug);
+  if (existing) return repair(existing, state);
 
   let client = readClient();
 
@@ -439,6 +438,80 @@ async function add(slug) {
   say(`${swatch(colour)} ${bold(slug)}  ${wire(chosen.summary)}  ${dim(`· ${wire(account)} · ${colour}`)}`);
   const n = await fetchOnce(cal, client, refreshToken);
   if (n !== null) say(dim(`  ${n} event${n === 1 ? "" : "s"} today and tomorrow.`));
+}
+
+/**
+ * `agenda add <slug>` aimed at a calendar that is already connected.
+ *
+ * DESIGN 2.7 puts the fixing command ON the loud line: an expired sign-in draws
+ * `home  sign-in expired · agenda add home`. Refusing that command outright made
+ * the column name something that turns you away -- found by hand in T08, and the
+ * user's call is that typing it should REPAIR the sign-in.
+ *
+ * The slug is not what broke. The ACCOUNT's refresh token is, and every calendar
+ * on that account went dark with it -- so this signs the account in again, leaves
+ * the calendar rows completely untouched (same slug, same colour, same position,
+ * all of which `agenda rm` + `agenda add` would have cost) and re-fetches every
+ * calendar that shared the sign-in, so all their loud lines clear at once instead
+ * of one tick later.
+ *
+ * The sign-in is PROBED before any browser opens, because refusing is still the
+ * right answer when nothing is wrong. Only a genuine `auth` failure is an expiry:
+ * a network failure must not be read as one, or a person with wifi off is sent
+ * through a browser round trip that fixes nothing.
+ */
+async function repair(cal, state) {
+  const client = readClient();
+  if (!client) die("no Google client registered yet -- `agenda setup <path-to-downloaded-json>` first.");
+
+  const refreshToken = state.accounts[cal.account]?.refreshToken;
+  if (refreshToken) {
+    let failure = null;
+    try {
+      await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
+    } catch (e) {
+      failure = describeError(e);
+    }
+    if (!failure) {
+      die(`\`${cal.slug}\` is already connected and its sign-in works.\n` +
+          `      \`agenda rm ${cal.slug}\` first, or pick another name.`);
+    }
+    // Not an expiry, so nothing here would fix it and a browser would only waste
+    // the round trip. Say what was wrong and change nothing.
+    if (failure.kind !== "auth") {
+      die(`\`${cal.slug}\` is already connected, and its sign-in could not be checked ` +
+          `(${wire(failure.reason || failure.kind)}).\n` +
+          `      Nothing was changed -- try again once that clears.`);
+    }
+  }
+
+  say(`${bold(cal.slug)} is connected, but the sign-in for ${wire(cal.account)} has expired.`);
+  const opener = process.env.AGENDA_BROWSER || "/usr/bin/open";
+  const openBrowser = async (url) => {
+    spawn(opener, [url], { stdio: "ignore", detached: true }).unref();
+  };
+  say(dim("opening a browser to sign in again…"));
+  const fresh = await signIn({ ...client, origin: ORIGIN, openBrowser });
+
+  // Signing in as somebody else would store a second account and leave this
+  // calendar pointing at the dead one -- fixing nothing while looking like it
+  // worked. Nothing is written unless the address matches.
+  if (fresh.email !== cal.account) {
+    die(`signed in as ${wire(fresh.email)}, but \`${cal.slug}\` belongs to ${wire(cal.account)}.\n` +
+        `      Nothing was changed. Sign in as ${wire(cal.account)}, or ` +
+        `\`agenda rm ${cal.slug}\` and add it again from the other account.`);
+  }
+  putAccount(fresh.email, fresh.refreshToken, NOW);
+
+  // Every calendar on that account was dark for the same reason, so they are all
+  // re-fetched here rather than left to heal a tick apart.
+  const shared = state.calendars.filter((c) => c.account === cal.account);
+  say();
+  for (const c of shared) {
+    say(`${swatch(c.colour)} ${bold(c.slug)}  ${wire(c.title)}  ${dim(`· ${wire(c.account)} · ${c.colour}`)}`);
+    const n = await fetchOnce(c, client, fresh.refreshToken);
+    if (n !== null) say(dim(`  ${n} event${n === 1 ? "" : "s"} today and tomorrow.`));
+  }
 }
 
 /**

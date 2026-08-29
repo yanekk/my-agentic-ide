@@ -19,18 +19,29 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 REAL_DIR="${HOME}/.claude/cockpit"
-# Names for the whole directory, plus name+size+mtime for the agenda's own files.
-# Names alone would miss a test that rewrote your real agenda.json in place, which
-# is the one accident this check exists to catch -- but stat'ing the WHOLE dir would
-# fail for reasons nothing to do with these tests, because a live cockpit rewrites
-# terminals.json every couple of seconds while the window is open. Nothing but the
-# agenda code writes agenda*, and no test may point that code at the real dir, so
-# those are the files worth watching closely. Sizes and mtimes, never contents: this
-# must not read a refresh token to prove it did not write one.
+# Names for the whole directory, plus name+size+mtime for the files that hold the
+# SIGN-INS. Names alone would miss a test that rewrote your real agenda.json in
+# place, which is the one accident this check exists to catch -- but stat'ing the
+# WHOLE dir would fail for reasons nothing to do with these tests, because a live
+# cockpit rewrites terminals.json every couple of seconds while the window is open.
+# Sizes and mtimes, never contents: this must not read a refresh token to prove it
+# did not write one.
+#
+# agenda-cache.json is deliberately NOT stat'd, only listed. Measured 2026-08-29
+# (T08): once a calendar is attached the DAEMON rewrites that file on every 60s
+# tick -- ticks logged 60.0s apart, a new inode each time -- so including its mtime
+# made this guard fail on any run that straddled a tick, with no test having touched
+# anything. A guard that cries wolf is a guard nobody believes, and this is the one
+# that must never be a false alarm. It stays in the `ls` line, so a test that
+# CREATES or DELETES it is still caught; what is no longer caught is a test that
+# overwrites the real cache in place. That is an acceptable residual: a leak has to
+# add a calendar before it can cache one, and adding writes agenda.json, which is
+# still watched to the byte-count and the second.
 real_snapshot() {
   if [ -d "$REAL_DIR" ]; then
     ls -A "$REAL_DIR" | sort
-    find "$REAL_DIR" -maxdepth 1 -name 'agenda*' -exec stat -f '%N %z %m' {} \; 2>/dev/null | sort
+    find "$REAL_DIR" -maxdepth 1 -name 'agenda*' ! -name 'agenda-cache.json' \
+      -exec stat -f '%N %z %m' {} \; 2>/dev/null | sort
   else
     echo "(absent)"
   fi

@@ -383,6 +383,129 @@ const added = freshDir("add");
 }
 
 // ===========================================================================
+section("30b. `agenda add <slug>` on a calendar that is already connected");
+
+// DESIGN 2.7 prints the fixing command ON the loud line -- an expired sign-in
+// draws `home  sign-in expired · agenda add home`. T08 found by hand that this
+// command then refused, so the column named something that turns you away. The
+// user's decision: typing it REPAIRS the sign-in, keeping the calendar as it is.
+{
+  const dir = freshDir("repair-expired");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  await run(["add", "home"], { dir, tty: writeTty(dir, "1", "2") });
+  const before = { work: colourOf(dir, "work"), home: colourOf(dir, "home"), order: slugs(dir) };
+  const browsers = browserLog(dir).length;
+
+  // What the daemon would have written once the token died: BOTH calendars on the
+  // account carry the auth error, because they share the one sign-in. Without this
+  // the "other calendar cleared" assertion below passes for the wrong reason -- its
+  // error was already null -- and a repair that fixed only the named calendar would
+  // sail through it (caught by mutating `shared` to `[cal]`).
+  const broken = cache(dir);
+  for (const slug of ["work", "home"]) {
+    broken.calendars[slug] = {
+      fetchedAt: 0, events: [],
+      error: { kind: "auth", reason: "invalid_grant", code: "", detail: "", since: 1 },
+    };
+  }
+  fs.writeFileSync(path.join(dir, "agenda-cache.json"), JSON.stringify(broken));
+
+  // The refresh token is dead until a fresh authorization_code lands -- which is
+  // what the re-sign-in does, so the re-fetch afterwards has to work.
+  let reSignedIn = false;
+  stub.set((req) => {
+    if (req.path === "/token" && req.form.grant_type === "refresh_token" && !reSignedIn) {
+      return { status: 400, body: { error: "invalid_grant", error_description: "Token has been expired or revoked." } };
+    }
+    if (req.path === "/token" && req.form.grant_type === "authorization_code") reSignedIn = true;
+    return defaultReply(req);
+  });
+
+  // No terminal: repair has nothing to ask -- the account is known and there is no
+  // calendar to pick -- so unlike `add` it must not need one.
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  eq("`agenda add` on an expired calendar exits 0", r.status, 0);
+  ok("...saying the sign-in expired rather than refusing", /expired/i.test(r.all), r.all);
+  eq("...and it opened a browser to fix it", browserLog(dir).length, browsers + 1);
+  eq("...the calendar is not re-added", slugs(dir), before.order);
+  eq("...it keeps its colour", colourOf(dir, "work"), before.work);
+  eq("...and so does every other calendar", colourOf(dir, "home"), before.home);
+  eq("...one sign-in, not two", Object.keys(state(dir).accounts), ["me@corp.com"]);
+  // The whole ACCOUNT was dark, so both its calendars clear at once rather than a
+  // tick apart -- that is the reason repairing beats `rm` + `add`.
+  eq("...the repaired calendar's error is cleared", cache(dir).calendars.work.error, null);
+  eq("...and so is the OTHER calendar's on the same sign-in", cache(dir).calendars.home.error, null);
+  ok("...both were actually re-fetched", cache(dir).calendars.work.fetchedAt > 0 &&
+     cache(dir).calendars.home.fetchedAt > 0, JSON.stringify(cache(dir).calendars));
+}
+
+// Refusing is still right when nothing is wrong: a working calendar must not be
+// dragged through a browser round trip by a mistyped slug.
+{
+  const dir = freshDir("repair-healthy");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const browsers = browserLog(dir).length;
+
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  eq("a HEALTHY calendar still refuses", r.status, 1);
+  ok("...saying the sign-in works", /sign-in works/i.test(r.all), r.all);
+  ok("...and pointing at the command that frees the slug", r.all.includes("agenda rm work"), r.all);
+  eq("...opening no browser at all", browserLog(dir).length, browsers);
+}
+
+// A wifi blip is not an expiry. Sending somebody through a sign-in because their
+// network is down spends a browser round trip on something it cannot fix.
+{
+  const dir = freshDir("repair-offline");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const browsers = browserLog(dir).length;
+  const tokenBefore = state(dir).accounts["me@corp.com"].refreshToken;
+
+  stub.set((req) => (req.path === "/token" && req.form.grant_type === "refresh_token"
+    ? { status: 500, body: { error: { message: "backend error" } } }
+    : defaultReply(req)));
+
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  eq("a calendar whose sign-in cannot be CHECKED refuses", r.status, 1);
+  ok("...saying nothing was changed", /nothing was changed/i.test(r.all), r.all);
+  eq("...and it did not open a browser", browserLog(dir).length, browsers);
+  eq("...nor touch the stored sign-in", state(dir).accounts["me@corp.com"].refreshToken, tokenBefore);
+}
+
+// Signing in as the wrong person would store a second account and leave this
+// calendar pointing at the dead one -- fixed-looking and still broken.
+{
+  const dir = freshDir("repair-wrong-account");
+  writeClientFile(dir);
+  stub.set(null);
+  await run(["add", "work"], { dir, tty: writeTty(dir, "1") });
+  const tokenBefore = state(dir).accounts["me@corp.com"].refreshToken;
+
+  let reSignedIn = false;
+  stub.set((req) => {
+    if (req.path === "/token" && req.form.grant_type === "refresh_token" && !reSignedIn) {
+      return { status: 400, body: { error: "invalid_grant" } };
+    }
+    if (req.path === "/token" && req.form.grant_type === "authorization_code") reSignedIn = true;
+    return defaultReply(req);
+  });
+  signInEmail = "somebody.else@gmail.com";
+  const r = await run(["add", "work"], { dir, tty: NO_TTY });
+  signInEmail = "me@corp.com";
+
+  eq("signing in as a different account exits 1", r.status, 1);
+  ok("...naming the account the calendar actually belongs to", r.all.includes("me@corp.com"), r.all);
+  eq("...and stores no second sign-in", Object.keys(state(dir).accounts), ["me@corp.com"]);
+  eq("...leaving the old token exactly as it was", state(dir).accounts["me@corp.com"].refreshToken, tokenBefore);
+}
+
+// ===========================================================================
 section("31. ls, rm and color");
 
 {
