@@ -179,6 +179,31 @@ case "$LINK_PLAN" in
     blocked) warn "left alone -- $LINK_NOTE" ;;
 esac
 
+# --- 3b. plan the session-naming hook --------------------------------------
+#
+# Registered in ~/.claude/settings.json rather than published on PATH the way
+# `note` and `agenda` are, because it must apply to EVERY claude session -- an
+# agent dispatched from the fleet view is an ordinary session, and naming it is
+# the whole point. cockpit-auto-name.mjs owns the merge itself (--install), so
+# the knowledge of where it hooks lives with the hook and the tests drive the
+# same code path this does.
+NAMING="$REPO/bin/cockpit-auto-name.mjs"
+say ""
+say "${bold}session naming${off} ${dim}(~/.claude/settings.json)${off}"
+if [ ! -f "$NAMING" ]; then
+    warn "cockpit-auto-name.mjs is missing -- skipping"
+    NAMING=""
+elif ! command -v node >/dev/null 2>&1; then
+    warn "no node on this PATH -- skipping (it is checked above)"
+    NAMING=""
+else
+    NAMING_PLAN="$(node "$NAMING" --check 2>&1)" || {
+        warn "$NAMING_PLAN"
+        NAMING=""
+    }
+    [ -n "$NAMING" ] && ok "$NAMING_PLAN"
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
     say ""
     say "--check: nothing written."
@@ -206,6 +231,16 @@ return {
 EOF
 say ""
 ok "wrote $CONFIG"
+
+# Idempotent, and re-points itself if this checkout moved -- so a re-run after a
+# rename or a re-clone repairs the hook the same way it repairs config.lua.
+if [ -n "$NAMING" ]; then
+    if OUT="$(node "$NAMING" --install 2>&1)"; then
+        ok "$OUT"
+    else
+        warn "could not register the naming hook: $OUT"
+    fi
+fi
 
 case "$LINK_PLAN" in
     replace)

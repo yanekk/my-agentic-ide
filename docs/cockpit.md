@@ -552,6 +552,120 @@ and silently discarding a refresh token costs two browser round trips.
 - **The feature is in the way.** `agenda rm` every slug: with nothing configured the tick returns
   immediately, nothing is fetched, and the column falls back to notes alone.
 
+## Session names
+
+The fleet list's rows are labelled with each session's **name**. Left alone,
+`claude agents` writes that name itself: a one-line summary Claude makes of your
+first message, so a session comes up as `read handoff document`. Read on its own
+it is fine. Read in a list of six it is not — nothing says which repo it belongs
+to, and two agents in different projects can look identical.
+
+`bin/cockpit-auto-name.mjs` supplies the missing half. Every session **in a git
+repo** becomes:
+
+```
+<repo folder> / <what it is doing>
+
+agentic-ide / cockpit-agenda            a /pir-work slug
+agentic-ide / browse-mode-review        the worktree it sits in
+real-screen-time / read handoff document    Claude's own summary
+```
+
+Outside a git repo nothing is named at all — there is no left half to build.
+
+### Where a name can come from at all
+
+There is exactly one channel: a **`UserPromptSubmit` hook** may return
+`hookSpecificOutput.sessionTitle`. Measured against the 2.1.251 binary, that field
+appears in no other hook event — not `SessionStart`, not `Stop`. `claude agents`
+has no `--name`, and the model has no tool to rename itself, so a rule written
+into CLAUDE.md cannot do this. The hook is the whole mechanism, which is also why
+the first name has to be computable from the prompt being submitted.
+
+Registered in `~/.claude/settings.json` by `bin/install.sh`, which calls the
+script's own `--install`. That keeps the knowledge of *where* it hooks in the same
+file as the hook, and lets `spikes/auto-name-test` drive the same code path the
+installer runs rather than a copy of it that would drift.
+
+Unlike `note` and `agenda`, this is deliberately **not** cockpit-only. Those are
+published as symlinks in a directory only cockpit shells have on `PATH`; this must
+apply to every claude session on the machine, because an agent dispatched from the
+fleet view is an ordinary session and naming it is the entire point.
+
+### Which signal wins
+
+Strongest first. A stronger signal may later overwrite a weaker one; the reverse
+never happens.
+
+| | signal | example |
+|---|---|---|
+| 3 | a `/pir-work`, `/pir-plan` or `/pir-review-plan` slug | `agentic-ide / cockpit-agenda` |
+| 2 | the worktree the session sits in | `agentic-ide / browse-mode-review` |
+| 1 | Claude's own summary of the session | `real-screen-time / read handoff document` |
+| 0 | the opening words of the first prompt | `real-screen-time / read the handoff doc…` |
+
+The name **follows the work**: a session that later runs `/pir-work`, or creates a
+worktree and moves into it, is renamed to match. Rank 0 is the exception — it is a
+first-naming device only. Re-applying the opening words on every prompt would
+rename the session continuously, so once anything is set, rank 0 never applies
+again.
+
+### Why the opening words, and not just Claude's summary
+
+Because the summary does not exist yet. The hook runs when a prompt is
+**submitted**; the `{"type":"ai-title"}` record lands in the transcript after the
+first reply. And `session_title` in the hook input carries only a *custom* title —
+never the summary — so the hook cannot even read it at that moment.
+
+That would suggest waiting a prompt. But a custom title, once set, **permanently
+suppresses** the summary: whatever the hook writes is what the list shows from then
+on. So naming immediately with the opening words and upgrading from the transcript
+on a later prompt is the only arrangement that gets both a correct name from the
+first second and Claude's better wording once it exists.
+
+### Why the repo half is `--git-common-dir`
+
+An agent sits in `.claude/worktrees/<name>`, where `git rev-parse --show-toplevel`
+answers with the **worktree** — which would file that agent under a second, phantom
+repo. It is the same trap `COCKPIT_REPO` exists for in `cockpit-note.mjs`.
+`--git-common-dir` points into the main checkout's `.git` from a worktree *and*
+from the checkout itself, so its parent directory is the real repo either way.
+
+### A name you typed is final
+
+The hook cannot tell its own last title from a human's by inspection — both are
+just "a custom title" on the session. So it records what it set and compares. A
+mismatch means a person typed one (`/rename`, or the fleet list), and `backedOff`
+is written for that session and never cleared.
+
+Without this the rule would undo your `/rename` on your very next prompt, which is
+worse than never having named anything. The same test covers sessions that were
+already named when the hook was installed: they have a title and no record of ours,
+so they are left alone permanently.
+
+### State, and why one file per session
+
+`~/.claude/cockpit/auto-names/<session id>.json` — what the hook last called the
+session and at which rank, or `backedOff`.
+
+One small file each rather than a single JSON keyed by session id, because every
+agent runs its own copy of the hook concurrently: a shared file would need the same
+read-modify-write lock `notes.json` needs, and a file each needs no lock at all.
+Written atomically like every other cockpit state file, and pruned at 30 days on
+the first write of a session — once per session, never once per prompt.
+
+### It may never block a prompt
+
+It runs on every prompt of every session, so a crash here is a crash in the prompt
+box. Every failure path exits 0 with no output: unparseable input, a missing git,
+an unreadable transcript, a state directory it cannot write. `run.sh` asserts the
+exit code for a spread of malformed inputs rather than trusting it.
+
+The one place it deliberately exits **non-zero** is `--install` against a
+`settings.json` it cannot parse. That file is the user's, and a malformed one
+silently disables *every* setting in it — so it is refused, never overwritten on a
+guess.
+
 ## Per-agent panes
 
 Each agent gets its own terminals **and its own revdiff**, and so does the fleet
@@ -706,6 +820,25 @@ And for the diff slot (`spikes/pane-swap/probe.sh`, same setup):
 ```bash
 spikes/cockpit-test/run.sh
 ```
+
+```bash
+spikes/notes-test/run.sh        # the `note` command and the right column
+spikes/agenda-test/run.sh       # the agenda's store, model, Google client, command
+spikes/auto-name-test/run.sh    # session naming and its settings.json merge
+```
+
+`spikes/auto-name-test` needs no WezTerm — the naming hook is a plain
+stdin/stdout filter — so it runs standalone. Its seatbelt is `~/.claude/settings.json`:
+no suite may write the real one, and `run.sh` fingerprints it before and after
+rather than trusting that. 50 assertions, over a real git repo with a real linked
+worktree (the worktree rules are the ones most easily got wrong by a fake): what
+each signal names, that a stronger signal overwrites a weaker one and never the
+reverse, that a name typed by hand stops the rule dead and keeps it stopped, that
+the hook stays silent on malformed input instead of failing a prompt, and — for the
+merge — that every other setting and every other `UserPromptSubmit` hook survives,
+that a re-run does not touch a byte, that a moved checkout is re-pointed rather
+than duplicated, and that a `settings.json` which cannot be parsed is refused
+rather than overwritten.
 
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two

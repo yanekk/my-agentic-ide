@@ -62,6 +62,21 @@ last events and adds one dim `last updated 22m ago · offline`; a revoked sign-i
 replaces that one calendar's rows with `home  sign-in expired · agenda add home`
 and leaves the others alone.
 
+The fleet list's **names** are written for you too. Left alone, `claude agents`
+labels a session with a one-line summary Claude writes from your first message
+("read handoff document") — fine on its own, poor in a list of six, because
+nothing says which repo it belongs to and two agents in different projects can
+read identically. `cockpit-auto-name.mjs` supplies the missing half: every session
+in a git repo becomes **`<repo folder> / <what it is doing>`**, from the strongest
+signal available — a `/pir-work` slug, else the worktree it sits in, else Claude's
+own summary once that exists (the opening words of the first prompt stand in until
+it does). The name **follows the work**: a session that later runs `/pir-work`, or
+moves into a worktree, is renamed to match. A name **you** type (`/rename`, or the
+fleet list) ends it — that session is never touched again. Unlike `note` and
+`agenda` this is deliberately *not* cockpit-only: it is registered in
+`~/.claude/settings.json` by `bin/install.sh`, because an agent dispatched from the
+fleet view is an ordinary claude session and naming it is the whole point.
+
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
 another, `⌥[` / `⌥]` cycle, `⌥w` closes. The strip is also **clickable**: clicking a
@@ -110,7 +125,8 @@ makes typing-without-submitting possible.
 ## Running it
 
 Once per machine: `bin/install.sh`. It checks the five tools, records where this
-checkout is and which projects root to open in, and points `~/.wezterm.lua` here.
+checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
+registers the session-naming hook in `~/.claude/settings.json`.
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
 remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
 
@@ -124,6 +140,7 @@ bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daem
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
 bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes column
+bin/cockpit-auto-name.mjs  names every session "<repo> / <task>"; registers itself
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
@@ -135,6 +152,7 @@ wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (589)
+spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -162,7 +180,9 @@ setup), `agenda.json` (the sign-ins and the attached calendars — a corrupt one
 **moved aside** to `agenda.json.corrupt-<ts>` rather than discarded, because
 throwing a refresh token away costs two browser round trips) and
 `agenda-cache.json` (the fetched events, written by the daemon and watched by the
-pane), all three `0600` — the cache included, it holds your meeting titles — under
+pane), `auto-names/` (one small file per session — what the naming hook last called
+it, and whether it has stood down because you renamed it by hand; a file each rather
+than one shared JSON so concurrent agents need no lock, pruned at 30 days), all three `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note` and `bin/agenda` (symlinks to
 `cockpit-note.mjs` and `cockpit-agenda.mjs`, relinked on every
 rebuild — the whole of how the commands are "inside the cockpit only"), and `cmd`
@@ -232,6 +252,12 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | The command is `agenda`, **never** `cal` | `/usr/bin/cal` already exists and the cockpit **prepends** its bin directory to `PATH`, so a `cal` symlink would shadow the month grid in every cockpit terminal *and in every agent*, which inherits that PATH. An agent reaching for `cal` out of habit and silently getting something else is a debugging cost paid at the worst possible moment. |
 | Google's downloaded client JSON is **nested**, and the parse must accept it | Measured 2026-08-27: a Desktop client downloads as `{ "installed": { "client_id": … } }` — snake_case, one level down — and a web client uses `"web"`. The plan assumed a flat `{ clientId, clientSecret }` and the spike **rejected the real file**. So `agenda setup` accepts `installed`, `web` and flat, in either key style, and stores the normalised flat shape: what is on disk is ours, what is read is Google's. |
 | A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is `auth`, **not** `gone` | Google's consent screen has a **per-scope checkbox**, and leaving the calendar box unticked yields a perfectly valid token whose calendar calls 403 (measured 2026-08-27). The remedy is to sign in again and tick it, so the column must say `calendar permission not granted · agenda add work`. Rendering `calendar gone` would tell somebody to `agenda rm` a calendar that is fine — destroying the configuration and fixing nothing. |
+| A session title can only be set from a **`UserPromptSubmit`** hook | Measured against the 2.1.251 binary: `hookSpecificOutput.sessionTitle` appears in that event's schema and no other — not `SessionStart`, not `Stop`. So naming is bound to the moment a prompt is submitted, which is also why the first name has to be computable from the prompt itself. There is no `--name` on `claude agents`, and the model has no tool to rename itself: instructions in CLAUDE.md cannot do this, only the hook can. |
+| Claude's own summary of a session arrives **after** the first reply, so the opening words stand in | The hook runs when a prompt is submitted; the `{"type":"ai-title"}` record is written to the transcript afterwards, and `session_title` in the hook input carries only a **custom** title, never the summary. So the summary cannot be used at first naming — the opening words of the prompt are, and are replaced from the transcript on a later prompt. A custom title permanently suppresses the summary, so naming immediately and upgrading later is the only way to have both. |
+| The repo half comes from `--git-common-dir`, **not** `--show-toplevel` | An agent sits in `.claude/worktrees/<name>`, where `--show-toplevel` answers with the **worktree** — which would file that agent under a second, phantom repo, the same trap `COCKPIT_REPO` exists for in `cockpit-note.mjs`. `--git-common-dir` points into the main checkout's `.git` from both a worktree and the checkout itself, so its parent is the real repo. |
+| A name **you** typed stops the rule permanently | The hook cannot tell its own last title from a human's by inspection — both are just "a custom title" — so it records what it set and compares. A mismatch means a person typed one, and `backedOff` is written and never cleared. Without this, `/rename` would be undone on your next prompt, which is worse than never naming at all. Sessions already named when the hook is installed are covered by the same test. |
+| The naming state is **one file per session**, not one shared JSON | Every agent runs its own copy of the hook concurrently. A shared file would need the read-modify-write lock `notes.json` needs; a file each needs no lock at all. Pruned at 30 days on first write of a session — once per session, never once per prompt. |
+| `settings.json` is merged, never rewritten, and a malformed one is **refused** | It is the user's file — their model, their plugins, their own hooks — and one that fails to parse silently disables *every* setting in it. So `--install` drops only a previous registration of **ours** (matched on the script's basename, so a moved checkout is re-pointed rather than duplicated), leaves every other `UserPromptSubmit` hook alone, writes atomically, and exits non-zero rather than overwrite a file it could not parse. |
 | `withLock` counts **depth**, and one lock covers all three agenda files | One lock over three files makes nesting the *ordinary* case (attach a calendar, prime its cache is one `withLock` around calls that each take it again), not an exotic one. Measured before the guard: that compound write took **5035ms**, because the inner call spun its whole retry budget against a lock **this process** held, then broke it as stale and unlinked it — leaving the rest of the transaction running with **no lock at all**, the opposite of what wrapping it was for. |
 | An all-day event is a **civil date**, not an instant, and a day is not always 24 hours | DST makes a local day 23 or 25 hours long, so "today plus 86400000" is wrong twice a year, and an all-day event carries `date` (not `dateTime`) precisely because it has no instant. The day bounds are computed in the calendar's zone; a multi-day all-day event appears on every day it covers. |
 | An offset-less `dateTime` must **not** be read in the machine's zone | Google can return a local wall-clock time whose zone lives in a sibling field. Parsing it with the machine's zone silently shifts an event by hours — and it is a §3.1 purity leak the grep cannot see, because `new Date(s)` is not a clock call. Found in T02's review. |
