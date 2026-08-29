@@ -75,11 +75,12 @@ matches it; the guard fix is correct and its residual is stated in the file. The
 review made to that decision: it was implemented for **one** of the two loud lines that name
 `agenda add <slug>`, not both — see T08's cell.
 
-**The review's own hands-on half.** The three fixes are verified against the stub and by
-mutation, not on the real screen. Two are worth a minute of a person's time and the commands are
-in the session report: `AGENDA_DRY_RUN=1 agenda add home` (must print a URL and open nothing),
-and the scope repair, which needs the calendar box deliberately left unticked on one consent
-screen and is undone by ticking it on the next. **Neither was run** as of 2026-08-29.
+**The review's own hands-on half — one of two closed.** The **dry-run seatbelt is ✅**, run by the
+user on a live calendar (FINDINGS 2026-08-29): `AGENDA_DRY_RUN=1 agenda add home` printed the URL
+and opened no browser, on the repair path that had been breaking it. Still **stub-verified only**:
+the scope repair, which needs the calendar box deliberately left unticked on one consent screen
+and is undone by ticking it on the next. Not blocking — the plan is closed either way, and the
+behaviour is pinned by four mutation-checked assertions.
 
 ## Deferred to the end of the plan
 
