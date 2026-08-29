@@ -107,10 +107,16 @@ rebuild_slot() {
 # The slot's extent, whether one pane holds it or two share it.
 slot_extent() {                # slot_extent <snapshot> <pane>...
   local snap="$1"; shift
-  local c=0 r=0 n=0 p
+  local c=0 r="" n=0 p pr
   for p in "$@"; do
     c=$(( c + $(p_cols "$snap" "$p") ))
-    r=$(p_rows "$snap" "$p")
+    pr=$(p_rows "$snap" "$p")
+    # Every pane sharing the slot must be the SAME height. Taking the last
+    # one's rows and moving on would let a mis-stacked pair compare equal to a
+    # correct one -- and the claim this probe exists to make is "identical, not
+    # merely similar". A mismatch poisons the value so every eq() using it fails.
+    if [ -n "$r" ] && [ "$pr" != "$r" ]; then echo "MIXED-HEIGHTS($r/$pr)"; return; fi
+    r="$pr"
     n=$((n + 1))
   done
   # n-1 one-column dividers between n side-by-side panes
@@ -203,7 +209,8 @@ sleep 1.5
 send "$MICROA" "$(printf '\x1b')" 1.2      # nudge micro to repaint after the resize
 S=$(snapshot)
 show "$S"
-eq "$SLOT_PAIR" "$(slot_extent "$S" "$BROOTA" "$MICROA")" "the restored pair fills the slot identically"
+SLOT_PAIR_BACK=$(slot_extent "$S" "$BROOTA" "$MICROA")
+eq "$SLOT_PAIR" "$SLOT_PAIR_BACK" "the restored pair fills the slot identically"
 eq 47 "$(p_cols "$S" "$BROOTA")" "browser is 47 columns again"
 eq 72 "$(p_cols "$S" "$MICROA")" "viewer is 72 columns again"
 BAR_AFTER=$(viewer_tabbar "$MICROA")
@@ -324,13 +331,23 @@ has "$(viewer_tabbar "$MICROA")" "gamma.js" "the tabs survived the rebuild"
 echo
 echo "### 9. what the extra park costs: pair swap vs single-pane swap"
 # Only the wezterm calls are timed -- the sleeps around them are the probe's, not
-# the daemon's -- and each swap is run six times, alternating, because a single
-# swap is under 50 ms and pure process-startup noise swamps it.
+# the daemon's -- and each swap is run REPS times, alternating, because a single
+# swap is well under 50 ms and pure process-startup noise swamps it.
 #
-# What this number IS: the cost the daemon pays to move the panes. What it is
-# NOT: what the user sees. A restored pane takes a SIGWINCH and repaints, and
-# that redraw is a judgement, not an assertion (DESIGN §5.1) -- T07's.
-REPS=6
+# READ THE DIRECTION, NOT THE FIGURE. REPS was 6 originally, and at six reps the
+# two means overlapped: measured runs gave 19/26, 26/25 and 24/27 (single/pair)
+# -- on the middle one the SINGLE swap came out the slower of the two, which a
+# 5-calls-vs-3 story cannot explain. A single `wezterm cli` invocation is ~6 ms
+# here, so a six-rep mean is a handful of process spawns and one scheduler
+# hiccup moves it. At REPS=20 the direction is stable (25/31 and 17/28) and the
+# pair costs roughly 6-11 ms more. So: the pair IS the slower of the two, both
+# are a few tens of milliseconds, and any exact delta quoted off one run is not
+# something this probe can defend.
+#
+# What these numbers ARE: the cost the daemon pays to move the panes. What they
+# are NOT: what the user sees. A restored pane takes a SIGWINCH and repaints,
+# and that redraw is a judgement, not an assertion (DESIGN §5.1) -- T07's.
+REPS=20
 t0=$(now_ms)
 for i in $(seq 1 $REPS); do
   if [ $((i % 2)) = 1 ]; then pair_out_pair_in "$BROOTA" "$MICROA" "$BROOTB" "$MICROB"
@@ -358,15 +375,18 @@ t1=$(now_ms)
 SINGLE_MS=$(( (t1 - t0) / REPS ))
 echo "  single-pane swap: ${SINGLE_MS} ms per swap (3 wezterm cli calls, mean of $REPS)"
 echo "  pair swap       : ${PAIR_MS} ms per swap (5 wezterm cli calls, mean of $REPS)"
+echo "  (the gap between the two is inside this measurement's noise -- see the note above)"
 assert "$([ "$PAIR_MS" -lt 1000 ] && echo 0 || echo 1)" \
   "a pair swap stays under a second (${PAIR_MS} ms) -- 'returning is instant' still holds"
+assert "$([ "$SINGLE_MS" -lt 1000 ] && echo 0 || echo 1)" \
+  "...and so does the single-pane swap it is measured against (${SINGLE_MS} ms)"
 
 echo
 echo "geometry summary"
 printf '  %-34s %s\n' "revdiff alone in the slot"        "$SLOT_REVDIFF"
 printf '  %-34s %s\n' "the pair in the slot"             "$SLOT_PAIR"
 printf '  %-34s %s\n' "revdiff back after parking"       "$SLOT_BACK"
-printf '  %-34s %s\n' "the pair back after parking"      "$SLOT_PAIR"
+printf '  %-34s %s\n' "the pair back after parking"      "$SLOT_PAIR_BACK"
 printf '  %-34s %s\n' "the slot resized while parked"    "$SLOT_RESIZED"
 
 finish

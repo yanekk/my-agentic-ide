@@ -19,14 +19,14 @@ all unless what answers its socket is a mux it just created — see
 Each script takes no arguments and its **exit status is the verdict**: green is 0.
 
 ```
-spikes/browse-mode/probe-pair-slot.sh    the pair in the slot            51 checks
+spikes/browse-mode/probe-pair-slot.sh    the pair in the slot            52 checks
 spikes/browse-mode/probe-park.sh         one viewer survives parking     11 checks
 spikes/browse-mode/probe-push.sh         the push mechanism               8 checks
 spikes/browse-mode/probe-e2e.sh          broot Enter -> micro, for real   6 checks
 spikes/browse-mode/probe-title.sh        how a micro pane is recognised   3 checks
 ```
 
-All five, in one line:
+**80 checks in all.** All five, in one line:
 
 ```
 for p in spikes/browse-mode/probe-*.sh; do "$p" || { echo "RED: $p"; break; }; done
@@ -85,13 +85,21 @@ outgoing viewer beside its browser, split the incoming viewer off its browser.
 
 | | per swap | wezterm cli calls |
 |---|---|---|
-| single-pane swap (the other three modes) | **19 ms** | 3 |
-| pair swap (browse ↔ browse) | **26 ms** | 5 |
+| single-pane swap (the other three modes) | **17–26 ms** | 3 |
+| pair swap (browse ↔ browse) | **25–31 ms** | 5 |
 
-Mean of six alternating swaps each, because a single swap is under 50 ms and process-startup
-noise swamps it. **This is the cost the daemon pays to move the panes, and it is not what the
-user sees**: a restored pane takes a SIGWINCH and repaints, and whether that redraw is
-acceptable rather than merely correct is a judgement (DESIGN §5.1) — T07's, not a probe's.
+Mean of twenty alternating swaps each. **Read the direction, not the figure.** At the six reps
+this probe originally used, the two means overlapped — measured single/pair runs of 19/26,
+26/25 and 24/27, and on the middle one the *single* swap came out the slower of the two, which
+a 5-calls-versus-3 story cannot explain. One `wezterm cli` invocation costs ~6 ms here, so a
+six-rep mean is a handful of process spawns and one scheduler hiccup moves it. At twenty reps
+the direction is stable (25/31 and 17/28) and the pair costs roughly **6–11 ms** more. So the
+pair is the slower of the two, both are a few tens of milliseconds, and **an exact delta quoted
+off one run is not something this probe defends** — the earlier "26 against 19" was one sample.
+
+**This is the cost the daemon pays to move the panes, and it is not what the user sees**: a
+restored pane takes a SIGWINCH and repaints, and whether that redraw is acceptable rather than
+merely correct is a judgement (DESIGN §5.1) — T07's, not a probe's.
 
 ### The cases the plan-review probe did not reach
 
@@ -107,6 +115,18 @@ acceptable rather than merely correct is a judgement (DESIGN §5.1) — T07's, n
   same 47 / 72 ratio. What is exercised is the *slot* changing size under a parked pair —
   a real OS window drag is not reachable from a headless mux (`wezterm cli` has no
   window-resize verb), so that half belongs to T07.
+
+### The 47 / 72 split is re-imposed on every restore, not preserved
+
+Worth being exact about, because the row above reads as though the ratio *survived* parking and
+it does not. Every restore in this probe ends with `split-pane --right --percent 60`, so the
+divider is **placed afresh each time** from a constant. That is why it comes back at 47 / 72
+after a park, after an agent switch and after a resize — the number is re-derived, not carried.
+
+The consequence is T05's to decide: if the user ever drags the divider between browser and
+viewer, this shape snaps it back to 60 % on the next park/restore. Nothing here measures a
+dragged divider, so nothing here says whether that is acceptable. It is a real behaviour, not a
+probe artefact — the daemon would do exactly the same.
 
 ---
 
