@@ -156,22 +156,26 @@ reset();
 eq("a non-numeric line is dropped, and the file still opens",
    run([path.join(REAL, "src/a.js"), "not-a-line"]).sent, ["\x05", "open src/a.js", "\r"]);
 
+// THE shape broot's Enter verb really produces on a plain Enter: `{line}` is `0`
+// whenever no `c/` content search is running -- measured by pressing Enter against
+// a real broot (run.sh 26), which is also what proves the commonest gesture in
+// browse mode opens the file without trying to jump anywhere.
 reset();
-eq("line 0 is not a line either", run([path.join(REAL, "src/a.js"), "0"]).sent,
+eq("line 0 is not a line either -- broot's `{line}` with no content search",
+   run([path.join(REAL, "src/a.js"), "0"]).sent,
    ["\x05", "open src/a.js", "\r"]);
 
 reset();
 eq("nor is a fractional one", run([path.join(REAL, "src/a.js"), "12.5"]).sent,
    ["\x05", "open src/a.js", "\r"]);
 
-// The two shapes broot's Enter verb actually produces (T03). `{line}` is the
-// matching line only while a `c/` content search is running and is EMPTY the rest
-// of the time, so `cockpit-open {file} {line}` arrives either as two arguments or
-// as three with a blank one -- depending on whether broot passes an empty token
-// through as an argv element. Asserted rather than assumed: a plain Enter is the
-// commonest gesture in browse mode and must open the file with no jump.
+// The shapes broot does NOT produce, kept because nothing guarantees it will not:
+// `{line}` was assumed to be empty on a plain Enter until the review pressed Enter
+// against a real broot and got `0` (asserted just above, and in run.sh 26). A
+// future broot could as easily pass an empty token, or drop it; a caller other
+// than the verb could hand over either. None of them may become a line.
 reset();
-eq("an EMPTY line argument -- broot's `{line}` with no content search",
+eq("an EMPTY line argument is not a line",
    run([path.join(REAL, "src/a.js"), ""]).sent, ["\x05", "open src/a.js", "\r"]);
 
 reset();

@@ -257,6 +257,88 @@ same "the broot guard comes before anything is built" \
 same "cockpit-layout.sh publishes cockpit-open for the verb to find" \
      "$(grep -cF 'ln -sf "$HERE/cockpit-open.mjs" "$COCKPIT_BIN/cockpit-open"' "$ROOT/bin/cockpit-layout.sh")" "1"
 
+
+echo
+echo "== 26. the verb FIRES: a real Enter, a real broot, the real file =="
+# Everything above this asserts either "broot did not complain" or a grep over the
+# hjson. Neither is enough on its own, because broot IGNORES A FIELD NAME IT DOES
+# NOT KNOW: `externol:` instead of `external:` loads perfectly clean (measured),
+# binds Enter and then does nothing -- which on macOS means the stock `open_stay`
+# hands the file to a GUI app, the one failure this file exists to prevent. The
+# control at the end of this section is exactly that mutant, and every other check
+# in this suite passes against it.
+#
+# So Enter is pressed for real. broot needs a terminal to read a key and a test run
+# has none, so it gets one from script(1); `cockpit-open` is a recorder on PATH
+# that writes down the argv it was handed. What this pins down is the contract T02
+# and T04 are built on: the verb fires, {file} is absolute, and {line} is the
+# matching line under a `c/` search and `0` otherwise.
+if ! command -v script >/dev/null; then
+  echo "  FAIL script(1) is missing -- Enter cannot be pressed without a terminal"
+  fail=1
+else
+mkdir -p "$T/vtree/sub" "$T/vhome" "$T/vbin"
+printf 'alpha\nbeta\nNEEDLE here\ndelta\n' > "$T/vtree/sub/a.txt"
+# Resolved, because broot hands back a path with every symlink resolved and macOS
+# puts a mktemp dir behind one (/var -> /private/var). Comparing against the
+# unresolved name is the trap FINDINGS records against `planPush`.
+VTREE="$(cd "$T/vtree" && pwd -P)"
+VARGV="$T/vargv.txt"
+# One write, not one per argument: the waiter below polls for this file, and an
+# append per argument lets it read a half-recorded call.
+cat > "$T/vbin/cockpit-open" <<SH
+#!/bin/sh
+out=""
+for a in "\$@"; do out="\$out[\$a]"; done
+printf '%s' "\$out" > "$VARGV"
+SH
+chmod +x "$T/vbin/cockpit-open"
+
+# Enter, then wait for the recorder rather than for a fixed time, then `q` so broot
+# leaves on its own instead of being killed and orphaned. stdin stays open until
+# the end: an EOF would quit broot before it could run anything.
+vfire() { # vfire <conf> <startdir> <broot --cmd>: echoes the argv, or nothing
+  : > "$VARGV"
+  ( sleep 1.5; printf '\r'
+    j=0; while [ ! -s "$VARGV" ] && [ "$j" -lt 40 ]; do sleep 0.1; j=$((j + 1)); done
+    sleep 0.2; printf 'q'; sleep 0.5 ) \
+  | ( PATH="$T/vbin:$PATH" HOME="$T/vhome" script -q /dev/null \
+        broot --conf "$1" --cmd "$3" --height 20 "$2" >"$T/vcap.txt" 2>&1 ) &
+  local pid=$! i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 120 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  cat "$VARGV"
+}
+
+screen() { tr -d '\r' < "$T/vcap.txt" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g'; }
+
+# A plain Enter -- the commonest gesture in browse mode. `{line}` is `0` here, not
+# empty and not absent: it was assumed to be empty until this check was written.
+same "Enter on a file runs cockpit-open with an ABSOLUTE path and line 0" \
+     "$(vfire "$VERBS" "$VTREE/sub" ':line_down')" "[$VTREE/sub/a.txt][0]"
+
+# The content search, which is the entire reason browse mode exists over revdiff's
+# own file list: the line handed over is the MATCHING line. NEEDLE is on line 3.
+same "under a c/ search, {line} is the matching line" \
+     "$(vfire "$VERBS" "$VTREE/sub" ':line_down;c/NEEDLE')" "[$VTREE/sub/a.txt][3]"
+
+# `apply_to: text_file` earns its keep here: Enter on a DIRECTORY has to stay
+# broot's own navigation, or there is no way to get anywhere in the tree.
+same "Enter on a DIRECTORY never pushes" \
+     "$(vfire "$VERBS" "$VTREE" ':line_down')" ""
+# Not "is a.txt on screen": broot's tree shows nested files whether or not it
+# descended, so that check passes against a verb that swallowed the keypress
+# (measured against an `apply_to: any` mutant). What actually moves is the ROOT
+# broot draws at the top, from <tree> to <tree>/sub.
+same "...it descends into it instead" \
+     "$(screen | grep -q 'vtree/sub' && echo descended || echo stuck)" "descended"
+
+# The control, and the reason this section exists at all.
+sed 's/external:/externol:/' "$VERBS" > "$T/typo.hjson"
+same "a typo'd field name IS caught here -- and nowhere else" \
+     "$(vfire "$T/typo.hjson" "$VTREE/sub" ':line_down')" ""
+fi
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
 exit "$fail"

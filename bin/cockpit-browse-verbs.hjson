@@ -24,10 +24,12 @@
             # pure side's decision (cockpit-open-model.mjs), which resolves both the
             # file and the repo root before comparing them.
             #
-            # {line} is the matching line when a `c/` content search is running, and
-            # EMPTY otherwise. Nothing special-cases that: the model treats a null,
-            # zero, empty or non-integer line as "no jump", so a plain Enter just
-            # opens the file.
+            # {line} is the matching line when a `c/` content search is running --
+            # and literally `0` the rest of the time, NOT empty and not absent
+            # (measured against broot 1.59 by pressing Enter for real; run.sh 26).
+            # Nothing special-cases that: the model treats zero as "no jump", so a
+            # plain Enter arrives as `cockpit-open <abs path> 0` and just opens the
+            # file.
             external: "cockpit-open {file} {line}"
 
             # Stay in the tree, still filtered, still searching. The push never takes
