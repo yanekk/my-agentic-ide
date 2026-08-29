@@ -153,7 +153,12 @@ const TZ = (() => {
  */
 function agendaBlock(width, rows, now) {
   try {
-    const calendars = readState().calendars;
+    // `rescue: false`: a corrupt agenda.json is left exactly where it is. This
+    // pane repaints every two seconds, so it would always be the one to move the
+    // sign-ins aside -- and it has nobody to tell, where the `agenda` command
+    // names the file it rescued and says the calendars need adding again
+    // (DESIGN 2.7). Reading is this pane's whole job; rescuing is not.
+    const calendars = readState({ rescue: false }).calendars;
     const cache = readCache();
     const wanted = agendaHeight({ width, calendars, cache, now, tz: TZ });
     const cap = Math.max(4, Math.floor((rows - SEP) / 2));

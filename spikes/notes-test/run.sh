@@ -317,6 +317,14 @@ printf '{ nor is this' > "$A/agenda.json"
 arender "$A" 140 24 > "$T/frame"
 check "a corrupt agenda.json draws too"          "no calendars" "$T/frame"
 check "...notes still intact"                    "agenda-pane note 12" "$T/frame"
+# And it is left exactly where it is. This pane repaints every two seconds, so it
+# would always be the one to move the sign-ins aside -- and it has nobody to tell,
+# where `agenda` names the rescued file and says the calendars need adding again
+# (DESIGN 2.7). Reading is the pane's job; rescuing is the command's.
+same "...and the pane did not move the sign-ins aside" \
+  "$(cat "$A/agenda.json")" "{ nor is this"
+same "...nor left a corrupt-<ts> file behind" \
+  "$(ls "$A" | grep -c 'agenda.json.corrupt-')" "0"
 
 echo
 echo "== 10. the pane is still pure display =="

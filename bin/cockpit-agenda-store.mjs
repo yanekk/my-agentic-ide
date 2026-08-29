@@ -171,10 +171,18 @@ export function writeClient({ clientId, clientSecret }) {
  * `corruptedTo` is the one thing a caller learns about the damage: the path the
  * broken file was moved to, so the CLI can say the sign-ins were set aside rather
  * than let them vanish silently.
+ *
+ * `rescue: false` reads WITHOUT moving anything: the quarantine is a one-shot
+ * event and only a caller that can speak to a person may consume it. The drawing
+ * pane repaints every two seconds and would otherwise always win the race to a
+ * freshly corrupted file, moving the sign-ins aside where nothing would ever
+ * report it -- and DESIGN 2.7 puts the announcement at the heart of the rule
+ * ("silently discarding refresh tokens costs two browser round trips"). So the
+ * CLI rescues and says so; the pane and the daemon read and leave it alone.
  */
-export function readState() {
+export function readState({ rescue = true } = {}) {
   const { data, corrupt } = readJson(STATE_FILE);
-  const corruptedTo = corrupt ? quarantine(STATE_FILE) : null;
+  const corruptedTo = corrupt && rescue ? quarantine(STATE_FILE) : null;
 
   const accounts = {};
   const rawAccounts = data && typeof data.accounts === "object" && data.accounts ? data.accounts : {};

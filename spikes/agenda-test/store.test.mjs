@@ -105,6 +105,20 @@ ok("...to agenda.json.corrupt-<ts>", /agenda\.json\.corrupt-\d+$/.test(rescued.c
 eq("...with the tokens still in it", fs.readFileSync(rescued.corruptedTo, "utf8"), "{ this is not json");
 ok("...and the original is out of the way", !fs.existsSync(STATE_FILE));
 eq("a second read reports nothing to rescue", store.readState().corruptedTo, null);
+
+// The drawing pane reads this file every two seconds and has nobody to tell, so
+// it must never be the one that moves the sign-ins aside: the rescue is a
+// one-shot event and only the CLI can report it (DESIGN 2.7).
+fs.writeFileSync(STATE_FILE, "{ corrupt again");
+const looked = store.readState({ rescue: false });
+eq("a display read still reads as empty", looked.calendars.length, 0);
+eq("...reports no rescue", looked.corruptedTo, null);
+eq("...and leaves the corrupt file exactly where it was",
+   fs.existsSync(STATE_FILE) ? fs.readFileSync(STATE_FILE, "utf8") : "(moved aside)",
+   "{ corrupt again");
+ok("...moving nothing aside", ls().filter((f) => f.startsWith("agenda.json.corrupt-")).length === 1, ls().join(" "));
+eq("...and the CLI's read still rescues it", /agenda\.json\.corrupt-\d+/.test(store.readState().corruptedTo || ""), true);
+ok("...so the file is out of the way now", !fs.existsSync(STATE_FILE));
 store.putCalendar({ slug: "work", account: "a@b.c", calendarId: "c", title: "W", colour: 1 }, T0);
 eq("...and writing works again afterwards", store.readState().calendars.length, 1);
 
