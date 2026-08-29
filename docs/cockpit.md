@@ -319,6 +319,239 @@ on*, so every note you wrote would become a change the agent thinks it has to
 explain. Written atomically (temp + rename) like every other cockpit state file,
 so the pane watches the **directory** and never goes deaf on a replaced inode.
 
+## Agenda
+
+Below NOTES in that same right column, separated by a rule, is **today's calendar**.
+
+```
+┌──────────────────────┬───────────────────────────────────────────┐
+│                      │ NOTES                                  4  │
+│                      │ ───────────────────────────────────────── │
+│                      │ 5c4f  2h    rebase before opening the PR  │
+│  agentic-ide         │ 0665  Mon   skipped the flaky test  — tidy│
+│  cockpit             │ ───────────────────────────────────────── │
+│                      │ TODAY · Wed 26 Aug                  14:20 │
+│                      │ ▌ ALL DAY  Kasia off              home    │
+│                      │ ▌ NOW      standup                work    │
+│                      │   └ until 14:30                           │
+│                      │ ▌ 15:00    design review        ? work    │
+│                      │ … +2 more · agenda                        │
+└──────────────────────┴───────────────────────────────────────────┘
+```
+
+**A slug is one calendar, not one account.** A Google account holds many — your own, plus every
+one you subscribed to: holidays, birthdays, a shared team calendar. `agenda add work` signs in
+and then gives you a **numbered list to pick one from**. A work schedule usually lives on a
+shared team calendar rather than on `primary`, and merging the whole account would drag in
+Company Holidays and every room you were ever added to, into a list a handful of rows tall.
+
+Sign-in is per **account**; calendars are per **slug**. Adding a second calendar from an
+account you already signed in to reuses the stored sign-in and opens no browser.
+
+```bash
+agenda                    # today, as the column shows it, plus per-calendar state
+agenda add home           # sign in if needed, pick a calendar, attach it
+agenda rm home            # detach it
+agenda ls                 # the configured calendars, one per line
+agenda color home         # reroll its colour
+agenda setup ~/Downloads/client_secret_….json   # the Google registration, once
+agenda help
+```
+
+**It is `agenda`, not `cal`.** `/usr/bin/cal` already exists, and the cockpit *prepends* its bin
+directory to `PATH` — so a `cal` symlink would shadow the month grid in every cockpit terminal
+**and in every agent**, which inherits that PATH. An agent reaching for `cal` out of habit and
+silently getting something else is a debugging cost paid at the worst possible moment.
+
+**`agenda rm` matches the slug exactly**, deliberately unlike `note rm a3f9`. A note removed by
+mistake is one line retyped; a calendar removed by mistake is the whole browser sign-in again.
+A note id is machine-minted and worth prefixing; a slug is a word you chose and can type in full.
+
+**Agents may read; agents may not connect.** `agenda`, `agenda ls` and `agenda help` work
+anywhere in the cockpit. `agenda add`, `rm`, `color` and `setup` refuse when `CLAUDECODE` is
+set, saying why — the refusal names the reason that is true of the verb, since `rm` and `color`
+open no browser and telling somebody one is coming sends them hunting for a window that is
+never going to appear.
+
+### What the column shows
+
+**Only what is left.** An event is finished when its end time is at or before now, and a
+finished event is dropped. The list shortens through the day rather than growing, which is what
+keeps it inside a few rows.
+
+**The event happening now is pinned at the top, marked `NOW`,** with a second line
+`└ until HH:MM`. At 14:20 the first thing you want is not the next meeting but confirmation of
+the one you are in and when it lets you go. If several overlap, the earliest start takes the
+label and the rest follow as ordinary rows.
+
+**All-day events sit above the timed ones**, marked `ALL DAY`. They have no start time to sort
+by and they do not finish until the day does; a week off appears on every day it covers.
+
+**When today has nothing left the column rolls on to tomorrow** — the header becomes
+`TOMORROW · Thu 27 Aug`. This is why the fetch window is two days wide: rolling over at 18:05
+must not need a network round trip. With both days empty it says `nothing today or tomorrow`.
+
+**Overflow says how much it is hiding**: `… +N more · agenda`, the same contract the notes
+column keeps. Stopping silently at the fold reads as "that is all of them", and here that is a
+false statement about your afternoon.
+
+Declined events are hidden — you are not going, and a row is scarce. Cancelled ones are hidden
+unconditionally; they are tombstones in the API response, not entries on your calendar.
+Unanswered invitations **are** shown, marked `?`: they are real claims on your time until you
+deal with them, and hiding one shows an 11:00 as free when it is not. So are events you marked
+"free" — Google's busy/free flag is about availability, not about whether you meant to do the
+thing, and focus blocks are half of what this is for.
+
+**The colour** is drawn at random from a fixed palette of eight mid-brightness terminal colours
+when a calendar is added, and no two configured calendars share one while a free colour remains.
+It renders as a `▌` bar down the left of each row *and* the slug at the right: the bar is what
+you read at a glance, the slug is what survives a colourblind reader, a monochrome terminal and
+a piped `--no-color`.
+
+### When it cannot fetch
+
+The failures split by whether waiting fixes them.
+
+**Transient** — no network, a 5xx, a timeout. The last events fetched **stay on screen** and one
+dim line is added: `last updated 22m ago · offline`. It heals itself within a minute, events
+rarely change inside twenty, and an agenda that turns into an error message every time a laptop
+wakes from sleep teaches you to ignore the line that matters.
+
+**Permanent** — the sign-in was revoked or expired, the consent was granted without the calendar
+permission, or the calendar is gone. That calendar's rows are replaced by **one loud line naming
+the command that fixes it**, and the other calendars are unaffected and keep showing their
+events:
+
+```
+home  sign-in expired · agenda add home
+home  calendar permission not granted · agenda add home
+home  calendar gone · agenda rm home
+```
+
+The middle one earns its own case. Google's consent screen carries a **per-scope checkbox**, and
+leaving the calendar box unticked yields a perfectly valid token whose calendar calls fail. That
+is a consent mistake, not a dead calendar — telling somebody to `agenda rm` a calendar that is
+fine would destroy the configuration and fix nothing.
+
+**Staleness is only reported when a fetch has actually failed.** A cache a minute or two old
+during normal operation is not stale, it is current; saying "5m ago" every time would make the
+line meaningless.
+
+### Refreshing: the daemon fetches, the pane only draws
+
+**Every minute, and on return to the cockpit if the last fetch is older than a minute.** "On
+return" is the transition back to the fleet *list* — you opened the window, or you stepped out of
+an agent. Opening the window counts, and `onExit` does not fire for it, so there is an explicit
+refresh at start-up as well.
+
+It was five minutes until 2026-08-29, when an event added by hand took up to six minutes to
+appear — precisely the moment the delay is least acceptable.
+
+**One tick, not two timers.** The 60-second tick fetches any calendar whose last fetch is older
+than a minute, and the on-return trigger calls the same function; a single "is anything stale?"
+predicate is easier to reason about than a periodic timer racing an event. One fetch is in
+flight at a time, guarded like `reconcile` already is — overlapping fetches would interleave
+cache writes and burn quota on a slow network. **With no calendars configured the tick returns
+immediately and writes nothing**, so the feature costs nothing until it is used.
+
+`cockpit-welcome.mjs` is **pure display by construction** — it never runs a command and never
+moves a pane, which is what lets `cockpitd` own it as a diff slot. So the daemon writes
+`agenda-cache.json` and the pane watches the state directory and redraws, exactly as the strip
+already consumes `terminals.json`. Network I/O in the pane would not break the pane machinery
+today, but it would break the rule, and the rule is load-bearing.
+
+### Why the agenda is drawn, not given a pane
+
+The same reason as [the notes column](#why-the-notes-column-is-drawn-not-split), and it has not
+changed: the diff slot swaps by parking *exactly one* pane, so a real agenda pane would turn
+every agent switch into a three-pane dance for a list nothing ever types into.
+
+**How the column divides.** The agenda is capped at half the column's rows; if it wants fewer it
+gives the slack back to notes, and notes never fall below three. Not a fixed half, because in
+the evening the agenda is two lines and a fixed half would show `nothing left today` above four
+blank rows while notes overflowed below it. With no calendars configured the section shows
+`no calendars` and `agenda add home` rather than nothing — a blank region with no explanation
+reads as a bug. Below the narrow-pane threshold the whole pane already falls back to a single
+centred greeting, and the agenda is not drawn there either; `agenda` in a terminal still reads it.
+
+### The Google registration, once per machine
+
+Google requires the cockpit to identify itself with a client ID and secret that you create in
+the Google Cloud console. **They are not in this repository and never will be** — they live in
+`~/.claude/cockpit/agenda-client.json`, mode `0600`, in a **separate file from the sign-ins** so
+that a corrupt state file, or `agenda rm` on everything, cannot cost you the console setup.
+
+`agenda setup` takes **the path to the JSON Google gave you**, not two typed values: a client
+secret is a long opaque string and one mistyped character produces a sign-in failure
+indistinguishable from every other sign-in failure. The download is parsed, the two values are
+copied out, and your download is left where it is. Google emits a **nested** file —
+`{ "installed": { "client_id": …, "client_secret": … } }` for a Desktop client, `"web"` for a web
+one — so the parse accepts `installed`, `web` and flat, in either key style, and stores the
+normalised flat shape. What is on disk is ours; what is read is Google's.
+
+**Two things in the console will bite you, and nothing warns you at the moment they matter:**
+
+- **Add each account as a test user.** A client in *Testing* publishing status refuses to sign in
+  any account not on that list, and the refusal happens in the browser, not in the terminal.
+- **Tick the calendar checkbox on the consent screen.** It is a *per-scope* checkbox and it is
+  not ticked for you. Leaving it produces a valid sign-in whose calendar calls fail; the column
+  then says `calendar permission not granted`, and the fix is to run `agenda add` again and tick
+  it.
+
+Sign-in is the **loopback flow with PKCE**. The redirect is `http://127.0.0.1:<port>` with the
+port taken by binding port 0 and reading back what the OS gave — Google permits any loopback
+port for a Desktop client, and hard-coding one would fail whenever it was already in use. The
+listener **closes after 180 seconds or the first request**, so a browser tab you abandon cannot
+leave a process listening. `access_type=offline` and `prompt=consent` are both passed: without
+them Google returns a refresh token only on the *first ever* consent, and a re-add after
+`agenda rm` would silently produce an account that cannot refresh.
+
+Scopes are `calendar.readonly` plus `openid email` — the second only so the tool can name which
+account signed in, which is what makes "you are already signed in to this account" possible.
+
+### Where the agenda lives, and why not in the repo
+
+Three files in `~/.claude/cockpit/`, all mode `0600` — the cache included, because it holds your
+meeting titles:
+
+```
+agenda-client.json   { version, clientId, clientSecret }
+agenda.json          { version, accounts: { "<email>": { refreshToken, addedAt } },
+                       calendars: [ { slug, account, calendarId, title, colour, addedAt } ] }
+agenda-cache.json    { version, calendars: { "<slug>": { fetchedAt, events, error } } }
+```
+
+Not in the repo, for the same reason as notes: a checked-in file here would show up in
+`revdiff --untracked HEAD` — the very diff the agent is being reviewed on — so your calendar
+would become a change the agent thinks it has to explain, and it would put refresh tokens in git.
+
+Writes are atomic (temp + rename) and taken under **one** lock covering all three files, with a
+stale break at 5s — you, an agent and the daemon all write them, and the three are written
+together often enough (attach a calendar, prime its cache) that separate locks would only buy
+interleavings to reason about. The lock is **reentrant by depth**: one lock across three files
+makes nesting the ordinary case, and without the depth count a compound write spun its whole
+retry budget against a lock the same process held, then broke it as stale — leaving the rest of
+the transaction running with no lock at all.
+
+A corrupt file starts clean rather than crashing the pane, with one exception: **`agenda.json` is
+moved aside** to `agenda.json.corrupt-<ts>` first, and the CLI says so. It holds the sign-ins,
+and silently discarding a refresh token costs two browser round trips.
+
+### If it goes wrong
+
+- `agenda` in any cockpit terminal prints the state of every calendar and why. Nothing here can
+  break the fleet view or an agent.
+- **Start over, keeping the console setup:**
+  `rm ~/.claude/cockpit/agenda.json ~/.claude/cockpit/agenda-cache.json`. You sign in again from
+  `agenda add`; you do not go back to the Google console. Notes, panes and agents are untouched.
+- **Start over including the registration:** `rm ~/.claude/cockpit/agenda*.json` — the glob takes
+  `agenda-client.json` too, so this one costs you the console setup as well.
+- **Revoke the cockpit's access** to an account from that account's
+  [third-party access page](https://myaccount.google.com/connections). The column then says
+  `sign-in expired`, which is correct.
+- **The feature is in the way.** `agenda rm` every slug: with nothing configured the tick returns
+  immediately, nothing is fetched, and the column falls back to notes alone.
+
 ## Per-agent panes
 
 Each agent gets its own terminals **and its own revdiff**, and so does the fleet
@@ -461,6 +694,12 @@ And for the diff slot (`spikes/pane-swap/probe.sh`, same setup):
 | `COCKPIT_REAP_MS` | How often to check whether a terminal's agent still exists (default 15000). Two consecutive misses kill it. The tests drive this down so the wait is seconds. |
 | `COCKPIT_REPO` | Which repo's notes a terminal sees. Exported into every cockpit-spawned shell; `note` falls back to `panes.json` when it is absent. Not something to set by hand. |
 | `COCKPIT_BIN` | Where the cockpit's own commands live (`~/.claude/cockpit/bin`). Set by the layout script; on the `PATH` of cockpit shells only. |
+| `AGENDA_DRY_RUN=1` | `agenda add` prints the sign-in URL it *would* open and stops — binds no port, opens no browser, writes nothing. The safe way to inspect the flow. |
+| `COCKPIT_AGENDA_TICK_MS` | How often the daemon looks for a stale calendar (default 60000). |
+| `COCKPIT_AGENDA_STALE_MS` | How old a fetch must be before that tick refetches it (default 60000). |
+| `AGENDA_ORIGIN` | Re-point Google's endpoints at a loopback stub. The tests' whole reason for existing offline; never set by hand. |
+| `AGENDA_BROWSER` | The opener, instead of `/usr/bin/open`. Used by the tests to record what would have been launched. |
+| `AGENDA_TTY` | Where `agenda add`'s prompts are read from, instead of `/dev/tty`, so the picker is drivable in a test. |
 
 ## Testing
 
@@ -471,7 +710,7 @@ spikes/cockpit-test/run.sh
 Stubs `wezterm` with a shim that records argv and stdin **and models a pane
 table** (`list`, `split-pane`, `move-pane-to-new-tab`, `kill-pane`), builds two
 throwaway git repos, and drives attach → review → switch → switch back → detach →
-reap. 134 assertions. Beyond the review-injection ones it asserts that entering an
+reap. 174 assertions. Beyond the review-injection ones it asserts that entering an
 agent *opens* a terminal and a diff pane in its worktree rather than `cd`-ing or
 restarting shared ones, that switching *parks* both outgoing panes instead of
 killing them, that switching back *moves the same panes in* — with **no revdiff
@@ -483,6 +722,17 @@ one is left alone, that quitting revdiff (Shift+Q, which discards annotations)
 is reinstated on the same diff rather than leaving the pane at a bare shell, and
 that both panes are reaped only once their agent has left the fleet.
 
+Since the agenda it also covers the daemon's half of that feature: that the
+60-second tick refetches a calendar the moment its cache is a minute old and
+leaves a younger one alone however many ticks pass, that a return to the fleet
+list does the same, that **with no calendars configured no cache file is written
+at all**, that a network failure keeps the previous events and only adds an error
+while an auth failure classifies differently, that one pass runs at a time
+(~5 ticks behind a held-open request start nothing), that a corrupt `agenda.json`
+is *not* quarantined by the daemon — that is the CLI's job alone — and that
+**neither an access token nor a meeting title ever reaches `daemon.log`**, which
+gets pasted into conversations.
+
 The stub models pane **titles** too, and deliberately reports a stale one on the
 switch-back so the framed-screen check has to carry that decision. Making
 `diffPaneStatus` title-only fails exactly those two assertions.
@@ -492,7 +742,7 @@ spikes/notes-test/run.sh
 ```
 
 The notes feature, standalone — the column is drawn inside the welcome pane
-rather than being a pane of its own, so it needs no mux stub. 39 assertions over
+rather than being a pane of its own, so it needs no mux stub. 90 assertions over
 the `note` command and the rendered column: that the command refuses outside a
 cockpit but still answers `help`, that a bare `note "text"` adds while `note ls`
 lists, that a pasted newline is collapsed rather than splitting a note, that
@@ -503,6 +753,35 @@ yours carries no byline, that two repos keep separate lists, that **10 concurren
 adds all survive** the shared-file lock, and that the column renders its header,
 ids, ages, empty state, the `+N more` line when it overruns, and drops back to a
 single column when the pane is too narrow to split.
+
+Since T06 it also owns the **right column as a whole** — NOTES over a rule over
+AGENDA — because both halves are drawn by the same pane. It sweeps 1–40 rows
+against four widths and asserts the height is exact, that no line ever runs over
+the width, that the agenda is never drawn above the notes, that notes never fall
+below three rows, and that a hostile event title cannot write control sequences
+into the pane. Its frame harness **freezes the clock and fixes `TZ`**, so `NOW`,
+`└ until 15:00` and the wall clock are one string on any machine at any hour —
+with a real clock an event three hours out crosses midnight for anyone running
+the suite in the evening.
+
+```bash
+spikes/agenda-test/run.sh
+```
+
+The agenda's own core: the state files and their lock, the event model, the
+column renderer, the Google client and the `agenda` command. 589 assertions, and
+**it never touches the network** — `AGENDA_ORIGIN` points Google's endpoints at a
+loopback stub, so the OAuth exchange, the refresh and the event fetch are all
+driven for real against a server the test owns. It asserts that a corrupt
+`agenda.json` is **moved aside** rather than discarded (it holds the sign-ins)
+while a corrupt cache is not, that a **stale lock is broken and a nested one does
+not stall**, that an offset-less `dateTime` is not read in the machine's zone,
+that a declined event is hidden while an unanswered one is shown and marked, that
+a 403 naming an insufficient scope says `calendar permission not granted` rather
+than `calendar gone`, that a hostile calendar title cannot escape into the
+terminal, that `agenda add __proto__` is refused, that `agenda add`/`rm`/`color`/`setup`
+refuse for an agent **with a reason that is true of the verb**, and that `agenda`
+is a command inside a cockpit terminal and not outside one.
 
 ```bash
 spikes/pane-swap/probe.sh          # what wezterm and revdiff actually do

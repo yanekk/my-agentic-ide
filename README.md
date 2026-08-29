@@ -50,10 +50,17 @@ Switching agents **moves** these panes, never restarts them: every terminal and
 revdiff keeps running while parked, holding its scroll position and unflushed
 annotations, so a return is instant.
 
-With no agent attached the top pane shows a greeting and a **notes** column.
-`note "rebase before the PR"` adds, bare `note` lists, `note edit|rm a3f9`
-changes. Cockpit terminals only — agents have it too, and their notes carry
-their name.
+With no agent attached the top pane shows a greeting and, down the right, a
+**notes** column over **today's calendar**. `note "rebase before the PR"` adds,
+bare `note` lists, `note edit|rm a3f9` changes. Cockpit terminals only — agents
+have it too, and their notes carry their name.
+
+Below the notes, `agenda` shows what is **left** of the day across your Google
+calendars — the meeting you are in pinned at the top as `NOW` with when it lets
+you go, rolling on to tomorrow once today empties. `agenda add work` signs in and
+attaches one calendar, picked from a list. The daemon refreshes it every minute;
+lose the network and the events stay with one dim line saying how old they are.
+Agents may read it, but not connect one.
 
 ## Shift+O — the whole review loop
 
@@ -117,6 +124,15 @@ Then just open WezTerm: `default_prog` builds the panes, starts the daemon and
 brings up the fleet. Re-opening the window is the rebuild path, and deliberately
 cheap — the agents are daemon-backed and survive it, their terminals and diffs
 do not.
+
+The agenda is **optional and set up separately**, because it needs a Google
+client ID you create once in the Google Cloud console. `agenda setup
+~/Downloads/client_secret_….json` takes the file Google gives you; then `agenda
+add home` per calendar. Nothing secret is in this repository — the registration
+and the sign-ins live in `~/.claude/cockpit/`, mode `0600`. With no calendars
+configured the feature costs nothing: the daemon's tick returns immediately and
+the column falls back to notes alone. `docs/cockpit.md` has the two console
+traps that will otherwise bite you.
 
 `docs/cockpit.md` covers how it works and why — read it before changing the
 daemon.

@@ -125,8 +125,17 @@ const swatch = (colour) => {
  */
 function refuseIfAgent(verb) {
   if (!process.env.CLAUDECODE) return;
+  // The refusal covers four verbs for TWO different reasons, and telling `rm` the
+  // browser story is simply false -- it opens none. Measured in T08's hands-on
+  // pass: `agenda rm` refused with "it would open a browser and wait for a person
+  // to finish signing in", which sends whoever read it looking for a browser
+  // window that was never going to appear.
+  const opensBrowser = verb === "add" || verb === "setup";
+  const why = opensBrowser
+    ? "It would open a browser and wait for a person to finish signing in."
+    : "It changes your calendar configuration, which is not an agent's to change.";
   die(`\`agenda ${verb}\` is not available to an agent.\n` +
-      `      It would open a browser and wait for a person to finish signing in.\n` +
+      `      ${why}\n` +
       `      Ask the human at this cockpit to run it. (\`agenda\` and \`agenda ls\` do work here.)`);
 }
 

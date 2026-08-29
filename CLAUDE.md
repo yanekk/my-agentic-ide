@@ -29,7 +29,12 @@ nothing about the agent view changes.
 │  agentic-ide         │ ───────────────────────── │
 │  cockpit             │ 5c4f  2h   rebase before… │
 │                      │ 0665  Mon  skipped the f… │
-│                      │ … +7 more · note ls       │
+│                      │ ───────────────────────── │
+│                      │ TODAY · Wed 26 Aug  14:20 │
+│                      │ ▌ ALL DAY Kasia off  home │
+│                      │ ▌ NOW     standup    work │
+│                      │   └ until 14:30           │
+│                      │ … +2 more · agenda        │
 ├────────────────┬─────┴──────────────────────┬────┤
 │ claude agents  │ shell @ repo               │list│
 └────────────────┴────────────────────────────┴────┘
@@ -41,6 +46,21 @@ a3f9` / `note rm a3f9` change and remove. Each has a **stable short id** (any
 unique prefix resolves), a date and an author. The agents inherit the command
 too, so an agent can leave you a note — those carry its name, so a note you were
 handed never reads like one you wrote.
+
+Below the notes, behind a rule, is **today's calendar**, from **`agenda`** — the
+same cockpit-only publication as `note`. `agenda add work` signs in to a Google
+account and attaches **one** of its calendars, picked from a list: a work schedule
+usually lives on a shared team calendar, not on `primary`. Sign-in is per
+*account*, calendars are per *slug*, so a second calendar from an account already
+signed in opens no browser. Only what is **left** of the day is shown, the event
+happening now pinned at the top as `NOW` with `└ until HH:MM`; when today empties
+the column rolls on to tomorrow, which is why the fetch window is two days wide.
+The **daemon** fetches every minute and on return to the fleet list, writing
+`agenda-cache.json`; the pane only draws, so `cockpit-welcome.mjs` stays pure
+display and `cockpitd` can keep owning it as a diff slot. A failed fetch keeps the
+last events and adds one dim `last updated 22m ago · offline`; a revoked sign-in
+replaces that one calendar's rows with `home  sign-in expired · agenda add home`
+and leaves the others alone.
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
@@ -106,10 +126,15 @@ bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer
 bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes column
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
+bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
+bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic writes
+bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
+bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (134 assertions)
-spikes/notes-test/      the `note` command and the notes column (39 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
+spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
+spikes/agenda-test/     the agenda's store, model, Google client and command (589)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -131,8 +156,16 @@ itself is per-agent and in-memory, so there is no `diff-mode` file any more),
 `custom-ref-pending` (the handoff file the
 custom prompt writes and the daemon reads), `notes.json` (the notes, keyed by repo
 root — never in the repo, where they would land in the agent's own diff) with its
-`notes.lock`, `bin/note` (a symlink to `cockpit-note.mjs`, relinked on every
-rebuild — the whole of how the command is "inside the cockpit only"), and `cmd`
+`notes.lock`, `agenda-client.json` (the Google registration you create once — kept
+apart from the state so `agenda rm` or a corrupt file cannot cost you the console
+setup), `agenda.json` (the sign-ins and the attached calendars — a corrupt one is
+**moved aside** to `agenda.json.corrupt-<ts>` rather than discarded, because
+throwing a refresh token away costs two browser round trips) and
+`agenda-cache.json` (the fetched events, written by the daemon and watched by the
+pane), all three `0600` — the cache included, it holds your meeting titles — under
+one shared `agenda.lock`, `bin/note` and `bin/agenda` (symlinks to
+`cockpit-note.mjs` and `cockpit-agenda.mjs`, relinked on every
+rebuild — the whole of how the commands are "inside the cockpit only"), and `cmd`
 (the command channel
 the terminal keybindings append to — the custom prompt appends `custom-ok`/
 `custom-cancel` here too). Debug with `tail -f ~/.claude/cockpit/daemon.log`.
@@ -196,6 +229,16 @@ in `docs/cockpit.md`, `spikes/pty-inject/RESULTS.md` and
 | revdiff follows the agent's worktree even **mid-attach**, not only across switches | `reconcile()` short-circuits on a matching fleet-header name, so a `cwd` migration under a *continuously* attached agent (it creates and enters a worktree without any detach) was never noticed: `attached.worktree` is captured once at `onEnter`, and revdiff, its worktree/reflog watches and the terminal all stayed pinned to the launch dir. Shift+R could not fix it — revdiff's reload re-runs the **same range in the same directory**. So on the same-name poll branch, `followWorktreeMigration` re-reads the agent's live `cwd` (`claude agents --json` reports it, measured), and on a change relaunches revdiff (`cd` + revdiff, not `R`), re-points the worktree/reflog watches, and re-syncs the terminal. Throttled (each check spawns `claude`) and cooldown-guarded against a still-painting revdiff / open annotation editor, exactly like `healQuitDiff`; runs under the reconcile lock so it never races a pane swap. |
 | The left button belongs to **claude, whole** — bind no part of it | claude does its own text selection: it turns on full mouse reporting (measured: `?1000h ?1002h ?1003h ?1006h`), draws its own highlight, and on release copies with **OSC 52**, announcing "copied N chars to clipboard". Driven with synthetic press/motion/release on a pty it does exactly that, and WezTerm honours the write (probed: BEL-terminated `ESC ] 52 ; c ; <base64>` lands in the pasteboard). Two attempts at helping made it worse. Binding Down+Drag+Up under `mouse_reporting = true` gave WezTerm the selection and left claude blind — nothing in the pane was clickable. Binding only Drag+Up, meant to leave claude the press, broke it twice over: claude dispatches a *click* on the **release** (`onClickAt`), not the press, so swallowing the release swallowed every click; and because the release never reached `pane.mouse_event`, wezterm-term's `current_mouse_buttons` still held Left, so `mouse_report_button_number` kept encoding every later mouse *move* as a held-button drag — claude never saw the hover that ends a drag (`py()`: motion with no button), so its selection followed the pointer forever and the next click started another. The gesture is **indivisible**: press, motion, release and the button-up bookkeeping are one transaction, and WezTerm can take all of it or none. It takes none. Shift still bypasses reporting entirely for a plain terminal selection (`bypass_mouse_reporting_modifiers`, at its SHIFT default) — the way to copy what claude's own selection cannot reach. |
 | Both `swallow_mouse_click_on_*_focus` are **off** | A drag whose press was eaten is the one way claude's copy fails silently: with no `onSelectionStart` there is no anchor, so the release finds nothing to copy even though a highlight appeared. macOS WezTerm eats exactly that press by default on the click that focuses the window. |
+| The command is `agenda`, **never** `cal` | `/usr/bin/cal` already exists and the cockpit **prepends** its bin directory to `PATH`, so a `cal` symlink would shadow the month grid in every cockpit terminal *and in every agent*, which inherits that PATH. An agent reaching for `cal` out of habit and silently getting something else is a debugging cost paid at the worst possible moment. |
+| Google's downloaded client JSON is **nested**, and the parse must accept it | Measured 2026-08-27: a Desktop client downloads as `{ "installed": { "client_id": … } }` — snake_case, one level down — and a web client uses `"web"`. The plan assumed a flat `{ clientId, clientSecret }` and the spike **rejected the real file**. So `agenda setup` accepts `installed`, `web` and flat, in either key style, and stores the normalised flat shape: what is on disk is ours, what is read is Google's. |
+| A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is `auth`, **not** `gone` | Google's consent screen has a **per-scope checkbox**, and leaving the calendar box unticked yields a perfectly valid token whose calendar calls 403 (measured 2026-08-27). The remedy is to sign in again and tick it, so the column must say `calendar permission not granted · agenda add work`. Rendering `calendar gone` would tell somebody to `agenda rm` a calendar that is fine — destroying the configuration and fixing nothing. |
+| `withLock` counts **depth**, and one lock covers all three agenda files | One lock over three files makes nesting the *ordinary* case (attach a calendar, prime its cache is one `withLock` around calls that each take it again), not an exotic one. Measured before the guard: that compound write took **5035ms**, because the inner call spun its whole retry budget against a lock **this process** held, then broke it as stale and unlinked it — leaving the rest of the transaction running with **no lock at all**, the opposite of what wrapping it was for. |
+| An all-day event is a **civil date**, not an instant, and a day is not always 24 hours | DST makes a local day 23 or 25 hours long, so "today plus 86400000" is wrong twice a year, and an all-day event carries `date` (not `dateTime`) precisely because it has no instant. The day bounds are computed in the calendar's zone; a multi-day all-day event appears on every day it covers. |
+| An offset-less `dateTime` must **not** be read in the machine's zone | Google can return a local wall-clock time whose zone lives in a sibling field. Parsing it with the machine's zone silently shifts an event by hours — and it is a §3.1 purity leak the grep cannot see, because `new Date(s)` is not a clock call. Found in T02's review. |
+| The **resting pane must not rescue** a corrupt `agenda.json` | `readState()` *quarantines* a corrupt file to `agenda.json.corrupt-<ts>`. The pane repaints every 2s, so it always won that race and moved the sign-ins aside **with nobody to tell** — killing the announcement the CLI exists to make. The pane reads with `rescue: false`; quarantining is the `agenda` command's job alone, where a person is watching. |
+| `onExit` does **not** fire when you open the window, so there is a **third** refresh call site | DESIGN counts opening the cockpit as a return, but the daemon's on-return hook only fires on the transition *out of* an agent — at window-open there is no agent to exit. Without the explicit `refreshAgenda("start")` at boot the column would sit empty until the first tick. Confirmed live in `daemon.log`: `agenda start: home ok`, then ticks 60.0s apart. |
+| A permanently broken calendar is retried **every minute, for ever, with no backoff** — deliberately | A failure keeps the previous `fetchedAt`, so the calendar stays stale and every tick retries it. That is one request a minute against a 401 that will not heal until you act — and it is the right trade: the loud `sign-in expired` line must clear *the moment* you fix it, and a backoff would make the fix look like it had not worked. |
+| The frame harness **freezes the clock and fixes `TZ`** | `NOW`, `└ until 15:00`, `TODAY · Wed 26 Aug` and the wall clock must be one string on every machine at any hour. With a real clock an event three hours out crosses midnight for anyone running the suite in the evening. The seam is in the **harness**: the pane still reads `Date.now()` once per paint and has no test hook. |
 
 ## How agent switching is detected
 

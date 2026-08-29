@@ -460,10 +460,16 @@ section("32. an agent may read, and may not connect");
   const asAgent = { CLAUDECODE: "1" };
   const answers = writeTty(dir, "1", "1");
 
+  // The reason given must be TRUE of the verb refused. `rm` and `color` open no
+  // browser, and telling somebody one is coming sends them looking for a window
+  // that never appears (T08's hands-on pass found exactly that).
+  const opensBrowser = new Set(["add", "setup"]);
   for (const args of [["add", "other"], ["rm", "work"], ["color", "work"], ["setup", "/tmp/whatever.json"]]) {
     const r = await run(args, { dir, tty: answers, env: asAgent });
     eq(`an agent running \`agenda ${args[0]}\` exits 1`, r.status, 1);
     ok(`...saying why, and that a person must do it`, /agent/i.test(r.all), r.all);
+    eq(`...and the browser is mentioned only if ${args[0]} opens one`,
+       /open a browser/.test(r.all), opensBrowser.has(args[0]));
   }
   eq("...and nothing an agent ran changed anything", slugs(dir), ["work"]);
   eq("...no browser was opened for it", browserLog(dir).length, 1);

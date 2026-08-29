@@ -482,9 +482,13 @@ Written for somebody under pressure who is not reading the code.
 
 - **The column is showing nonsense or nothing.** `agenda` in any cockpit terminal prints the
   state of every calendar and why. Nothing here can break the fleet view or an agent.
-- **Start over completely:** `rm ~/.claude/cockpit/agenda*.json`. You lose the sign-ins and the
-  colours; you keep the Google registration only if you spare `agenda-client.json`. Notes,
-  panes and agents are untouched — different files.
+- **Start over, keeping the Google registration:**
+  `rm ~/.claude/cockpit/agenda.json ~/.claude/cockpit/agenda-cache.json`. You lose the sign-ins
+  and the colours and sign in again from `agenda add`; you do **not** have to go back to the
+  Google console. Notes, panes and agents are untouched — different files.
+- **Start over including the registration:** `rm ~/.claude/cockpit/agenda*.json` — the glob takes
+  `agenda-client.json` too, so this one costs you the console setup as well. Only reach for it if
+  the registration itself is what is broken.
 - **Revoke the cockpit's access to a Google account** from that account's
   [third-party access page](https://myaccount.google.com/connections); it is out of this tool's
   hands and always available. The column then shows `sign-in expired`, which is correct.
