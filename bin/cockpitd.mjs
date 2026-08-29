@@ -537,7 +537,7 @@ function disposeViewer(jobId) {
  *
  * Called under the reconcile lock (every caller holds it).
  */
-async function enterBrowse(jobId, worktree) {
+async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   const anchor = diffs.get(jobId);
   if (anchor === undefined) return log(`no slot pane to split for ${jobId}; not entering browse`);
   // Whatever pair this agent had is not parked (T05), so a re-entry rebuilds it.
@@ -578,7 +578,10 @@ async function enterBrowse(jobId, worktree) {
   });
   // The browser holds focus: you enter browse mode to find a file, and a push never
   // takes focus away, so the whole gesture happens without touching another key.
-  wez(["activate-pane", "--pane-id", String(browser)]);
+  // Only when the pair was asked for, though -- `focus: false` is for a rebuild the
+  // user did not ask for (followWorktreeMigration), where taking the keyboard is
+  // the same class of mistake as typing `R` into an open annotation editor.
+  if (focus) wez(["activate-pane", "--pane-id", String(browser)]);
   log(`entered browse for ${jobId}: browser ${browser}, viewer ${viewer} at ${worktree}`);
 }
 
@@ -610,6 +613,11 @@ async function leaveBrowse(jobId, worktree) {
   viewers.delete(jobId);
   if (fresh === undefined) {
     // The slot is empty and both halves are gone; healMissingPanes rebuilds it.
+    // Unpublish the viewer on the way out even so: the success branch below is not
+    // the only path where the pair stops existing, and a `viewer` still naming a
+    // killed pane is exactly how cockpit-open ends up typing micro's command bar
+    // into whoever inherits that id (ids are reused -- see disposeViewer).
+    publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null });
     log(`could not rebuild the diff slot leaving browse for ${jobId}`);
     return undefined;
   }
@@ -1563,8 +1571,14 @@ async function followWorktreeMigration() {
   // the new worktree first, which only a fresh launch does. In browse mode there is
   // no revdiff to relaunch -- the browser is rooted at the worktree the agent has
   // just left, so the whole pair is rebuilt in the new one.
-  if (modeOf(attached.jobId) === "browse") await enterBrowse(attached.jobId, to);
-  else if (pane !== undefined) await relaunchDiff(attached.jobId, pane, to, attached.reviewFile);
+  if (modeOf(attached.jobId) === "browse") {
+    // Follow the focus, never take it. This fires on the AGENT's schedule -- it
+    // created a worktree and moved into it -- so it can land while you are typing a
+    // review into the Claude pane, and enterBrowse would otherwise put the rest of
+    // that sentence in broot's filter box. The revdiff branch below moves focus
+    // nowhere for exactly the same reason. Read before the old pair is destroyed.
+    await enterBrowse(attached.jobId, to, { focus: diffPaneFocused() });
+  } else if (pane !== undefined) await relaunchDiff(attached.jobId, pane, to, attached.reviewFile);
 
   // Re-establish the worktree + reflog watches on the new location; the old ones
   // watch a directory the agent has left.

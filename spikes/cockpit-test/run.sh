@@ -1079,6 +1079,75 @@ refute "clicking Browse again launches nothing"   "broot --conf" "$CALLS"
 refute "...and disposes of nothing"               "kill-pane" "$CALLS"
 
 echo
+echo "== 11j. ⌥[ out of browse lands on CUSTOM and opens the ref prompt =="
+# The one transition the mode cycle makes that is neither "launch revdiff" nor
+# "launch the pair": leaveBrowse hands the slot to a fresh shell and the PROMPT is
+# typed into that, not into a browse half that no longer exists.
+BR4="$(pane_key diff)"; VW4="$(pane_key viewer)"
+: > "$CALLS"
+echo "$BR4" > "$ACTIVE"                   # the browser holds focus
+echo prev >> "$T/state/cmd"               # browse -> custom (browse is the fourth stop)
+nap 3
+SLOT4="$(pane_key diff)"
+check  "the mode is now custom"                   '"diffMode":"custom"' "$T/state/terminals.json"
+check  "the ref prompt opened"                    "cockpit-custom-prompt.mjs" "$CALLS"
+check  "...in the FRESH slot pane the pair handed over" \
+                                                  "send-text --pane-id $SLOT4" "$CALLS"
+refute "...not into the browser, which is gone"   "send-text --pane-id $BR4" "$CALLS"
+refute "...nor into the viewer"                   "send-text --pane-id $VW4" "$CALLS"
+check  "the viewer keys were cleared leaving browse" \
+                                                  '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
+refute "and revdiff is NOT launched until the prompt answers" "revdiff --wrap" "$CALLS"
+
+# Cancelling reverts to browse -- which is not a revdiff range at all, so the pair
+# has to come back rather than diffCommand picking something for it.
+: > "$CALLS"
+printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
+echo custom-cancel >> "$T/state/cmd"
+nap 3
+check  "cancel reverted to browse"                '"diffMode":"browse"' "$T/state/terminals.json"
+check  "...and rebuilt the pair"                  "broot --conf" "$CALLS"
+check  "...publishing the viewer again"           '"viewerAgent":"abc12345"' "$T/state/panes.json"
+refute "...rather than putting a diff in the slot" "revdiff --wrap" "$CALLS"
+
+echo
+echo "== 11k. a worktree migration in browse mode FOLLOWS focus, never takes it =="
+# followWorktreeMigration fires on the AGENT's schedule -- it created a worktree and
+# moved into it -- so it can land while you are typing into the Claude pane. The
+# revdiff branch moves focus nowhere; the browse branch rebuilds two panes and must
+# not take the keyboard with them, or the rest of your sentence goes into broot's
+# filter box. NOT scaled: the relaunch cooldown must expire before the check runs at
+# all, and the throttle after it (same reasoning as 9c).
+MOVED5="$T/moved5"; mkrepo "$MOVED5"
+echo 32 > "$ACTIVE"                       # focus is on the agent's TERMINAL, not the slot
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED5","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+sleep 6
+BR5="$(pane_key diff)"
+check  "the pair followed the agent into the new worktree" "--cwd $MOVED5 --" "$CALLS"
+check  "...and broot was relaunched there"        "broot --conf" "$CALLS"
+refute "the keyboard was NOT dragged into the new browser" \
+                                                  "activate-pane --pane-id $BR5" "$CALLS"
+
+# The other half of the same rule: focus that was already in the slot follows the
+# pair, or a migration would leave you focused on a pane that has been killed.
+MOVED6="$T/moved6"; mkrepo "$MOVED6"
+echo "$BR5" > "$ACTIVE"                   # focus is on the BROWSER this time
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED6","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+sleep 6
+BR6="$(pane_key diff)"
+check "the pair moved again"                      "--cwd $MOVED6 --" "$CALLS"
+check "...and focus came with it, since it was in the slot" \
+                                                  "activate-pane --pane-id $BR6" "$CALLS"
+
+echo
 echo "== 12. the footer draws -- and clicks -- a fourth label =="
 # The strip renderer is a separate process reading terminals.json, so this section
 # runs it directly rather than through the daemon. It never exits on its own (it
