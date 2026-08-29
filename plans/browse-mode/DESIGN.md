@@ -7,19 +7,24 @@
 
 The cockpit can only show you files the agent **changed**. `revdiff --untracked HEAD` is a
 diff, so an unchanged file is invisible — you cannot read the function the agent called, only
-the line that calls it. Browse mode adds a fourth stop to the diff-slot cycle that turns the
-top pane into a **tabbed, read-only file viewer**, fed by a **file browser running in one of
-your terminals**. Files you open accumulate as tabs and survive cycling away.
+the line that calls it. Browse mode adds a fourth stop to the diff-slot cycle that **splits the
+top pane in two: the file browser on the left, a tabbed read-only viewer on the right.** Enter
+on a file in the browser opens it as a tab in the viewer beside it. Files accumulate as tabs and
+survive cycling away.
+
+One gesture, nothing to type. `⌥]` is the whole of the user interface.
 
 For the one person who runs this cockpit. Not a general-purpose editor and not a second IDE.
 
 ### Success criteria
 
-- `⌥]` from `custom` lands on `browse`; the top pane becomes a file viewer.
-- Pressing Enter on a file in the browser makes it a tab in that viewer, without spawning a
-  second editor and **without taking focus away from the browser**.
+- `⌥]` from `custom` lands on `browse`; the top pane becomes **browser | viewer**, with the
+  browser holding focus.
+- Pressing Enter on a file in the browser makes it a tab in the viewer beside it, without
+  spawning a second editor and **without taking focus away from the browser**.
 - A `c/` content search in the browser followed by Enter lands on the **matching line**.
-- Cycling to another mode and back returns the viewer with **every tab still open**, its
+- `⌥[`/`⌥]` leave browse mode from **either** half — you are never trapped in the browser.
+- Cycling to another mode and back returns **both** panes, with every tab still open and the
   cursor where it was.
 - Files cannot be modified from the viewer.
 
@@ -29,7 +34,10 @@ For the one person who runs this cockpit. Not a general-purpose editor and not a
   a stray keystroke must not become a change the agent then has to explain.
 - **Nothing is restarted that can be parked.** The cockpit's whole promise is that returning
   is instant. Browse mode obeys it or it is not worth having.
-- **The browser is not in the diff slot.** See §3.1 — this is load-bearing, not a detail.
+- **Nothing is typed.** Browse mode is reached the same way the other three modes are, and it
+  arrives complete. There is no command to remember and no second place to start it from.
+- **The browser lives in the diff slot, beside the viewer.** See §3.1 — this reverses an earlier
+  decision, and the measurement that reversed it is recorded there.
 
 ---
 
@@ -46,9 +54,14 @@ so a new agent and every agent after a cockpit rebuild starts at `uncommitted`.
 argument that browsing is a different activity from "which changes am I looking at" and would
 be passed through on the way between diff modes. Recorded in §7.
 
+**"The diff pane holds focus" now means either half.** In browse mode the slot holds two panes,
+and `diffPaneFocused()` must answer true for **both** — otherwise `⌥[`/`⌥]` do nothing while the
+browser has focus, which is where focus deliberately sits (§2.3), and the only way out of browse
+mode would be to click the other half first. That is a trap, not a mode.
+
 ### 2.2 The viewer
 
-`micro -readonly true`, occupying the **diff slot** — the same full-width pane revdiff uses.
+`micro -readonly true`, occupying the **right-hand half of the diff slot**, beside the browser.
 
 - **Read-only is not cosmetic.** Every buffer shows `[ro]`. Without it the viewer is an editor
   pointed at the agent's worktree, and an accidental save becomes a diff the agent must
@@ -61,13 +74,23 @@ be passed through on the way between diff modes. Recorded in §7.
 
 ### 2.3 The browser
 
-`broot`, run in a **cockpit terminal** via a `browse` command, never in the diff slot.
+`broot`, occupying the **left-hand half of the diff slot**, launched by the daemon when the
+agent enters browse mode. **There is no `browse` command and nothing is typed** — entering the
+mode is the whole gesture.
 
-- Measured usable at **47 columns**, the attached agent's terminal width: tree, folder
-  structure and content-search snippets all readable.
-- Because terminals are already per-agent and already keep running while parked, the browser
-  is per-agent and survives switching **for free**. `⌥t` gives you a second one if you want
-  two places in the tree at once.
+- **The split is `--percent 60` in the viewer's favour**, which on a 120-column window gives the
+  browser **47 columns** and the viewer 72 — measured. 47 is the width broot was already
+  validated at during planning (tree, folder structure and `c/` snippets all readable), so the
+  ratio is chosen to land on a number known to work, not picked for looks. Wider windows scale
+  both.
+- **The browser holds focus on entry.** You enter browse mode to find a file, and a push never
+  takes focus away (§2.4), so the whole gesture — arrive, filter, Enter, read, filter again —
+  happens without touching the mouse or another key.
+- The browser is **per agent**, like everything else in the slot, and parks with the viewer
+  (§2.6).
+
+*Why not a terminal:* it was, in the first draft of this design, and §3.1 records why that was
+reversed and what was measured to reverse it.
 
 ### 2.4 The push
 
@@ -101,35 +124,74 @@ available source of truth is what we ourselves sent.
 
 ### 2.6 Parking, not restarting
 
-Cycling **out** of browse parks the viewer pane; cycling **back in** restores it. This differs
-from the other three modes, which quit revdiff and relaunch it, because `R` only reloads the
-same range.
+Cycling **out** of browse parks the browser **and** the viewer, as a pair; cycling **back in**
+restores both. This differs from the other three modes, which quit revdiff and relaunch it,
+because `R` only reloads the same range.
 
 *Why the difference:* browse is a stop in a four-way cycle, so it is passed through
 constantly. Killing micro on the way past would empty the tab bar every time and make tabs
 pointless — which is the entire feature. Measured: a parked micro returns with all tabs, the
 cursor on the same line, `[ro]` still set, and the pane at identical geometry.
 
-**Consequence, stated plainly:** the diff slot's parking area now holds **up to two panes per
-agent** — that agent's revdiff and that agent's viewer — where it held one. The slot itself
-still holds exactly one pane at a time, so the "park exactly one, split the incoming into it"
-invariant is untouched. T00 exists to prove that before any of it is built.
+**The pair parks as a unit, in a tab of its own.** `move-pane-to-new-tab` moves one pane, so
+parking is two calls: move the browser to a new tab, then `split-pane --move-pane-id` the viewer
+in beside it. Restoring is the mirror: split the browser into whatever holds the slot, dispose of
+that, then split the viewer back to its right. **Measured at plan review, on a headless mux:**
+
+```
+pair in slot   broot 47x18   micro 72x18   fleet 120x11
+parked         broot 47x30   micro 72x30   (their own tab)
+restored       broot 47x18   micro 72x18   fleet 120x11    <- identical
+```
+
+micro came back holding its file with `[ro]` set and the cursor at (1,1); broot came back
+drawing. See FINDINGS.
+
+**Consequence, stated plainly:** the diff slot holds **two panes at once** in browse mode and one
+in the other three, and its parking area holds **up to three panes per agent** — that agent's
+revdiff, its browser and its viewer. The "park exactly one, split the incoming into it"
+invariant becomes "park the outgoing **set**, split the incoming set into the slot"; the
+geometry argument behind it is unchanged, because it is still the *outgoing* occupant that is
+split into. T00 proves the whole dance before any of it is built.
 
 ### 2.7 What the strip shows
 
 `terminals.json` already carries the visible agent's `diffMode` and the strip renders it. It
 must render `browse` too, and the footer legend must not imply only three modes exist.
 
+**`browse` gets a full, clickable fourth label — `Browse`** (decided at plan review). Concretely,
+in `cockpit-strip.mjs`: `DIFF_ORDER` gains `"browse"` and `DIFF_MODE_LABELS` gains
+`browse: "Browse"`.
+
+*Why the label is not optional:* the footer picks its highlight with
+`DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted"`. A mode with no label entry does not
+merely go unlisted — the bar highlights **Uncommitted Changes** while the agent is actually in
+browse, which is worse than showing nothing.
+
+*Why clickable rather than keyboard-only:* every diff-mode label in this footer is a button
+(`DIFF_ORDER` is what builds the click hit-zones), and one that is drawn but inert is the kind of
+inconsistency nobody remembers. Adding it to `DIFF_ORDER` makes `diff-browse` reachable on the
+`cmd` channel, which `diffModeSet` accepts as soon as `browse` is in `DIFF_MODES` — so the click
+path is live from T04 and **must park like the keyboard path does** once T05 lands (see T05).
+
+*The cost, measured:* the footer already needs ~184 columns with three labels, a short agent name
+and no custom ref; `Browse` adds ~11, and a long `Custom: <branch>` adds more on top. On a window
+narrower than that the right-hand end is clipped. Accepted knowingly; T07 is where a person says
+whether it reads badly.
+
 ### 2.n The unhappy paths
 
 | Situation | Rule | Why |
 |---|---|---|
-| `browse` run while the diff pane is **not** in browse mode | Refuse with a one-line hint naming the gesture; change nothing | Pushing into a revdiff pane would type the command into revdiff, where every character is a keybinding |
-| `browse` run with **no agent attached** | Refuse the same way | Diff modes are per agent; with nothing attached the top pane is the greeting/notes pane |
-| The user quits micro (`Ctrl+Q`) | The diff pane drops to a shell; heal it by relaunching the viewer, exactly as `healQuitDiff` reinstates revdiff — **and reset that agent's tab list**, because the tabs are gone | A bare shell in the diff slot reads as the cockpit having broken |
+| `cockpit-open` run when the slot is **not** in browse mode | Refuse; change nothing, send nothing | `panes.json.viewer` is null, so there is no viewer to push into — and typing into a revdiff pane would land in revdiff, where every character is a keybinding. Reachable now only from a stale broot left over from a mode change |
+| `cockpit-open` run with **no agent attached** | Refuse the same way | Diff modes are per agent; with nothing attached the top pane is the greeting/notes pane |
+| The user quits **micro** (`Ctrl+Q`) | The viewer half drops to a shell; relaunch micro **in that half**, leaving the browser alone — **and reset that agent's tab list**, because the tabs are gone | A bare shell in half the slot reads as the cockpit having broken; killing the browser too would lose the place in the tree for no reason |
+| The user quits **broot** | The browser half drops to a shell; relaunch broot in that half, leaving the viewer and its tabs alone | Same reason, the other way round. Two halves, two independent heals |
+| Both halves are quit | Each is healed independently by the rule above | Neither heal may assume the other half is alive |
 | Healing races a still-painting micro | Same cooldown guard as `healQuitDiff` | micro looks like a shell for a moment while it starts |
-| The agent is reaped while its viewer is parked | Dispose the viewer pane and drop its tab list | Otherwise parked panes and stale state accumulate for the life of the window |
-| Two pushes land together (an agent and you, or two terminals) | Take a lock around the read-modify-write of the tab list; break a stale lock at 5s | Same reasoning and same 5s as `notes.lock` — the agents share these files with you |
+| The healer meets a **healthy** browse pane | `diffPaneStatus` must report **both** halves as `running`, and today it reports neither — measured, a live micro shows **0** framed lines and titles itself `micro`; broot likewise draws no `│` frame. Taught in **T04**, with the mode itself | Otherwise the 1 s healer types a command line into a live editor and a live browser from the moment browse mode is reachable. Detection cannot lag behind the mode that needs it |
+| The agent is reaped while its pair is parked | Dispose **both** panes and drop its tab list | Otherwise parked panes and stale state accumulate for the life of the window |
+| Two pushes land together (an agent and you) | Take a lock around the read-modify-write of the tab list; break a stale lock at 5s | The agents share these files with you. Uses the agenda store's exported `withLock` (§3.5), not a third copy |
 | A pushed file has since been deleted | Send nothing, report it on stderr | micro would open an empty buffer named after a file that does not exist |
 | The tab list and micro disagree (micro restarted underneath us) | The list is reset whenever the viewer is launched, never merged | A wrong `tabswitch <n>` jumps to the wrong file silently; a duplicate tab is merely untidy |
 
@@ -154,21 +216,46 @@ This mirrors the split this repo already uses for the agenda (`cockpit-agenda-mo
 Everything on the pure side is testable exhaustively in milliseconds; every rule that leaks
 across becomes a rule only a person with a terminal can check.
 
-**The browser is not in the diff slot.** The diff slot swaps by parking *exactly one* pane and
-splitting the incoming one into it — the documented reason the notes column is *drawn* rather
-than being a real pane. broot *and* micro in that slot would make every agent switch a
-two-pane dance. Putting broot in a terminal costs nothing: that slot already exists, already
-parks, and is already per agent.
+**The browser IS in the diff slot, beside the viewer.** *(Reversed at plan review, 2026-08-29.)*
+
+The first draft of this design put broot in a terminal and argued that broot *and* micro in the
+slot "would make every agent switch a two-pane dance". That is true, and it is also the whole
+cost — the dance is **one extra `wezterm cli` call in each direction**, not a broken invariant.
+It was rejected without being measured; measured, it works:
+
+```
+pair in slot   broot 47x18   micro 72x18       parked   (their own tab)
+restored       broot 47x18   micro 72x18       <- identical geometry
+```
+
+micro came back with its file and `[ro]` intact; broot came back drawing. FINDINGS has the run.
+
+**Why the reversal is right, not merely possible.** The terminal version needed a `browse`
+command, published on a cockpit-only PATH, that the user had to remember and type — a second
+place to start a mode that already has a gesture. The user's requirement is one switch that
+arrives complete (§1). Putting the browser where the mode already lives deletes the command, the
+symlink, its PATH publication and the whole class of "you pressed `⌥]` but nothing is feeding
+the viewer" states.
+
+**What is genuinely given up:** the diff slot no longer holds exactly one pane per agent, so
+every place that assumes "one pane, one agent" has to be found (T05), and an agent switch out of
+browse mode costs two parks instead of one. The geometry rule itself is untouched — the incoming
+occupant is still split *into* the outgoing one, which is what makes it inherit the slot.
 
 ### 3.2 Modules
 
 | Module | Owns | Depends on |
 |---|---|---|
 | `bin/cockpit-open-model.mjs` | the open/tab/tabswitch decision, path relativisation | nothing |
-| `bin/cockpit-open.mjs` | viewer pane lookup, tab-list persistence + lock, sending | the model, `wezterm cli` |
-| `bin/cockpit-browse.sh` | launching broot with the cockpit's verb layer | broot |
+| `bin/cockpit-open.mjs` | viewer pane lookup, tab-list persistence + lock, sending | the model, `wezterm cli`, the agenda store's `withLock` |
 | `bin/cockpit-browse-verbs.hjson` | the Enter verb only | — |
-| `bin/cockpitd.mjs` | the fourth mode, viewer park/restore, healing, reaping | wezterm |
+| `bin/cockpitd.mjs` | the fourth mode, launching **both** halves, pair park/restore, healing, reaping | wezterm |
+
+There is **no `bin/cockpit-browse.sh`**. The daemon launches broot itself when the agent enters
+browse mode, so there is nothing to publish on a PATH and nothing to type. The `--conf` chain and
+the `PATH`/`COCKPIT_REPO` that the verb's `cockpit-open` needs are named on the daemon's
+`split-pane` command line — a split inherits **no** environment (`CLAUDE.md`), so this is the
+same `/usr/bin/env` shape the terminals already use.
 
 ### 3.3 The decision function
 
@@ -190,7 +277,7 @@ never touches the filesystem — the caller resolves and checks the path.
 
 ```
 broot (a terminal)  --Enter-->  cockpit-open <file> <line>
-                                   | reads panes.json .viewer
+                                   | reads panes.json .viewer / .viewerAgent / .viewerRoot
                                    | reads viewer-tabs.json (under lock)
                                    | planPush(...)
                                    v
@@ -200,13 +287,37 @@ broot (a terminal)  --Enter-->  cockpit-open <file> <line>
                                 micro in the diff slot
 ```
 
-`cockpitd` publishes `viewer` into `panes.json`: the viewer's pane id while the **attached**
-agent is in browse mode, and `null` otherwise. The glue reads it and refuses when it is null
-(§2.n).
+`cockpitd` publishes **three keys together** into `panes.json`, all of them set while the
+**attached** agent is in browse mode and all of them `null` otherwise:
+
+| Key | Value | Why the glue needs it |
+|---|---|---|
+| `viewer` | the viewer's pane id | where to send the keystrokes |
+| `viewerAgent` | that agent's **jobId** | the key into `viewer-tabs.json` (§3.5) |
+| `viewerRoot` | that agent's **worktree** | `repoRoot` for the model, so tab labels are short |
+
+The glue reads them and refuses when `viewer` is null (§2.n).
 
 *Why an explicit `viewer` key rather than reusing `.diff`:* `.diff` is whatever occupies the
 slot, which is usually revdiff. A separate process cannot safely infer which. Publishing it
 makes the daemon the single authority, as it already is for every pane swap.
+
+*Why `viewerAgent` rather than reading `terminals.json`:* `terminals.json` carries `agent`, but
+that field holds the agent's **display name** (`writeTerminals`: `attached?.name ?? visibleKey`),
+not its jobId — and `viewer-tabs.json` is keyed by jobId, as is every reap path in the daemon.
+Keying the tab list by name would mean the entry a reap tries to drop never matches the one a
+push wrote, so tab lists would leak for the life of the window. Names are also only required to
+be *unique*, never stable.
+
+*Why `viewerRoot` rather than reusing `panes.json.repo`:* `.repo` is whatever directory the
+layout script was launched with — the **projects root** (measured on this machine:
+`/Users/jan.krolikowski/src`), not a repo root. Relativising against it yields
+`agentic-ide/.claude/worktrees/<name>/bin/cockpitd.mjs` on a tab label, which is exactly the
+unreadable-tab problem §2.2 exists to avoid. The agent's worktree is the directory micro is
+already launched in (§2.2), so it is the only correct base.
+
+All three are written by the same `publishPanes()` call, so a reader never sees a pane id
+without the agent and root that go with it.
 
 *Why a file and not an environment variable:* a `wezterm cli split-pane` inherits **no**
 environment — the mux server's env dates from whenever WezTerm started. Already documented in
@@ -217,8 +328,8 @@ environment — the mux server's env dates from whenever WezTerm started. Alread
 | Path | Contents | On crash mid-write |
 |---|---|---|
 | `~/.claude/cockpit/viewer-tabs.json` | `{ "<jobId>": ["bin/a.mjs", "docs/b.md"] }` | written to a temp file and renamed, as `panes.json` and `terminals.json` already are |
-| `~/.claude/cockpit/viewer-tabs.lock` | held across read-modify-write; stale-broken at 5s | same rule and same 5s as `notes.lock` |
-| `~/.claude/cockpit/panes.json` | gains `viewer` | existing atomic write |
+| `~/.claude/cockpit/viewer-tabs.lock` | held across read-modify-write; stale-broken at 5s, using the **agenda store's exported `withLock`**, not a third copy (T02) | same rule and same 5s as `notes.lock` |
+| `~/.claude/cockpit/panes.json` | gains `viewer`, `viewerAgent`, `viewerRoot` (§3.4) | existing atomic write |
 
 Never in the repo. A file written into the worktree appears in `revdiff --untracked HEAD` —
 the very diff the agent is being reviewed on.
@@ -231,7 +342,7 @@ the very diff the agent is being reviewed on.
 |---|---|---|
 | `spikes/browse-test/run.sh` (new) | the model's decisions, exhaustively; the boundary import check; the glue's refusals and locking against a stubbed `wezterm` | that any of it draws correctly |
 | `spikes/cockpit-test/run.sh` (existing, must stay green) | the daemon's mode cycling, park/restore and healing, with `wezterm` stubbed | the same |
-| `spikes/browse-mode/` (T00, headless mux) | that two panes really can alternate in the slot, with real geometry | what it looks like |
+| `spikes/browse-mode/` (T00, headless mux) | that the slot can alternate revdiff and the browser+viewer pair, with real geometry, for two agents at once | what it looks like |
 
 None of them prove the thing is usable. That is §5.1.
 
@@ -244,7 +355,7 @@ None of them prove the thing is usable. That is §5.1.
 | OS | macOS 26.5.1 (25F80), Apple Silicon |
 | Runtime | node v24.2.0 |
 | Toolchain | wezterm 20240203-110809-5046fc22 (+ `wezterm-mux-server`), git 2.50.1 |
-| New dependencies | **micro 2.0.15**, **broot 1.59.0** — both installed during planning, both single binaries from Homebrew |
+| New dependencies | **micro 2.0.15**, **broot 1.59.0** — both installed during planning, both single binaries from Homebrew. **Both are hard prerequisites** (decided at plan review): `install.sh` refuses without them and `cockpit-layout.sh` guards on them, exactly like the five that came before. With `micro` absent the top pane would sit at a failed command that the 1 s healer retries forever — a warning is not enough. T03 |
 | Also present | revdiff v1.12.0, ripgrep, fzf, bat, fd |
 | **Deliberately absent** | No IDE, no GUI editor, no tmux. `timeout(1)` **does not exist** on this machine — scripts must not use it. `micro` is the editor; `helix`/`vim` are rejected as modal |
 
@@ -269,11 +380,13 @@ is a decision for the user, not a session.
 
 | Cannot be tested automatically | Why it needs a person |
 |---|---|
-| That the viewer *looks* right in the diff slot | Nothing here can see a screen |
-| That `⌥[`/`⌥]` actually reach the daemon | The stub tests the daemon's reaction to a verb, not WezTerm's delivery of the keystroke |
-| That `⌥p`/`⌥o` work in broot inside WezTerm | macOS and WezTerm both sit between the key and the app |
+| That the split *looks* right — browser left, viewer right | Nothing here can see a screen |
+| That `⌥[`/`⌥]` actually reach the daemon, **from both halves** | The stub tests the daemon's reaction to a verb, not WezTerm's delivery of the keystroke |
+| That `⌥p`/`⌥o` still work in broot inside WezTerm | macOS and WezTerm both sit between the key and the app — and the cockpit now adds its own file to the same `--conf` chain those keys come from |
 | That the redraw on return from parking is acceptable rather than merely correct | A judgement, not an assertion |
-| That 47 columns is *comfortable* as well as legible | Same |
+| That **60/40 is the right split** — 47 columns of browser against 72 of viewer | Legible was measured; comfortable is a judgement |
+
+Every row belongs to **T07**, and T07 asks all of them.
 
 ### 5.2 Seatbelts
 
@@ -290,9 +403,10 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
 
 ## 6. Recovery
 
-- **The viewer is stuck or wrong.** `⌥[` back to `uncommitted`; the slot returns to revdiff.
-- **The diff pane is a bare shell.** The daemon heals it within a second. If it does not,
-  re-open the WezTerm window — the supported way to rebuild everything.
+- **The viewer or the browser is stuck or wrong.** `⌥[` back to `uncommitted`; the slot returns
+  to revdiff and the pair is parked, not lost. `⌥]` back into browse brings both back.
+- **Either half is a bare shell.** The daemon heals that half within a second, leaving the other
+  alone. If it does not, re-open the WezTerm window — the supported way to rebuild everything.
 - **broot behaves oddly.** The cockpit's verb layer is a separate file passed with `--conf`;
   the user's own `~/.config/broot/` is never written to by the cockpit. Removing
   `bin/cockpit-browse-verbs.hjson` from the `--conf` list restores stock broot.
@@ -307,7 +421,10 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
 |---|---|---|
 | 2026-08-29 | Browse is a **fourth stop** in the `⌥[`/`⌥]` cycle | Its own key was recommended, on the grounds that browsing is not an answer to "which changes am I looking at" and would be passed through on the way between modes. **The user chose the fourth stop having heard that.** §2.6 exists because of the consequence. |
 | 2026-08-29 | Viewer parks rather than restarts | Killing and relaunching matches the other three modes, but empties the tab bar on every pass through the cycle, which makes tabs pointless |
-| 2026-08-29 | broot in a **terminal**, micro in the diff slot | Both in the diff slot was the user's first instinct; it breaks the "park exactly one pane" invariant that keeps agent switching cheap |
+| 2026-08-29 | ~~broot in a **terminal**, micro in the diff slot~~ | ~~Both in the diff slot was the user's first instinct; it breaks the "park exactly one pane" invariant that keeps agent switching cheap~~ **Reversed at plan review the same day — see the next row.** |
+| 2026-08-29 *(plan review)* | **Both in the diff slot: browser left, viewer right.** Entering browse mode splits the top pane in two; there is no `browse` command and nothing is typed | The user's first instinct, restored. The plan-review session put the two-pane cost to them plainly and they chose it anyway, then it was **measured**: the pair parks and restores at identical geometry (§2.6, §3.1, FINDINGS). The "breaks the invariant" objection had been asserted, never tested; the real cost is one extra `wezterm cli` call per direction. It also deletes the `browse` command, its symlink and its PATH publication — a second place to start a mode that already had a gesture |
+| 2026-08-29 *(plan review)* | `⌥[`/`⌥]` work from **either** half of the slot | Gating on a single diff pane id would trap the user in the browser, which is exactly where focus deliberately starts. §2.1 |
+| 2026-08-29 *(plan review)* | The split is **`--percent 60`** to the viewer — browser 47 columns, viewer 72, on a 120-column window | 47 is the width broot was already measured usable at during planning, so the ratio lands on a known-good number rather than a guess. T07 is where a person says whether it reads well |
 | 2026-08-29 | **broot + micro** rather than `revdiff --all-files` | revdiff's own browse mode has an identical look and keeps annotations, but: no directory folding (2,251 rows on a real repo), **6–12 s** to open that repo against broot's instant, and its search covers only the currently-open file. broot folds, opens instantly and searches across files |
 | 2026-08-29 | You **cannot comment** on a browsed file | A second broot key opening the file in revdiff would close the loop, and is the better end state. The user chose to leave it: it introduces a fifth diff-slot state that is not a stop in the cycle, and muddies the model just decided. See §8 |
 | 2026-08-29 | The cockpit ships its **own** broot verb file, layered with `--conf` | Editing the user's `~/.config/broot/verbs.hjson` would fight their own settings. Measured: `--conf a;b;c` **layers**, it does not replace |
@@ -325,4 +442,11 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
   `ideas/terminal-find-in-files.md` and deliberately deferred there.
 - **Repairing `ff` / `fp`.** They are dangling symlinks into a deleted job directory
   (see FINDINGS). Whether broot replaces them is a separate decision for the user.
-- **Changing the notes column, the agenda, or anything in the fleet pane.** Untouched.
+- **Changing the notes column or anything in the fleet pane.** Untouched.
+- **A `browse` command.** Removed at plan review: the browser now arrives with the mode, so there
+  is nothing to type and nothing to publish on a PATH. If a second browser somewhere else is ever
+  wanted, it is a new decision, not a leftover.
+- **A second browser, or browsing a repo other than the attached agent's.** One pair per agent,
+  rooted at that agent's worktree.
+- **The agenda**, beyond `withLock` gaining a lock-file argument (§3.5, T02). Its behaviour,
+  files and tests are unchanged and `spikes/agenda-test/run.sh` must stay green.

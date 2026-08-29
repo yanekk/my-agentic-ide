@@ -35,26 +35,36 @@ the seatbelt here: nothing in this check runs against a half-migrated cockpit.
 
 ```
 1. Open a fresh WezTerm window and enter an agent in the fleet list.
-2. Focus the diff pane. Press ⌥] until the strip says: browse
-3. In the bottom-right terminal, type: browse
-4. Type a few letters to find a file. Press Enter.
-5. Press Enter on two more files.
-6. Type: c/healQuitDiff        then press Enter on a result.
+2. Focus the diff pane. Press ⌥] until the footer highlights: Browse
+3. Type a few letters to find a file. Press Enter.
+4. Press Enter on two more files.
+5. Type: c/healQuitDiff        then press Enter on a result.
+6. With a file selected, press ⌥p and ⌥o.
 7. Press ⌥] twice to leave browse and ⌥[ twice to come back.
-8. Press ⌥w-free: switch to another agent and back.
+8. Switch to another agent and back.
+9. Click the word "Browse" in the footer, then click "Uncommitted Changes", then "Browse".
 ```
 
-Expect: at 2 the top pane becomes an empty editor. At 4 the file appears there and **the cursor
-stays in the terminal** — you can keep typing in broot without clicking. At 5 there are three
-tabs. At 6 it opens **on the matching line**. At 7 all three tabs are still there. At 8 they are
-still there and it is still your agent's files.
+Expect: at 2 the top pane splits — the file tree on the left, an empty editor on the right — and
+**you can start typing immediately**, without clicking anything: the tree already has focus. At 3
+the file appears in the right half and the cursor **stays in the tree**. At 4 there are three
+tabs. At 5 it opens **on the matching line**. At 6 your own preview keys still work. At 7 all
+three tabs are still there and the tree is where you left it. At 8 the same, and it is still your
+agent's files. At 9 the clicks do exactly what the keys did.
 
 Tell me:
-- Did focus ever jump out of the browser?
+- **Could you drive the whole thing without touching the mouse or typing a command?** That is the
+  point of the shape you chose, and this is the only check of it.
+- Did focus ever jump out of the tree?
 - Did the tabs survive steps 7 and 8?
-- Did step 6 land on the right line?
-- Is the tree readable at that terminal width, or is it too cramped to use?
-- Does the redraw when the viewer comes back look acceptable, or does it read as a glitch?
+- Did step 5 land on the right line?
+- **Did ⌥p / ⌥o still open and close the preview?** They come from *your* `verbs.hjson`, and the
+  cockpit adds its own file to the same `--conf` chain — this is the only check that the
+  layering did not shadow your own keys (DESIGN §5.1, and the layering measurement in FINDINGS).
+- **Is the tree/viewer split right?** It is 47 columns against 72 on a 120-column window. Too
+  narrow a tree, too narrow a reader, or about right?
+- Does the redraw when the pair comes back look acceptable, or does it read as a glitch?
+- Does the footer still fit on one line with a fourth label, or is the right-hand end clipped?
 
 ## Tests
 
