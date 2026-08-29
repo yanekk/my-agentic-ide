@@ -38,12 +38,20 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **Phase 1 is reviewed; T04 is built and awaiting review.** `⌥[`/`⌥]` now reach
-`browse` as a fourth stop, both halves launch into the slot (broot left, micro right at
-`--percent 60`), either half routes the keys, the footer draws and clicks a `Browse` label, and
-`diffPaneStatus` reports a healthy pair as *running* so the 1 s healer leaves it alone. The pair
-is **launched and disposed of, not parked** — that is T05. `spikes/cockpit-test` **205 checks**
-(was 134); browse, agenda and notes suites green.
+**Status:** **Phase 2 has begun: T04 is reviewed and done.** `⌥[`/`⌥]` now reach `browse` as a
+fourth stop, both halves launch into the slot (broot left, micro right at `--percent 60`), either
+half routes the keys, the footer draws and clicks a `Browse` label, and `diffPaneStatus` reports a
+healthy pair as *running* so the 1 s healer leaves it alone. The pair is **launched and disposed
+of, not parked** — that is T05. `spikes/cockpit-test` **221 checks** (was 134); browse (238),
+agenda (579) and notes (88) suites green.
+
+**T04's review fixed two things and probed a third.** `enterBrowse` took `{focus}`: it had always
+activated the browser, so a `followWorktreeMigration` rebuild — which fires on the *agent's*
+schedule — dragged the keyboard out of the Claude pane and into broot's filter box. Focus now
+**follows** the pair when the slot already had it and is never **taken**. And a failed
+`leaveBrowse` split stopped advertising a killed viewer. Separately, micro and broot were probed
+through `script(1)`: neither sets a terminal title (micro emits **zero** escape sequences even
+with a file open), so title-only detection holds for a whole session — **T06 can rely on it.**
 
 Everything below the daemon was already there:
 broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews anything
@@ -60,12 +68,17 @@ calls with a park — not to redesign the dance.
 
 **`spikes/cockpit-test` is timing-based end to end.** A red run at
 `COCKPIT_TEST_SPEED=1.0` on a loaded machine is evidence about the machine: re-run it before
-believing it (one of five runs failed here, in **section 1**, at load 44). Re-run `agenda-test`
+believing it. Confirmed again at T04's review: at load **97** twelve checks failed across
+**section 1**, at load 31 one failed in **5g**, and at load 10 the same tree ran **221/221
+green** — the flake moves with the load, never with the code. `notes-test` did it once too.
+**Two clean runs at low load are the standard**, not one red run at high. Re-run `agenda-test`
 **alone** for the same reason. `browse-test` needs the **broot binary** and `script(1)`; so does
 `cockpit-test` now, for the footer-click checks.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **review T04** — the fourth mode, the pair launch, the strip/footer label and the browse-pane detection. Then T05 (park the pair) is next to implement.
+**Next `pir-work` will:** **implement T05** — park and restore the pair instead of killing it. The
+enter/leave order it needs is already built and asserted; the job is to replace the `kill-pane`
+calls with a park, not to redesign the dance.
 
 ## Tasks
 
@@ -78,7 +91,7 @@ done · ⛔ blocked, needs a human.
 | T01 | `cockpit-open-model.mjs` — the pure decision | — | ✅ | Reviewed: every doc row verified, both deviations accepted (`realpath` is genuinely T02's), and the boundary grep proven able to fail against a control module that imports `node:fs`. One defect fixed — `..` climbing past `/` was carried upward, emitting a real `..` chain against a root of `/`. Probed empty/CR paths → T02. **62 checks**, not the 59 claimed (was 57). |
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ✅ | Reviewed, four deviations accepted, **two defects fixed**: the `--conf` chain was the wrong way round (the **first** file wins, so a user's own `enter` beat the cockpit's), and `{line}` is `0`, not empty. Enter is now pressed **for real** — push, `c/` line, directory descent, binary and unreadable files. **223 → 238 checks**, each proven to fail. Enter on a non-text file now opens broot's preview, **per the user**. |
-| T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | 🔍 | Built: the fourth stop, the pair launch, either-half focus, the `Browse` label and its click, broot/micro detection. **205 checks** (+71), four mutants proven to fail. Deviations, six in all — commit message has them: both halves are **typed into spawned shells**, not spawned as pane programs (T00's finding); the pair is **disposed of, not parked** (T05); `reloadDiff` guarded — it would have typed `R` into broot. |
+| T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, six deviations accepted, **two defects fixed**: `enterBrowse` always seized the keyboard, so an agent moving worktree mid-review put your next keystrokes in broot; and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. Probed micro/broot for title escapes — neither sets one. Added the untested browse→custom path. **221 checks**, the focus one mutant-proven. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ⬜ | Heavy. The slot has always held one pane per agent. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ⬜ | Two independent heals: never rebuild the pair to fix one half. |
 | T07 | Verified by hand with the user | T03, T06 | ⬜ | Cannot be closed by any test. The session waits for the answer. |
@@ -87,7 +100,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T04**, and it is reviewed — not extended — by the session that picks it up.
+**Review queue:** *(empty)* — T04 is closed. The next thing to review is **T05**, once it is built.
 
 ## Blocked on the user
 
