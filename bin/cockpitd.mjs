@@ -23,6 +23,12 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+// The agenda's three layers, used only by refreshAgenda below: the PURE model
+// (no clock, no filesystem -- DESIGN 3.1), the state/cache store, and the one
+// module allowed to reach the network.
+import { dayBounds, normaliseEvent, safeText } from "./cockpit-agenda-model.mjs";
+import { putCacheEntry, readCache, readClient, readState } from "./cockpit-agenda-store.mjs";
+import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google.mjs";
 
 const execFileAsync = promisify(execFile);
 // The directory this daemon lives in, so it can launch its sibling scripts
@@ -1635,6 +1641,167 @@ async function onExit() {
   // again brings both back mid-flight.
   await showDiff(REPO_KEY, panes.repo, "repo");
   await showTerminal(REPO_KEY, panes.repo, "repo");
+  // One of the agenda's two refresh triggers (DESIGN 2.5): landing back on the
+  // fleet list refreshes anything stale. Deliberately NOT awaited -- this runs
+  // under the reconcile lock and a fetch can take ten seconds per calendar, so
+  // awaiting it would stall the next poll behind the network. refreshAgenda never
+  // rejects, so nothing is left floating for the process handler to report.
+  refreshAgenda("returned");
+}
+
+// ---------------------------------------------------------------------------
+// The agenda: keeping the event cache current
+//
+// DESIGN 2.5. THE DAEMON FETCHES AND THE PANE ONLY DRAWS. cockpit-welcome.mjs is
+// pure display by construction -- it never runs a command and never moves a pane
+// -- and that is exactly what lets this daemon own it as a diff slot. Network I/O
+// up there would not break the pane machinery today, but it would break the rule,
+// and the rule is load-bearing. So the fetching lives here and writes
+// agenda-cache.json; the pane watches the state directory and redraws, exactly as
+// the strip already consumes terminals.json.
+//
+// ONE TICK, NOT TWO TIMERS: a 60-second tick fetches any calendar whose last
+// fetch is older than five minutes, and the on-return trigger calls the same
+// function. A single "is anything stale?" predicate is easier to reason about
+// than a periodic timer racing an event.
+// ---------------------------------------------------------------------------
+
+// Overridable for the same reason COCKPIT_REAP_MS is: a suite cannot wait a
+// minute for a tick, let alone five for a staleness edge. An unset or bogus value
+// falls through the ||, so production and a plain run are the documented numbers.
+const AGENDA_TICK_MS = Number(process.env.COCKPIT_AGENDA_TICK_MS) || 60_000;
+const AGENDA_STALE_MS = Number(process.env.COCKPIT_AGENDA_STALE_MS) || 5 * 60_000;
+// The loopback-stub seam, spelled exactly as the `agenda` CLI spells it so one
+// test can point both at the same fake Google. Empty means the real endpoints.
+const AGENDA_ORIGIN = process.env.AGENDA_ORIGIN || "";
+// Resolved out here and passed in: reading Intl's zone inside the model is the
+// environment read DESIGN 3.1 forbids, and the purity grep cannot see it because
+// it would happen inside Date.parse. The drawing pane resolves it the same way.
+const AGENDA_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
+  catch { return "UTC"; }
+})();
+
+// One pass in flight at a time, guarded exactly as `reconcile` is. Overlapping
+// passes interleave writes to the cache and burn quota on a slow network.
+let agendaFetching = false;
+
+/**
+ * Fetch every calendar whose cache entry is older than AGENDA_STALE_MS.
+ *
+ * `reason` is for the log only.
+ *
+ * NEVER THROWS AND NEVER REJECTS. This runs unattended behind a window; the
+ * uncaughtException handler at the bottom of this file is a backstop, not a
+ * licence to leave a rejection unhandled.
+ *
+ * NOTHING IS LOGGED THAT CANNOT BE PASTED INTO A CONVERSATION -- daemon.log
+ * routinely is. The slug, a count and the error KIND (one of four fixed words) go
+ * in; an access token, an event title and Google's own error text never do.
+ */
+async function refreshAgenda(reason) {
+  if (agendaFetching) return;
+  agendaFetching = true;
+  try {
+    // rescue: false. readState() MOVES a corrupt agenda.json aside, and that
+    // quarantine is a one-shot event only a caller that can speak to a person may
+    // consume. This one runs every 60 seconds with nobody to tell, so it would
+    // always win the race and the sign-ins would vanish unannounced -- DESIGN 2.7
+    // puts the announcement at the heart of the rule (FINDINGS 2026-08-29).
+    // Rescuing belongs to the `agenda` command alone.
+    const { accounts, calendars } = readState({ rescue: false });
+    // Nothing configured: no token call, no request, no file written. The feature
+    // costs nothing until it is used (DESIGN 2.5).
+    if (calendars.length === 0) return;
+
+    const now = Date.now();
+    const cache = readCache();
+    // A calendar with no cache entry reads as fetchedAt 0, so it is stale and gets
+    // its first fetch here.
+    const stale = calendars.filter(
+      (c) => now - (cache.calendars[c.slug]?.fetchedAt ?? 0) >= AGENDA_STALE_MS,
+    );
+    if (stale.length === 0) return;
+
+    const client = readClient();
+    if (!client) {
+      // No registration means no fetch is even possible. `agenda setup` is the fix
+      // and the column already says so; a cache entry written here would add
+      // nothing the user can act on.
+      log(`agenda ${reason}: ${stale.length} stale, but no client registration`);
+      return;
+    }
+
+    // Never now +/- 24h: a day is not always 24 hours long (Warsaw's 25 Oct 2026
+    // runs 25), and the window is the start of today to the end of tomorrow so the
+    // midnight roll-over is served from data already on disk (DESIGN 2.5,
+    // FINDINGS 2026-08-27).
+    const { todayStart, dayAfterStart } = dayBounds(now, { tz: AGENDA_TZ });
+
+    for (const cal of stale) {
+      // Sequential, not Promise.all. One calendar failing must not stop the next
+      // being refreshed, and each iteration is wrapped so a throw cannot escape
+      // the loop.
+      const prev = cache.calendars[cal.slug];
+      try {
+        const refreshToken = accounts[cal.account]?.refreshToken;
+        if (!refreshToken) {
+          // removeAccount drops that account's calendars, so this is only
+          // reachable through a hand-edited agenda.json. Skip rather than invent
+          // an error the user cannot act on; `agenda ls` shows the loss.
+          log(`agenda ${reason}: ${safeText(cal.slug)} skipped, no account`);
+          continue;
+        }
+        const { token } = await accessToken({
+          ...client, refreshToken, origin: AGENDA_ORIGIN, now,
+        });
+        const { events: raw, timeZone } = await fetchEvents({
+          token, calendarId: cal.calendarId,
+          timeMin: todayStart, timeMax: dayAfterStart, origin: AGENDA_ORIGIN,
+        });
+        // The calendar's OWN zone places its all-day boundaries; the machine's is
+        // the fallback for a calendar that does not say.
+        const events = raw
+          .map((r) => normaliseEvent(r, { slug: cal.slug, tz: timeZone || AGENDA_TZ, selfEmail: cal.account }))
+          .filter(Boolean);
+        // A success clears `error` ENTIRELY, not just its kind.
+        putCacheEntry(cal.slug, { fetchedAt: now, events, error: null });
+        log(`agenda ${reason}: ${safeText(cal.slug)} ok, ${events.length} events`);
+      } catch (e) {
+        // KEEP THE PREVIOUS EVENTS. Blanking them turns a wifi blip into an empty
+        // agenda, which is precisely what DESIGN 2.7 refuses: the last events stay
+        // on screen and one dim line says how old they are.
+        //
+        // fetchedAt is kept too, because it IS the age that line reports. The cost
+        // is that a broken calendar is retried every tick rather than every five
+        // minutes -- the right trade: it heals sooner and each attempt fails fast.
+        //
+        // describeError, never a bare classifyError string: the object is what lets
+        // the column tell "sign-in expired" from "calendar permission not granted"
+        // (FINDINGS 2026-08-28). No response body rides along with it.
+        //
+        // `since` is set on the FIRST failure and preserved across repeats, so the
+        // column can say how long it has been broken rather than resetting the age
+        // every 60 seconds.
+        const error = { ...describeError(e), since: Number(prev?.error?.since) || now };
+        putCacheEntry(cal.slug, {
+          fetchedAt: prev?.fetchedAt ?? 0,
+          events: prev?.events ?? [],
+          error,
+        });
+        // The KIND only. Google's message can carry a calendar title, and this log
+        // gets pasted into conversations.
+        log(`agenda ${reason}: ${safeText(cal.slug)} failed, ${error.kind}`);
+      }
+    }
+  } catch (e) {
+    // A pass must never take the daemon down, and must never leave a rejection for
+    // the process-level handler to report as an anonymous crash. The constructor
+    // name only -- the message can carry anything.
+    log(`agenda ${reason}: pass failed, ${e?.name ?? "Error"}`);
+  } finally {
+    agendaFetching = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1786,7 +1953,16 @@ setInterval(healMissingPanes, REAP_MS);
 // a reap interval. The cooldown in healQuitDiff keeps this from firing during a
 // launch's draw lag.
 setInterval(healQuitDiff, ms(1000));
+// The agenda's other trigger (DESIGN 2.5). Not scaled by ms(): it has its own env
+// seam, because a suite cannot wait even the scaled half-minute for a tick.
+setInterval(() => refreshAgenda("tick"), AGENDA_TICK_MS);
 reconcile();
+// DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
+// only fires when an agent WAS attached -- at start-up none is, so without this
+// the column would sit blank until the first tick a minute later. Costs nothing
+// when no calendar is configured: refreshAgenda returns before it reads a client
+// or opens a socket.
+refreshAgenda("start");
 
 const shutdown = () => {
   stopWatchers();

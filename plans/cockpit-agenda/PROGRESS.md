@@ -8,22 +8,21 @@ that touch the task you are picking up, and append yours there. It is where "ver
 with the user" is written down. **Sixty words to a Notes cell here, forty to a finding
 there**; when a note wants a paragraph, the paragraph belongs in the commit message.
 
-**Status:** T06 is **reviewed and done** — the agenda is on screen under NOTES in the fleet
-view's right column, and both halves of the task are closed: the suites are green and the user
-saw the real pane (FINDINGS 2026-08-29). **T07 (the daemon's 60s refresh) is the only thing
-between this and a column that fills itself in**; today it draws whatever `agenda` last cached.
-Measured this session: agenda-test **585**, notes-test **90**, cockpit-test **134** — 809
-assertions, three ALL PASS.
+**Status:** T07 is **implemented, awaiting review** — the daemon now refreshes the cache on a
+60s tick and on the return to the fleet list, so the column fills itself in. Measured this
+session: agenda-test **585**, notes-test **90**, cockpit-test **134 → 174** — **849** assertions,
+three ALL PASS. **T07's hands-on half is NOT closed**: nothing has been seen refreshing in a
+live cockpit, and no calendar is connected on this machine to see it with. The user chose to do
+that check now rather than leave it to T08 — see *Blocked on the user*.
 **Not reviewed as a plan.** This plan carries no `Plan reviewed:` line — it predates the check.
 Six tasks have been built and reviewed clean off it; whether to run `/pir-review-plan` now is the
 user's call, and no session has decided it for them.
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **implement T07** — the daemon's 60s tick and the on-return refresh, in
-`cockpitd.mjs`. Before it starts: **clear the throwaway preview agenda** (`rm
-~/.claude/cockpit/agenda.json ~/.claude/cockpit/agenda-cache.json`) or it will test against two
-calendars nobody signed in to; **re-measure `cockpit-test`** (134, and that number has moved four
-times); and read the three newest FINDINGS rows — the daemon must read state with
-`rescue: false`, must not widen the pane's import list, and must not chase the §9d flake.
+**Next `pir-work` will:** **review T07**. Start from the eight deviations in its Notes cell — the
+one that needs a decision rather than a check is the **third call site**, `refreshAgenda("start")`
+at boot, which T07's own "Done when" forbids and DESIGN §2.5 requires. Re-measure `cockpit-test`
+(**174** now; that number has moved five times) and **re-run the mutation sweep** described in
+FINDINGS before trusting a green section 11. Do not chase the §9d flake.
 
 ## Tasks
 
@@ -39,29 +38,34 @@ done · ⛔ blocked, needs a human.
 | T04 | Google client — OAuth, refresh, REST | T01 | ✅ | Reviewed; **two defects fixed**, both about what the user is *told*: the redirect `state` was checked only on the code branch (a stray local `?error=` ended a sign-in blaming Google for a refusal that never happened), and `describeError` dropped a scope signal `classifyError` read from the body (drawing `sign-in expired` for a consent 403). All deviations approved. 404 → **412**. Probed: browser page delivery, double redirects, junk fetch windows, malformed items, network-denied sandbox. |
 | T05 | The `agenda` command | T01–T04 | ✅ | Reviewed; **two defects fixed**, both in lines the model never draws: an untrusted calendar **title escaped into the terminal** (an ESC retitled the window, a newline forged an `ls` row), and **`agenda add __proto__`** attached a calendar whose cache write vanished, then killed bare `agenda`. All eight deviations approved. 562 → **579**. Probed: hostile titles/emails/error text, prototype keys, piped-output flush, corrupt caches. |
 | T06 | Right column: NOTES over AGENDA | T03, T05 | ✅ | Reviewed; **one defect fixed**: the resting pane called `readState()`, which **quarantines a corrupt `agenda.json`** — so the 2s repaint always won the race and moved the sign-ins aside with nobody to tell, killing DESIGN §2.7's announcement. Now `rescue: false`. All eight deviations approved; 39 originals kept by name. 801 → **809**. Probed: 640 renders across 1–40 rows × 4 widths (exact height, no over-width line, agenda never above notes, notes never below three), hostile event title, store side effects on import. |
-| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | ⬜ | Touches `cockpitd.mjs`; `cockpit-test` must stay green. |
+| T07 | Daemon refresh: 60s tick + on-return | T04, T05 | 🔍 | `refreshAgenda` + the tick + the `onExit` trigger. 134 → **174**; 849 across three suites. **Eight deviations, all in the commit message.** The one needing a decision: a **third call site** (`refreshAgenda("start")` at boot) — the doc forbids it, DESIGN §2.5 needs it, `onExit` never fires at window-open. Two test-only timing seams added, both guarded. Assertions proved by five mutations. **Hands-on half unverified.** |
 | T08 | Live verification with the user; docs | T06, T07 | ⬜ | Deliverable is FINDINGS rows and docs, not code. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty — T07 is next, and it implements.)*
+**Review queue:** **T07** — and it is the whole of the next session's work.
 
 ## Blocked on the user
 
-*(Empty. Hand-verifications: T00 in FINDINGS 2026-08-27, T05 in FINDINGS 2026-08-28, T06 in
-FINDINGS 2026-08-29. Nothing waiting.)*
+**T07's hands-on half is open and the user has chosen to do it now** (rather than fold it into
+T08). It needs, in order: a Google desktop-client registration, `agenda setup` + `agenda add` in
+a cockpit terminal — which an agent may not run, `CLAUDECODE` refuses it — and then a **window
+rebuild**, because the running daemon predates this task. The two questions are whether the
+column fills itself in with nobody touching it, and whether `daemon.log` ever contains a token or
+a meeting title (it must not). The exact commands are in the session report.
 
-**One thing on the user's machine, not in the repo:** the T06 check used a throwaway preview
-agenda — two fake calendars (`work`, `home`) and a cache of invented events written straight to
-`~/.claude/cockpit/agenda.json` and `agenda-cache.json`, with no accounts and no tokens. If it
-is still there, a session will see two calendars attached that were never signed in to.
-`rm ~/.claude/cockpit/agenda.json ~/.claude/cockpit/agenda-cache.json` removes it; **T07 should
-clear it before testing the daemon against a real fetch.**
+The rebuild kills every agent pane, so the session that hands this over does not survive it.
+**Whoever gets the answer writes it into FINDINGS as a dated ✅ row** — that row is the entire
+record, and the reviewer cannot re-run it.
 
-The user's `~/.claude/cockpit/bin/agenda` symlink was created by hand for that check; every
-cockpit rebuild relinks it anyway, so there is nothing to undo.
+Hand-verifications so far: T00 in FINDINGS 2026-08-27, T05 in FINDINGS 2026-08-28, T06 in
+FINDINGS 2026-08-29.
+
+**The T06 preview fixture is already gone** — `~/.claude/cockpit/` holds no `agenda*.json` at
+all, so PROGRESS's old "clear it before T07" instruction is discharged and nothing was deleted.
+Nothing is signed in on this machine, which is why the check above starts at the registration.
 
 Left for the user's own machine, on their own schedule, not blocking anything: the probe's
 `~/.claude/cockpit/probe-client.json` can stay (T04 reuses the same registration) or be
