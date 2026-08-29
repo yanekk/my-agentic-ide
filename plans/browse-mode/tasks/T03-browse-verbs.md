@@ -46,7 +46,7 @@ check_tool broot "brew install broot"
 
 ## Interface
 
-The verb file, and nothing else in it:
+The verb file, and nothing else in it — **two** verbs, and the order between them matters:
 
 ```hjson
 {
@@ -57,32 +57,57 @@ The verb file, and nothing else in it:
             external: "cockpit-open {file} {line}"
             leave_broot: false
         }
+        {
+            key: enter
+            apply_to: file
+            internal: panel_right
+            leave_broot: false
+        }
     ]
 }
 ```
 
-- `apply_to: text_file` so Enter on a **directory** still descends into it, which is broot's
-  normal navigation and must not be broken.
-- `leave_broot: false` so you land back in the tree, still searching.
-- This **overrides** broot's stock `enter` → `open_stay`, which on macOS hands the file to
+> **Changed during the T03 review, on the user's decision (2026-08-29).** The task originally
+> specified one verb. `apply_to: text_file` left every **non-text** file — an image, a compiled
+> artifact — falling through to broot's stock `open_stay`, and on macOS that opens a GUI app
+> over the terminal: the exact failure the verb exists to prevent. The user chose **broot's own
+> preview panel** over the alternatives (do nothing; push it into micro anyway).
+
+- `apply_to: text_file` on the **first** verb so Enter on a **directory** still descends into it,
+  which is broot's normal navigation and must not be broken. Directories match neither verb.
+- `apply_to: file` on the second, **not `binary_file`**: an *unreadable* file is neither text nor
+  binary and matched only the general kind (measured), so a `binary_file` fallback would still
+  have leaked it to macOS. `file` excludes directories.
+- **Order is load-bearing.** broot takes the **first** verb that matches a key and a file kind —
+  not the most specific one (measured: a general verb declared first swallowed every text file).
+  The `text_file` verb must stay above the catch-all.
+- `leave_broot: false` on both, so you land back in the tree, still searching.
+- These **override** broot's stock `enter` → `open_stay`, which on macOS hands the file to
   whatever GUI app is associated with it — a window over the terminal, which is the whole
   reason this binding exists.
 - `{file}` is absolute; `planPush` (T01) makes it repo-relative for the tab label. Do not
   pre-relativise it here — the pure side owns that, and the promoted planning probe's
   `{file:path-from-directory}` is a *different* shape kept only for the record (T00).
-- `{line}` is empty when no `c/` content search is active. The model already treats a null, zero
-  or non-integer line as "no jump" (T01), so a plain Enter needs no special case — **assert
-  that, do not assume it.**
+- `{line}` is **`0`** when no `c/` content search is active — not empty and not absent
+  (measured in review by pressing Enter; this doc said "empty"). The model already treats zero as
+  "no jump" (T01), so a plain Enter needs no special case.
 
 The `--conf` chain the daemon builds (T04 uses it; this task defines and tests it):
 
 ```
-$HOME/.config/broot/conf.hjson;$HOME/.config/broot/verbs.hjson;<repo>/bin/cockpit-browse-verbs.hjson
+<repo>/bin/cockpit-browse-verbs.hjson;$HOME/.config/broot/conf.hjson;$HOME/.config/broot/verbs.hjson
 ```
 
 **`--conf` layers, it does not replace** — measured (FINDINGS). The user's own broot config keeps
 working, their `⌥p`/`⌥o` preview keys keep working, and the cockpit never writes into
-`~/.config/broot/`. The cockpit's file is **last** so it wins on a key clash.
+`~/.config/broot/`.
+
+**The cockpit's file is FIRST, and this doc said "last" until the T03 review measured it.** broot
+takes the first verb that matches, across the whole chain, so the **earlier** file wins — tested
+both ways round. Shipped last, an `enter` the user had bound themselves would beat the cockpit's
+and the push would silently never happen; broot's own sample `verbs.hjson` invites exactly that
+("you'll find it convenient to change the 'key' from 'ctrl-e' to 'enter'"). Putting the cockpit's
+file first costs the user's config nothing: it contains only verbs, and binds only `enter`.
 
 ## Tests
 

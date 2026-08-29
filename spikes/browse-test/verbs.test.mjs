@@ -41,14 +41,19 @@ const parts = (chain) => chain.split(";");
 section("20. the --conf chain: order, and what is in it");
 
 const both = home("conf.hjson", "verbs.hjson");
-eq("yours first, in broot's own order, then ours",
+eq("ours first, then yours in broot's own order",
    parts(browseConfChain(both, ROOT)),
-   [path.join(both, ".config/broot/conf.hjson"),
-    path.join(both, ".config/broot/verbs.hjson"),
-    MINE]);
+   [MINE,
+    path.join(both, ".config/broot/conf.hjson"),
+    path.join(both, ".config/broot/verbs.hjson")]);
 
-ok("the cockpit's file is LAST, so it wins a key clash",
-   parts(browseConfChain(both, ROOT)).at(-1) === MINE);
+// FIRST, not last, and the difference is the whole binding: broot takes the first
+// verb that matches a key across the chain, so the earlier file wins (measured
+// both ways round, run.sh 27). Shipped last -- which is what "last wins" would
+// suggest -- an `enter` of the user's own beats the cockpit's and the push simply
+// never happens, silently.
+ok("the cockpit's file is FIRST, which is how it wins a key clash",
+   parts(browseConfChain(both, ROOT))[0] === MINE);
 
 ok("`;` is the separator broot expects", browseConfChain(both, ROOT).split(";").length === 3);
 
@@ -69,7 +74,7 @@ section("21. a chain entry that does not exist is dropped, never named");
 
 eq("no verbs.hjson of your own: it is simply absent from the chain",
    parts(browseConfChain(home("conf.hjson"), ROOT)).map((p) => path.basename(p)),
-   ["conf.hjson", "cockpit-browse-verbs.hjson"]);
+   ["cockpit-browse-verbs.hjson", "conf.hjson"]);
 
 eq("no conf.hjson either: the cockpit's file alone",
    parts(browseConfChain(home(), ROOT)).map((p) => path.basename(p)),
@@ -85,7 +90,7 @@ const dirCase = home("conf.hjson");
 fs.mkdirSync(path.join(dirCase, ".config", "broot", "verbs.hjson"));
 eq("a DIRECTORY named verbs.hjson is not a config file",
    parts(browseConfChain(dirCase, ROOT)).map((p) => path.basename(p)),
-   ["conf.hjson", "cockpit-browse-verbs.hjson"]);
+   ["cockpit-browse-verbs.hjson", "conf.hjson"]);
 
 // The cockpit's own file is named unconditionally: if it were dropped when missing,
 // a broken checkout would launch a broot whose Enter opens a GUI app over the

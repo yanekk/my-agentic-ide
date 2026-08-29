@@ -1,13 +1,24 @@
 # The cockpit's own broot verbs. Layered over YOUR ~/.config/broot files with
 # `--conf a;b;c` (bin/cockpit-browse-conf.mjs builds the chain) -- broot LAYERS
 # those files rather than replacing them, so your own config and key bindings keep
-# working and the cockpit never writes into ~/.config/broot/. This file is last in
-# the chain, so it wins on a key clash.
+# working and the cockpit never writes into ~/.config/broot/.
 #
-# One verb, and deliberately only one: Enter on a file pushes it into the viewer
-# next door instead of handing it to macOS. broot's stock `enter` on a file is
-# `open_stay`, which on macOS opens whatever GUI app owns the extension -- a window
-# over the terminal, which is the entire reason this binding exists.
+# ORDER IS EVERYTHING HERE, and it is the opposite of what it looks like: broot
+# takes the FIRST verb that matches a key and a file kind, not the most specific
+# one and not the last one loaded (measured, broot 1.59 -- with a general verb
+# declared first, every text file matched it and the specific verb below never
+# ran). Two consequences, and neither is optional:
+#
+#   * this file goes FIRST in the --conf chain, ahead of yours, or an `enter` of
+#     your own would win and the push would silently never happen;
+#   * inside this file the text_file verb must stay ABOVE the fallback, or every
+#     file gets previewed and nothing is ever pushed into the viewer.
+#
+# Two verbs, and between them they account for every file Enter can land on, which
+# is the point: broot's stock `enter` is `open_stay`, and on macOS that hands the
+# file to whatever GUI app owns the extension -- a window over the terminal, which
+# is the entire reason this file exists. A file kind we failed to name would fall
+# straight back to it.
 #
 # Hjson, not JSON: an unquoted value runs to the END OF THE LINE, so every field
 # must sit on its own line. `{ key: enter, apply_to: text_file }` on one line is a
@@ -15,8 +26,9 @@
 {
     verbs: [
         {
-            # Files only. Enter on a DIRECTORY must keep descending into it -- that
-            # is broot's normal navigation and the whole way you get anywhere.
+            # Text files: push into the viewer next door. Enter on a DIRECTORY is
+            # matched by neither verb here, so it keeps descending -- that is
+            # broot's normal navigation and the whole way you get anywhere.
             key: enter
             apply_to: text_file
 
@@ -34,6 +46,25 @@
 
             # Stay in the tree, still filtered, still searching. The push never takes
             # focus (measured), so the loop is: filter, Enter, read, filter again.
+            leave_broot: false
+        }
+        {
+            # EVERYTHING ELSE that is a file: images, compiled artifacts, and files
+            # broot cannot read at all. Chosen by the user: show it in broot's own
+            # preview panel rather than let macOS open it in a window over the
+            # terminal.
+            #
+            # `file`, not `binary_file`, because binary is not the only other kind:
+            # an UNREADABLE file is neither text nor binary and matched only the
+            # general kind (measured -- a `binary_file` fallback still leaked it to
+            # macOS). `file` excludes directories, so navigation is untouched.
+            key: enter
+            apply_to: file
+
+            # broot's own hex/preview panel, to the right inside broot -- nothing
+            # leaves the terminal and nothing is pushed into the viewer, which would
+            # only show the same bytes with a filename attached.
+            internal: panel_right
             leave_broot: false
         }
     ]

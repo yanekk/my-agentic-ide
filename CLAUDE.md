@@ -107,7 +107,7 @@ bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes colu
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
-bin/cockpit-browse-verbs.hjson broot's Enter verb: push the file into the viewer
+bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (134 assertions)

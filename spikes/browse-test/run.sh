@@ -124,7 +124,7 @@ same "the cockpit's file alone loads"      "$(brootload "$VERBS")" "clean"
 # The chain the daemon will really build on this machine, user's own config and all.
 CHAIN="$(node -e "import('$ROOT/bin/cockpit-browse-conf.mjs').then(m => process.stdout.write(m.browseConfChain(process.env.HOME, '$ROOT')))")"
 same "the whole chain loads, layered over your own config" "$(brootload "$CHAIN")" "clean"
-same "...and ours is the last entry in it" "$(printf '%s' "$CHAIN" | awk -F';' '{print $NF}')" "$VERBS"
+same "...and ours is the FIRST entry in it" "$(printf '%s' "$CHAIN" | awk -F';' '{print $1}')" "$VERBS"
 
 # Control 1: the check can fail. Hjson broot cannot parse.
 printf '{ verbs: [ { key: enter\n' > "$T/broken.hjson"
@@ -152,18 +152,35 @@ echo
 echo "== 23. the verb itself: files only, no GUI, stay in the tree =="
 # Read off the file rather than described in a comment, because every one of these
 # four lines is load-bearing and three of them are one word long.
-same "Enter is the key"          "$(grep -cE '^ *key: enter$' "$VERBS")" "1"
-same "files only, so Enter still descends into a DIRECTORY" \
+same "Enter is the key, for both verbs" "$(grep -cE '^ *key: enter$' "$VERBS")" "2"
+same "text files are pushed into the viewer" \
                                  "$(grep -cE '^ *apply_to: text_file$' "$VERBS")" "1"
 same "it runs cockpit-open with the file and the line" \
                                  "$(grep -cF 'external: "cockpit-open {file} {line}"' "$VERBS")" "1"
-same "and does not leave broot"  "$(grep -cE '^ *leave_broot: false$' "$VERBS")" "1"
-same "exactly one verb"          "$(grep -cE '^ *key: ' "$VERBS")" "1"
-# The stock binding this overrides is `open_stay`, which on macOS hands the file to
-# a GUI app: a window over the terminal, which is the whole reason for the file. The
-# comments name it, so only the hjson itself is searched.
+same "everything else that is a file gets broot's own preview" \
+                                 "$(grep -cE '^ *apply_to: file$' "$VERBS")" "1"
+same "...which is panel_right, inside broot" \
+                                 "$(grep -cE '^ *internal: panel_right$' "$VERBS")" "1"
+same "neither verb leaves broot" "$(grep -cE '^ *leave_broot: false$' "$VERBS")" "2"
+same "exactly two verbs"         "$(grep -cE '^ *key: ' "$VERBS")" "2"
+# ORDER, and it is load-bearing: broot takes the FIRST verb that matches, not the
+# most specific one (measured -- run.sh 27). With `apply_to: file` above
+# `text_file`, every source file would be previewed and nothing would ever reach
+# the viewer.
+same "the text_file verb comes ABOVE the catch-all, or nothing is ever pushed" \
+     "$([ "$(grep -nE '^ *apply_to: text_file$' "$VERBS" | cut -d: -f1)" \
+         -lt "$(grep -nE '^ *apply_to: file$' "$VERBS" | cut -d: -f1)" ] && echo above || echo below)" \
+     "above"
+# `binary_file` is NOT what the catch-all uses: an unreadable file is neither text
+# nor binary and matched only the general kind, so a binary_file fallback would
+# still have leaked it to macOS (measured).
+same "the catch-all is not narrowed to binary_file" \
+     "$(grep -vE '^[[:space:]]*#' "$VERBS" | grep -cE 'binary_file')" "0"
+# The stock binding both verbs override is `open_stay`, which on macOS hands the
+# file to a GUI app: a window over the terminal, which is the whole reason for the
+# file. The comments name it, so only the hjson itself is searched.
 same "it never falls back to opening the file itself" \
-     "$(grep -vE '^[[:space:]]*#' "$VERBS" | grep -cE 'open_stay|internal:')" "0"
+     "$(grep -vE '^[[:space:]]*#' "$VERBS" | grep -cE 'open_stay')" "0"
 
 echo
 echo "== 24. micro and broot are prerequisites, not suggestions =="
@@ -277,8 +294,12 @@ if ! command -v script >/dev/null; then
   echo "  FAIL script(1) is missing -- Enter cannot be pressed without a terminal"
   fail=1
 else
-mkdir -p "$T/vtree/sub" "$T/vhome" "$T/vbin"
+mkdir -p "$T/vtree/sub" "$T/vtree/odd" "$T/vhome" "$T/vbin"
 printf 'alpha\nbeta\nNEEDLE here\ndelta\n' > "$T/vtree/sub/a.txt"
+# The two kinds the catch-all verb exists for. Kept in their own directory so the
+# cases above still land on a.txt without depending on what broot lists first.
+printf '\211PNG\r\n\032\n\000\000\000\010IHDR\377\376' > "$T/vtree/odd/img.png"
+printf 'secret\n' > "$T/vtree/odd/locked"; chmod 000 "$T/vtree/odd/locked"
 # Resolved, because broot hands back a path with every symlink resolved and macOS
 # puts a mktemp dir behind one (/var -> /private/var). Comparing against the
 # unresolved name is the trap FINDINGS records against `planPush`.
@@ -326,7 +347,7 @@ same "under a c/ search, {line} is the matching line" \
 # `apply_to: text_file` earns its keep here: Enter on a DIRECTORY has to stay
 # broot's own navigation, or there is no way to get anywhere in the tree.
 same "Enter on a DIRECTORY never pushes" \
-     "$(vfire "$VERBS" "$VTREE" ':line_down')" ""
+     "$(vfire "$VERBS" "$VTREE" ':line_down;sub')" ""
 # Not "is a.txt on screen": broot's tree shows nested files whether or not it
 # descended, so that check passes against a verb that swallowed the keypress
 # (measured against an `apply_to: any` mutant). What actually moves is the ROOT
@@ -334,10 +355,59 @@ same "Enter on a DIRECTORY never pushes" \
 same "...it descends into it instead" \
      "$(screen | grep -q 'vtree/sub' && echo descended || echo stuck)" "descended"
 
+# The catch-all verb, chosen by the user over letting macOS have the file. A PNG is
+# not pushed into the viewer -- which would only show the same bytes -- and broot
+# draws its own hex preview instead: `89504e4` is the PNG magic number, so this
+# asserts the preview really rendered the file rather than merely opening a panel.
+same "Enter on a BINARY file never pushes" \
+     "$(vfire "$VERBS" "$VTREE/odd" ':line_down;img.png')" ""
+same "...broot previews it instead, in hex, inside the terminal" \
+     "$(screen | tr -s ' ' | grep -q '89504e4' && echo previewed || echo 'GONE TO macOS')" \
+     "previewed"
+
+# The kind a `binary_file` fallback would have missed: neither text nor binary, so
+# only the general `file` verb catches it. The panel says why it cannot show it,
+# which is the point -- the alternative was macOS opening it.
+same "Enter on an UNREADABLE file never pushes either" \
+     "$(vfire "$VERBS" "$VTREE/odd" ':line_down;locked')" ""
+same "...and the preview panel says what went wrong" \
+     "$(screen | grep -qi 'permissi' && echo explained || echo 'GONE TO macOS')" "explained"
+
 # The control, and the reason this section exists at all.
 sed 's/external:/externol:/' "$VERBS" > "$T/typo.hjson"
 same "a typo'd field name IS caught here -- and nowhere else" \
      "$(vfire "$T/typo.hjson" "$VTREE/sub" ':line_down')" ""
+echo
+echo "== 27. which file in the --conf chain wins a key clash =="
+# The reason cockpit-browse-conf.mjs puts the cockpit's file FIRST, and it is the
+# opposite of what "layered, ours last" suggests. broot takes the first verb that
+# matches, across the whole chain, so the EARLIER file wins. Shipped last, an
+# `enter` of the user's own would beat the cockpit's and the push would silently
+# never happen -- and broot's own sample verbs.hjson invites exactly that ("you'll
+# find it convenient to change the 'key' from 'ctrl-e' to 'enter'").
+#
+# Measured here both ways round rather than asserted, because everything else in
+# this suite would pass just as happily with the chain the wrong way about.
+clash() { # clash <path> <marker>: a config binding enter to a recognisable push
+  {
+    printf '{\n    verbs: [\n        {\n'
+    printf '            key: enter\n'
+    printf '            apply_to: text_file\n'
+    printf '            external: "cockpit-open %s"\n' "$2"
+    printf '            leave_broot: false\n'
+    printf '        }\n    ]\n}\n'
+  } > "$1"
+}
+clash "$T/clash-a.hjson" AAA
+clash "$T/clash-b.hjson" BBB
+
+same "the FIRST file in the chain wins" \
+     "$(vfire "$T/clash-a.hjson;$T/clash-b.hjson" "$VTREE/sub" ':line_down')" "[AAA]"
+same "...and it is the first one whichever order they are in" \
+     "$(vfire "$T/clash-b.hjson;$T/clash-a.hjson" "$VTREE/sub" ':line_down')" "[BBB]"
+# Which is what section 20 asserts about the real chain: ours is entry one.
+
+chmod 644 "$T/vtree/odd/locked" 2>/dev/null   # so the trap can remove it
 fi
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
