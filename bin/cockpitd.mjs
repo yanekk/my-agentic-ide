@@ -25,6 +25,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
+// The push side (cockpit-open.mjs) takes this same lock over viewer-tabs.lock, and
+// the daemon is the other writer of that file: it clears an agent's list whenever
+// it launches a FRESH viewer. One helper rather than a second copy (DESIGN 3.5).
+import { withLock } from "./cockpit-agenda-store.mjs";
 
 const execFileAsync = promisify(execFile);
 // The directory this daemon lives in, so it can launch its sibling scripts
@@ -49,6 +53,11 @@ const CMD_FILE = path.join(DIR, "cmd");
 const CUSTOM_REFS_FILE = path.join(DIR, "custom-refs.json");
 const CUSTOM_PROMPT = path.join(HERE, "cockpit-custom-prompt.mjs");
 const CUSTOM_PENDING_FILE = path.join(DIR, "custom-ref-pending");
+// What has been pushed into each agent's viewer, keyed by jobId. cockpit-open
+// owns it; the daemon only ever CLEARS an agent's entry, and only when it launches
+// that agent a fresh viewer (resetViewerTabs).
+const VIEWER_TABS = path.join(DIR, "viewer-tabs.json");
+const VIEWER_TABS_LOCK = path.join(DIR, "viewer-tabs.lock");
 
 // A uniform scale on every internal poll/debounce/settle interval below, so the
 // integration test can run the daemon "fast" without re-tuning each constant by
@@ -330,12 +339,46 @@ const MAX_TERMS = 8;
  */
 const diffs = new Map([[REPO_KEY, panes.diff]]);
 /**
- * jobId -> the VIEWER pane (micro), the second occupant of the slot, present only
- * while that agent is in browse mode. Kept apart from `diffs` rather than folded
- * into it so every existing "the agent's slot pane" caller -- showDiff, the reaper,
- * healMissingPanes -- keeps working unchanged.
+ * jobId -> { browser, viewer, cwd }: that agent's browse PAIR, wherever it is --
+ * holding the slot while the agent is showing in browse mode, parked in a tab of
+ * its own the rest of the time.
+ *
+ * Both halves keep running while parked, and that is the whole point: browse is
+ * one stop in a four-way cycle, so it is passed through constantly, and a pair
+ * killed on the way past empties micro's tab bar every time -- which is the
+ * feature (DESIGN 2.6). `cwd` is the worktree the two were launched in, so an
+ * agent that moved worktree while its pair was parked gets the pair REBUILT
+ * rather than restored into a directory it has left.
+ *
+ * `viewer` is undefined when the viewer half failed to open or has died; the
+ * browser can be alone in the slot, never the other way round.
+ *
+ * Kept apart from `diffs` rather than folded into it so every existing "the
+ * agent's slot pane" caller -- showDiff, healQuitDiff, the reaper -- keeps
+ * working unchanged. While the pair holds the slot, `diffs.get(jobId)` and
+ * `browsePairs.get(jobId).browser` are the same pane; that equality is how
+ * `pairInSlot` tells a pair that is on screen from one that is parked.
  */
-const viewers = new Map();
+const browsePairs = new Map();
+const viewerOf = (jobId) => browsePairs.get(jobId)?.viewer;
+/** The agent's pair if it is IN the slot right now, else null. */
+function pairInSlot(key) {
+  const pair = browsePairs.get(key);
+  return pair !== undefined && pair.browser === diffs.get(key) ? pair : null;
+}
+/**
+ * jobId -> { pane, mode, ref, cwd }: that agent's REVDIFF pane while its browse
+ * pair holds the slot, parked in a tab of its own, with what it was last launched
+ * with.
+ *
+ * Cycling into browse parks it instead of killing it, so cycling back out costs no
+ * revdiff restart: the pane comes back with its selected file, its scroll position
+ * and any unflushed annotations, exactly as an agent switch already does. The
+ * recorded mode/ref/cwd is what decides whether it can simply be handed back or
+ * has to be relaunched -- the mode can be clicked to a different one, and the
+ * agent can move worktree, while it sits parked.
+ */
+const parkedDiffs = new Map();
 let visibleDiff = REPO_KEY;
 const reapStrikes = new Map();
 
@@ -514,51 +557,206 @@ function splitDiffSlot(anchor, tail) {
   return Number.isInteger(id) ? id : undefined;
 }
 
-/** Kill an agent's viewer half and stop advertising it. Safe to call with none. */
-function disposeViewer(jobId) {
-  const viewer = viewers.get(jobId);
-  if (viewer === undefined) return;
-  wez(["kill-pane", "--pane-id", String(viewer)]);
-  viewers.delete(jobId);
-  browseHalfStatus.delete(viewer);
-  // A stale pane id is worse than none: ids are reused, so cockpit-open would type
-  // micro's command bar into whatever holds that id next.
+/**
+ * Stop advertising a viewer pane. A stale pane id is worse than none: ids are
+ * reused, so cockpit-open would type micro's command bar into whatever holds that
+ * id next.
+ */
+function unpublishViewer(viewer) {
   if (panes.viewer === viewer) publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null });
-  log(`disposed viewer pane ${viewer} for ${jobId}`);
+}
+
+/**
+ * Kill an agent's browse pair and forget it. `keep` names a pane the caller still
+ * needs (the outgoing browser is the slot's anchor until the incoming pane has
+ * been split into it) and is left for the caller to dispose of.
+ *
+ * Only ever called on a pair that cannot be REUSED -- a half has died, or broot is
+ * rooted in a worktree the agent has left. A pair that merely went out of view is
+ * parked, never killed.
+ */
+function disposePair(jobId, keep) {
+  const pair = browsePairs.get(jobId);
+  if (pair === undefined) return;
+  // The viewer goes first and unconditionally: it is the one half that would
+  // otherwise still be sitting in the slot beside an incoming browser, and a
+  // browser split into half a slot comes back at half the width.
+  for (const pane of [pair.viewer, pair.browser]) {
+    if (pane === undefined || pane === keep) continue;
+    wez(["kill-pane", "--pane-id", String(pane)]);
+    browseHalfStatus.delete(pane);
+    log(`disposed browse pane ${pane} for ${jobId}`);
+  }
+  if (pair.viewer !== undefined) unpublishViewer(pair.viewer);
+  browsePairs.delete(jobId);
+}
+
+/** The cockpit's own tab -- the one the fleet pane is in. */
+const cockpitTabId = (table) => table?.find((p) => p.pane_id === panes.fleet)?.tab_id;
+
+/**
+ * Park the pair's VIEWER beside its already-parked BROWSER, so the two sit
+ * together in one tab -- and, in the same call, collapse the split that was
+ * holding the slot so the incoming occupant inherits it exactly.
+ *
+ * The divider is re-imposed from BROWSE_VIEWER_PERCENT here as it is everywhere
+ * else, never carried: measured, that is why the pair comes back at 47/72 after a
+ * park, an agent switch and a resize alike (spikes/browse-mode/RESULTS.md 1).
+ */
+function parkViewerBeside(browser, viewer, cockpitTab) {
+  wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
+       "--pane-id", String(browser), "--move-pane-id", String(viewer)]);
+  // move-pane-to-new-tab makes its new tab active, and a split aimed into a
+  // background tab may do the same; either would swap the whole cockpit off
+  // screen. Cheap insurance, exactly as parkPane does it.
+  if (cockpitTab !== undefined) wez(["activate-tab", "--tab-id", String(cockpitTab)]);
+}
+
+/**
+ * Park this agent's revdiff pane out of the slot while its pair browses, keeping
+ * what it was launched with so the return trip knows whether it can just be handed
+ * back.
+ */
+function parkDiffPane(jobId, pane, cockpitTab) {
+  parkPane(pane, `diff ${jobId}`, cockpitTab);
+  parkedDiffs.set(jobId, {
+    pane,
+    mode: diffLaunchedMode.get(jobId),
+    ref: diffLaunchedRef.get(jobId),
+    cwd: diffLaunchedCwd.get(jobId),
+  });
+  log(`parked diff pane ${pane} for ${jobId} while it browses`);
+}
+
+/**
+ * Forget what we last pushed into `jobId`'s viewer.
+ *
+ * Called whenever a viewer is LAUNCHED FRESH, and never otherwise. The list is the
+ * only record of what micro has open -- it cannot be asked (DESIGN 2.5) -- so a
+ * list left over from a viewer that no longer exists makes the next push a
+ * `tabswitch <n>` onto a tab that is not there, which jumps to the wrong file
+ * silently. Merging is never right: a duplicate tab is merely untidy, a wrong jump
+ * is a lie (DESIGN 2.n). A RESTORED viewer still has every tab it had, so its list
+ * must survive untouched -- that is the whole of what parking buys here.
+ *
+ * `withLock` blocks, as every `wezterm cli` call in this daemon already does. It is
+ * held for one read and one rename against a push that holds it for ~300ms, so the
+ * 5s stale break is never approached -- but nothing slower may move inside it.
+ */
+function resetViewerTabs(jobId) {
+  try {
+    withLock(() => {
+      let all = {};
+      try { all = JSON.parse(fs.readFileSync(VIEWER_TABS, "utf8")); } catch { /* absent or broken: nothing to clear */ }
+      if (all === null || typeof all !== "object" || Array.isArray(all) || !(jobId in all)) return;
+      delete all[jobId];
+      const tmp = `${VIEWER_TABS}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
+      fs.renameSync(tmp, VIEWER_TABS);
+      log(`reset the viewer tab list for ${jobId} (fresh viewer)`);
+    }, VIEWER_TABS_LOCK);
+  } catch (e) {
+    // A tab list we could not clear is untidy, not fatal: the next push adds a
+    // tab that is already open. Never worth failing a mode switch for.
+    log(`could not reset the viewer tab list for ${jobId}: ${String(e.message).split("\n")[0]}`);
+  }
 }
 
 /**
  * Put the browse pair in the slot for `jobId`, replacing whatever occupies it.
  *
  * The order is measured (spikes/browse-mode/RESULTS.md 1) and the slot is never
- * empty at any point: split the BROWSER into the outgoing occupant, dispose of the
+ * empty at any point: split the BROWSER into the outgoing occupant, park the
  * outgoing one so the browser inherits the whole slot, and only THEN split the
  * viewer off the browser -- 60% of half a slot is not 60% of a slot.
+ *
+ * Both halves are RESTORED where they can be. A pair this agent parked on the way
+ * out comes back with every tab micro had open and broot still where it was left
+ * in the tree; nothing is typed into either. Only a pair that cannot be reused --
+ * a dead half, or a worktree the agent has left -- is started afresh.
  *
  * Called under the reconcile lock (every caller holds it).
  */
 async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   const anchor = diffs.get(jobId);
   if (anchor === undefined) return log(`no slot pane to split for ${jobId}; not entering browse`);
-  // Whatever pair this agent had is not parked (T05), so a re-entry rebuilds it.
-  disposeViewer(jobId);
+  const table = paneTable();
+  const cockpitTab = cockpitTabId(table);
+  const live = table ? new Set(table.map((p) => p.pane_id)) : null;
+  const alive = (id) => id !== undefined && (live === null || live.has(id));
 
-  const browser = splitDiffSlot(anchor, spawnTerminal(worktree));
-  if (browser === undefined) return log(`could not open a browser pane for ${jobId}`);
-  wez(["kill-pane", "--pane-id", String(anchor)]);
-  browseHalfStatus.delete(anchor);
+  const pair = browsePairs.get(jobId);
+  // The pair is in the slot already: this is a REBUILD (followWorktreeMigration
+  // dragging both halves into the worktree the agent just entered), so the browser
+  // we are anchored to is the one being replaced -- it is killed after the split,
+  // never parked.
+  const anchorIsBrowser = pair !== undefined && pair.browser === anchor;
+  // Otherwise a pair this agent parked comes back exactly as it was: every tab
+  // still open, broot still where it was left in the tree. That is what parking is
+  // for. Not reusable if a half has died under us, or if broot is rooted in a
+  // worktree the agent has since left -- a browser showing a directory that is
+  // gone is worse than the second it costs to start a new one.
+  const reusable = pair !== undefined && !anchorIsBrowser && alive(pair.browser)
+                && (pair.viewer === undefined || alive(pair.viewer))
+                && normCwd(pair.cwd ?? "") === normCwd(worktree);
+  if (!reusable) disposePair(jobId, anchorIsBrowser ? anchor : undefined);
+
+  let browser;
+  if (reusable) {
+    // Restored, not relaunched: split the parked browser back INTO whatever holds
+    // the slot, exactly as a parked revdiff is restored.
+    const moved = wez(["split-pane", "--top", "--percent", "50",
+                       "--pane-id", String(anchor), "--move-pane-id", String(pair.browser)]);
+    if (moved !== null) browser = pair.browser;
+    else {
+      log(`could not restore browser pane ${pair.browser} for ${jobId}; starting a fresh pair`);
+      disposePair(jobId, anchorIsBrowser ? anchor : undefined);
+    }
+  }
+  const restored = browser !== undefined;
+  if (!restored) {
+    browser = splitDiffSlot(anchor, spawnTerminal(worktree));
+    if (browser === undefined) return log(`could not open a browser pane for ${jobId}`);
+  }
+
+  // The outgoing occupant goes only once the browser is in, so the browser
+  // inherits the whole slot. It is this agent's REVDIFF, and it is parked, not
+  // killed: coming back out of browse then costs no revdiff restart at all.
+  if (anchorIsBrowser) {
+    wez(["kill-pane", "--pane-id", String(anchor)]);
+    browseHalfStatus.delete(anchor);
+  } else {
+    parkDiffPane(jobId, anchor, cockpitTab);
+  }
   diffs.set(jobId, browser);
 
-  const out = wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
-                   "--pane-id", String(browser), ...spawnTerminal(worktree)]);
-  const id = Number.parseInt((out ?? "").trim(), 10);
-  const viewer = Number.isInteger(id) ? id : null;
-  if (viewer === null) log(`could not open a viewer pane for ${jobId}; the browser is on its own`);
-  else viewers.set(jobId, viewer);
+  let viewer = null;
+  const parkedViewer = restored ? pair.viewer : undefined;
+  if (parkedViewer !== undefined) {
+    const back = wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
+                      "--pane-id", String(browser), "--move-pane-id", String(parkedViewer)]);
+    if (back !== null) viewer = parkedViewer;
+    else log(`could not restore viewer pane ${parkedViewer} for ${jobId}; the browser is on its own`);
+  } else {
+    const out = wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
+                     "--pane-id", String(browser), ...spawnTerminal(worktree)]);
+    const id = Number.parseInt((out ?? "").trim(), 10);
+    viewer = Number.isInteger(id) ? id : null;
+    if (viewer === null) log(`could not open a viewer pane for ${jobId}; the browser is on its own`);
+  }
+  browsePairs.set(jobId, { browser, viewer: viewer ?? undefined, cwd: worktree });
 
-  await sleep(SHELL_SETTLE_MS);            // let the login shells start reading
-  launchInPane(browser, browserCommand(worktree));
-  if (viewer !== null) launchInPane(viewer, viewerCommand(worktree));
+  // A restored half is already running its program; typing into it would type into
+  // broot's filter box and micro's buffer. Only the halves actually spawned here
+  // get a settle and a command line -- and a freshly spawned VIEWER has no tabs,
+  // so the list of what we pushed into the last one has to go with it.
+  const freshViewer = viewer !== null && parkedViewer === undefined;
+  if (!restored || freshViewer) await sleep(SHELL_SETTLE_MS);   // let the login shells start reading
+  if (!restored) launchInPane(browser, browserCommand(worktree));
+  if (freshViewer) {
+    launchInPane(viewer, viewerCommand(worktree));
+    resetViewerTabs(jobId);
+  }
 
   // Recorded exactly as a revdiff launch is, so the cooldown that keeps the healer
   // off a still-painting pane covers these two as well.
@@ -582,50 +780,92 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   // user did not ask for (followWorktreeMigration), where taking the keyboard is
   // the same class of mistake as typing `R` into an open annotation editor.
   if (focus) wez(["activate-pane", "--pane-id", String(browser)]);
-  log(`entered browse for ${jobId}: browser ${browser}, viewer ${viewer} at ${worktree}`);
+  log(`entered browse for ${jobId}: ${restored ? "restored" : "launched"} browser ${browser}, `
+    + `${parkedViewer !== undefined && viewer !== null ? "restored" : "launched"} viewer ${viewer} at ${worktree}`);
 }
 
 /**
- * Take the pair back out of the slot and hand the slot to a fresh shell, whose id
- * is returned for the caller to launch revdiff (or the custom prompt) in.
+ * Take the pair back out of the slot and hand the slot to this agent's revdiff --
+ * the one it parked on the way in, or a fresh shell if it has none.
  *
- * The mirror of enterBrowse, in the order the probe measured: dispose the BROWSER
+ * Returns `{ pane, relaunch }`: the pane now holding the slot, and whether the
+ * caller has to start something in it. `relaunch` is false only for a revdiff that
+ * came back from its park still showing the range the agent is switching to -- the
+ * whole saving of parking. Undefined means the slot could not be handed over at
+ * all and the caller must do nothing.
+ *
+ * The mirror of enterBrowse, in the order the probe measured: park the BROWSER
  * first so the viewer inherits the slot, split the incoming pane into the VIEWER,
- * then dispose the viewer so the incoming pane inherits the slot at its exact size.
- * T05 turns both disposals into parks; the order is what makes that a drop-in.
+ * then move the viewer into the browser's park tab -- which in the same call
+ * collapses the split, so the incoming pane inherits the slot at its exact size.
+ * Nothing is killed: both halves keep running, with every tab micro had open.
  */
 async function leaveBrowse(jobId, worktree) {
-  const browser = diffs.get(jobId);
-  const viewer = viewers.get(jobId);
-  // With no viewer (its split failed) the browser is the only occupant, so it has
-  // to stay until the incoming pane is split into it -- killing it first would
-  // leave the slot empty with nothing to split into.
+  const pair = browsePairs.get(jobId);
+  const browser = pair?.browser ?? diffs.get(jobId);
+  const viewer = pair?.viewer;
+  // With no viewer (its split failed, or it died) the browser is the only occupant,
+  // so it has to stay until the incoming pane is split into it -- parking it first
+  // would leave the slot empty with nothing to split into.
   const anchor = viewer ?? browser;
   if (anchor === undefined) return undefined;
-  if (viewer !== undefined && browser !== undefined) {
-    wez(["kill-pane", "--pane-id", String(browser)]);
-    browseHalfStatus.delete(browser);
-  }
+  const table = paneTable();
+  const cockpitTab = cockpitTabId(table);
+  const live = table ? new Set(table.map((p) => p.pane_id)) : null;
+  if (viewer !== undefined && browser !== undefined) parkPane(browser, `browse ${jobId}`, cockpitTab);
 
-  const fresh = splitDiffSlot(anchor, ["--cwd", worktree, "--", LOGIN_SHELL, "-l"]);
-  wez(["kill-pane", "--pane-id", String(anchor)]);
-  browseHalfStatus.delete(anchor);
-  viewers.delete(jobId);
-  if (fresh === undefined) {
-    // The slot is empty and both halves are gone; healMissingPanes rebuilds it.
-    // Unpublish the viewer on the way out even so: the success branch below is not
-    // the only path where the pair stops existing, and a `viewer` still naming a
-    // killed pane is exactly how cockpit-open ends up typing micro's command bar
-    // into whoever inherits that id (ids are reused -- see disposeViewer).
+  // This agent's own revdiff comes back if it parked one -- same pane, same
+  // selected file, same scroll position, same unflushed annotations. Only when
+  // there is none (or it has died) does the slot get a fresh shell to launch in.
+  const parked = parkedDiffs.get(jobId);
+  let slot;
+  if (parked !== undefined && (live === null || live.has(parked.pane))) {
+    const moved = wez(["split-pane", "--top", "--percent", "50",
+                       "--pane-id", String(anchor), "--move-pane-id", String(parked.pane)]);
+    if (moved !== null) slot = parked.pane;
+    else log(`could not restore diff pane ${parked.pane} for ${jobId}; opening a fresh one`);
+  }
+  const restored = slot !== undefined;
+  if (!restored) slot = splitDiffSlot(anchor, ["--cwd", worktree, "--", LOGIN_SHELL, "-l"]);
+  parkedDiffs.delete(jobId);
+
+  // The outgoing half parks LAST, beside its browser, so the incoming pane inherits
+  // the slot -- and so the pair sits in one tab rather than two.
+  if (viewer !== undefined && browser !== undefined) parkViewerBeside(browser, viewer, cockpitTab);
+  else parkPane(anchor, `browse ${jobId}`, cockpitTab);
+  unpublishViewer(viewer);
+
+  if (slot === undefined) {
+    // The slot is empty, but the pair is alive and parked: forgetting this agent's
+    // slot pane is what makes healMissingPanes rebuild it (a fresh pane, then
+    // revdiff in it) on its next tick. Unpublish the viewer keys on the way out --
+    // a `viewer` still naming a pane that is no longer beside a browser is how
+    // cockpit-open ends up typing micro's command bar into a pane nobody can see.
     publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null });
-    log(`could not rebuild the diff slot leaving browse for ${jobId}`);
+    diffs.delete(jobId);
+    log(`could not hand the diff slot back leaving browse for ${jobId}`);
     return undefined;
   }
-  diffs.set(jobId, fresh);
-  publishPanes({ diff: fresh, viewer: null, viewerAgent: null, viewerRoot: null });
-  await sleep(SHELL_SETTLE_MS);            // let the login shell start reading
-  log(`left browse for ${jobId}; slot pane is now ${fresh}`);
-  return fresh;
+  diffs.set(jobId, slot);
+  publishPanes({ diff: slot, viewer: null, viewerAgent: null, viewerRoot: null });
+  if (!restored) await sleep(SHELL_SETTLE_MS);   // let the login shell start reading
+
+  // A restored revdiff is handed straight back only if it is still showing what
+  // this agent's mode now asks for: the mode can be clicked to a different one, and
+  // the agent can move worktree, while the pane sits parked. The status check is
+  // the same one onEnter makes of a restored pane -- a pane that came back at a
+  // shell (revdiff was quit before browsing, or it held the custom-range prompt)
+  // has nothing running in it to keep.
+  const mode = modeOf(jobId);
+  const ref = customRef.get(jobId);
+  const stale = !restored
+             || parked.mode !== mode
+             || (mode === "custom" && parked.ref !== ref)
+             || normCwd(parked.cwd ?? "") !== normCwd(worktree)
+             || diffPaneStatus(slot) !== "running";
+  log(`left browse for ${jobId}; slot pane is now ${slot}`
+    + `${restored ? ` (restored from its park${stale ? ", stale" : ", untouched"})` : " (fresh)"}`);
+  return { pane: slot, relaunch: stale };
 }
 
 /** The pane currently shown for `key`, or undefined if it has none live. */
@@ -1073,12 +1313,15 @@ async function diffModeCommand(verb, attempt = 0) {
       await enterBrowse(jobId, attached.worktree);
       return;
     }
-    // Coming OUT of browse, the pair is taken out of the slot first and the mode
-    // being switched to lands in the fresh pane that inherits it.
+    // Coming OUT of browse, the pair is parked out of the slot first and this
+    // agent's own revdiff pane comes back into it -- unrelaunched when it is
+    // already showing the range being switched to, which is the point of parking.
     let slot = pane;
+    let relaunch = true;
     if (from === "browse") {
-      slot = await leaveBrowse(jobId, attached.worktree);
-      if (slot === undefined) return;
+      const left = await leaveBrowse(jobId, attached.worktree);
+      if (left === undefined) return;
+      ({ pane: slot, relaunch } = left);
     }
     if (next === "custom") {
       // Cycling INTO custom always asks for the range (pre-filled with this
@@ -1087,7 +1330,8 @@ async function diffModeCommand(verb, attempt = 0) {
       await openCustomPrompt(jobId, slot, attached.worktree);
       return;
     }
-    await relaunchDiff(jobId, slot, attached.worktree, attached.reviewFile);
+    if (relaunch) await relaunchDiff(jobId, slot, attached.worktree, attached.reviewFile);
+    else log(`diff pane ${slot} for ${jobId} came back from its park in ${next} mode; nothing to relaunch`);
     // The reviewer is reading the diff, so leave focus on it rather than bouncing
     // back to the fleet pane the way an agent switch does.
     wez(["activate-pane", "--pane-id", String(slot)]);
@@ -1134,17 +1378,23 @@ async function diffModeSet(target, attempt = 0) {
       await enterBrowse(jobId, attached.worktree);
       return;
     }
+    // Clicking a label parks the pair exactly as the keys do, and gets the same
+    // parked revdiff back: how you left browse must not decide whether the tabs
+    // survive it.
     let slot = pane;
+    let relaunch = true;
     if (from === "browse") {
-      slot = await leaveBrowse(jobId, attached.worktree);
-      if (slot === undefined) return;
+      const left = await leaveBrowse(jobId, attached.worktree);
+      if (left === undefined) return;
+      ({ pane: slot, relaunch } = left);
     }
     if (target === "custom") {
       modeBeforeCustom = from;          // a cancel reverts here (custom -> custom keeps the ref)
       await openCustomPrompt(jobId, slot, attached.worktree);
       return;
     }
-    await relaunchDiff(jobId, slot, attached.worktree, attached.reviewFile);
+    if (relaunch) await relaunchDiff(jobId, slot, attached.worktree, attached.reviewFile);
+    else log(`diff pane ${slot} for ${jobId} came back from its park in ${target} mode; nothing to relaunch`);
     wez(["activate-pane", "--pane-id", String(slot)]);
   } finally {
     reconciling = false;
@@ -1302,18 +1552,40 @@ async function showDiff(key, cwd, label) {
   const live = new Set(table.map((p) => p.pane_id));
   const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
   for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedCwd.delete(k); diffLaunchedAt.delete(k); diffModeByAgent.delete(k); }
-  for (const [k, id] of viewers) if (!live.has(id)) { viewers.delete(k); browseHalfStatus.delete(id); }
+  // A parked revdiff whose shell was exited is simply forgotten: leaving browse
+  // then hands the slot a fresh pane instead of chasing a pane that is gone.
+  for (const [k, rec] of parkedDiffs) if (!live.has(rec.pane)) parkedDiffs.delete(k);
+  for (const [k, pair] of browsePairs) {
+    if (pair.viewer !== undefined && !live.has(pair.viewer)) { browseHalfStatus.delete(pair.viewer); pair.viewer = undefined; }
+    // A browser that died takes the pair with it: the viewer cannot hold the slot
+    // on its own (the whole dance splits off the browser), so an orphaned viewer
+    // has nowhere to be. Healing ONE quit half in place is T06's; this is the
+    // different case where the half is gone rather than quit.
+    if (!live.has(pair.browser)) {
+      browseHalfStatus.delete(pair.browser);
+      if (pair.viewer !== undefined) {
+        wez(["kill-pane", "--pane-id", String(pair.viewer)]);
+        browseHalfStatus.delete(pair.viewer);
+        unpublishViewer(pair.viewer);
+        log(`browser pane ${pair.browser} for ${k} is gone; disposed of its orphaned viewer ${pair.viewer}`);
+      }
+      browsePairs.delete(k);
+    }
+  }
 
   if (key === visibleDiff && diffs.has(key)) return { pane: diffs.get(key), spawned: false };
 
   // The outgoing agent may be in browse mode, in which case the slot holds a PAIR
-  // and only the browser is about to be parked. The viewer goes first, so the
-  // browser inherits the whole slot before the incoming pane is split into it --
-  // otherwise the incoming pane comes back at the browser's 47 columns. It is
-  // disposed of rather than parked; T05 parks the pair as a unit.
-  disposeViewer(visibleDiff);
+  // and BOTH halves are parked -- together, in one tab, still running. The browser
+  // goes first, so the viewer inherits the whole slot and is what the incoming pane
+  // is split into; the viewer follows it into that tab afterwards (T00 RESULTS 1).
+  // Getting this backwards brings the incoming pane back at the browser's 47
+  // columns.
+  const outgoing = pairInSlot(visibleDiff);
+  const outgoingPaired = outgoing !== null && outgoing.viewer !== undefined;
+  if (outgoingPaired) parkPane(outgoing.browser, `browse ${visibleDiff}`, cockpitTab);
 
-  let anchor = diffs.get(visibleDiff);
+  let anchor = outgoingPaired ? outgoing.viewer : diffs.get(visibleDiff);
   const throwaway = anchor === undefined;
   if (throwaway) {
     anchor = rebuildDiffSlot(cockpitTab);
@@ -1341,15 +1613,39 @@ async function showDiff(key, cwd, label) {
   }
 
   if (throwaway) wez(["kill-pane", "--pane-id", String(anchor)]);
+  else if (outgoingPaired) parkViewerBeside(outgoing.browser, outgoing.viewer, cockpitTab);
+  else if (outgoing !== null) parkPane(anchor, `browse ${visibleDiff}`, cockpitTab);
   else parkPane(anchor, `diff ${visibleDiff === REPO_KEY ? "repo" : visibleDiff}`, cockpitTab);
+
+  // The INCOMING agent may be in browse mode too: its browser has just taken the
+  // slot, so its viewer is split back off it -- after the outgoing occupant is
+  // gone, never before (60% of half a slot is not 60% of a slot).
+  const incoming = modeOf(key) === "browse" && !spawned ? browsePairs.get(key) : undefined;
+  let viewer = null;
+  if (incoming !== undefined && incoming.browser === pane && incoming.viewer !== undefined) {
+    const back = wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
+                      "--pane-id", String(pane), "--move-pane-id", String(incoming.viewer)]);
+    if (back !== null) viewer = incoming.viewer;
+    else {
+      log(`could not restore viewer pane ${incoming.viewer} for ${key}; the browser is on its own`);
+      incoming.viewer = undefined;
+    }
+  }
 
   visibleDiff = key;
   // split-pane activates whatever it put in the slot. Switching agents happens in
   // the fleet view, so that is where the next keystroke belongs.
   wez(["activate-pane", "--pane-id", String(panes.fleet)]);
-  publishPanes({ diff: pane });
+  // All four together: the viewer keys must never outlive the pair they name, and
+  // an agent that is not browsing has to clear the ones the last one published.
+  publishPanes({
+    diff: pane,
+    viewer,
+    viewerAgent: viewer === null ? null : key,
+    viewerRoot: viewer === null ? null : cwd,
+  });
   log(spawned ? `opened diff pane ${pane} for ${label ?? key} at ${cwd}`
-              : `restored diff pane ${pane} for ${label ?? key}`);
+              : `restored diff pane ${pane} for ${label ?? key}${viewer === null ? "" : ` with its viewer ${viewer}`}`);
   return { pane, spawned };
 }
 
@@ -1382,9 +1678,18 @@ async function reapAgents() {
       }
       terminals.delete(key);
     }
-    // Its browse pair, if it had one: the viewer half first, then the browser --
-    // which `diffs` holds, so the loop below disposes of it like any slot pane.
-    disposeViewer(key);
+    // An agent can now own THREE panes in the diff slot's world -- the one holding
+    // the slot, and the two halves or the revdiff parked out of it. Every one of
+    // them has to go, or a pane nobody can reach any more survives for the life of
+    // the window. Its browse pair goes through disposePair so the viewer stops
+    // being advertised with it.
+    disposePair(key);
+    const parked = parkedDiffs.get(key);
+    if (parked !== undefined) {
+      wez(["kill-pane", "--pane-id", String(parked.pane)]);
+      log(`reaped parked diff pane ${parked.pane} — agent ${key} is gone`);
+      parkedDiffs.delete(key);
+    }
     const d = diffs.get(key);
     if (d !== undefined) {
       wez(["kill-pane", "--pane-id", String(d)]);
@@ -1431,13 +1736,16 @@ function healMissingPanes() {
   }
   // A dead VIEWER is not worth rebuilding the whole attach for (T06 heals the
   // halves), but it must stop being published at once: pane ids are reused, and
-  // cockpit-open types into whatever `panes.viewer` names.
-  const viewer = viewers.get(attached.jobId);
+  // cockpit-open types into whatever `panes.viewer` names. GONE is the test, not
+  // "not on screen": a parked half is alive in a tab of its own and is left
+  // strictly alone here.
+  const pair = browsePairs.get(attached.jobId);
+  const viewer = pair?.viewer;
   if (viewer !== undefined && !live.has(viewer)) {
     log(`viewer pane ${viewer} for ${attached.jobId} is gone; unpublishing it`);
-    viewers.delete(attached.jobId);
+    pair.viewer = undefined;
     browseHalfStatus.delete(viewer);
-    if (panes.viewer === viewer) publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null });
+    unpublishViewer(viewer);
   }
   // The terminal slot is healthy as long as this agent's CURRENT terminal is in
   // it. A dead current with a live sibling still needs a rebuild -- the sibling
@@ -1506,7 +1814,7 @@ function healQuitDiff() {
 function reportBrowseHalves(jobId) {
   const table = paneTable();
   if (!table) return;
-  for (const [half, pane] of [["browser", diffs.get(jobId)], ["viewer", viewers.get(jobId)]]) {
+  for (const [half, pane] of [["browser", diffs.get(jobId)], ["viewer", viewerOf(jobId)]]) {
     if (pane === undefined) continue;
     const status = diffPaneStatus(pane, table);
     if (browseHalfStatus.get(pane) === status) continue;   // said already
@@ -1896,11 +2204,19 @@ async function onEnter(jobId, knownName) {
     // only follows the ATTACHED agent, so a parked one that moved is caught here).
     const cwdMoved = diffLaunchedCwd.has(jobId) && normCwd(diffLaunchedCwd.get(jobId)) !== normCwd(worktree);
     if (mode === "browse") {
-      // This agent was left in browse mode. The pair is not parked yet (T05), so
-      // its viewer was disposed of on the way out and the slot pane is a browser
-      // with nothing beside it: rebuild both. Checked before the branches below
-      // because none of them knows how to put two panes in the slot.
-      await enterBrowse(jobId, worktree);
+      // This agent was left in browse mode, and showDiff has already brought BOTH
+      // halves back into the slot -- broot where it was in the tree, micro with
+      // every tab it had. Checked before the branches below because none of them
+      // knows how to put two panes in the slot.
+      //
+      // It is rebuilt only when there is nothing to come back to (a half died
+      // while it was away) or when the agent moved worktree while parked, which
+      // leaves broot rooted in a directory it has left. Never with focus: an agent
+      // switch lands you in the fleet pane, so the slot did not have the keyboard
+      // and must not take it (the same rule as the migration rebuild).
+      const pair = browsePairs.get(jobId);
+      const back = pair !== undefined && pair.browser === shown.pane && pair.viewer !== undefined;
+      if (!back || cwdMoved) await enterBrowse(jobId, worktree, { focus: false });
     } else if (shown.spawned || status === "shell") {
       if (shown.spawned) await sleep(SHELL_SETTLE_MS);  // let the login shell start reading
       if (mode === "custom" && !ref) {

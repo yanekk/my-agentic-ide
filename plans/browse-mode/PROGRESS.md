@@ -38,12 +38,19 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **Phase 2 has begun: T04 is reviewed and done.** `⌥[`/`⌥]` now reach `browse` as a
-fourth stop, both halves launch into the slot (broot left, micro right at `--percent 60`), either
-half routes the keys, the footer draws and clicks a `Browse` label, and `diffPaneStatus` reports a
-healthy pair as *running* so the 1 s healer leaves it alone. The pair is **launched and disposed
-of, not parked** — that is T05. `spikes/cockpit-test` **221 checks** (was 134); browse (238),
-agenda (579) and notes (88) suites green.
+**Status:** **T05 is built and awaiting review.** The pair is now **parked, not killed**: cycling
+out of browse parks the browser and the viewer together in one tab and brings that agent's own
+revdiff pane back, unrelaunched; cycling in parks the revdiff and gives both halves back with every
+micro tab still open. The same happens on an agent switch, through the footer's labels, and when
+the custom-range prompt is cancelled back into browse. `spikes/cockpit-test` **289 checks** (was
+221); browse (238), agenda and notes suites green.
+
+**Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
+its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
+so showDiff, the healer and the reaper read as before; `browsePairs` and `parkedDiffs` hold
+whatever is parked out of it, each carrying the worktree it was launched in. That worktree is what
+rebuilds a browser rooted in a directory the agent has left, and relaunches a revdiff whose range
+moved while it sat parked.
 
 **T04's review fixed two things and probed a third.** `enterBrowse` took `{focus}`: it had always
 activated the browser, so a `followWorktreeMigration` rebuild — which fires on the *agent's*
@@ -59,12 +66,11 @@ else; `cockpit-open` finds the viewer, refuses unless
 `panes.json` carries all three viewer keys *in the right shape*, and types micro's command bar
 under `viewer-tabs.lock`. micro and broot are hard prerequisites in both the installer and the
 layout script. `spikes/browse-test` **238 checks**; agenda, notes and cockpit suites green.
-**Nothing launches it yet** — the `viewer` key and the two panes arrive with T04.
 
-**T05 inherits a deliberate placeholder.** Entering browse splits the browser into the slot and
-**disposes of** the outgoing revdiff pane; leaving disposes of both halves. The *order* is
-already the measured one (RESULTS §1) and asserted, so T05's job is to replace two `kill-pane`
-calls with a park — not to redesign the dance.
+**T06 inherits two crude fallbacks, both deliberate.** A half that has *died* rebuilds the whole
+pair on the next attach (killing the healthy half with it), and an orphaned viewer whose browser
+is gone is disposed of. Healing **one** half in place, without touching the other, is T06's whole
+job — DESIGN §2.n, "two halves, two independent heals".
 
 **`spikes/cockpit-test` is timing-based end to end.** A red run at
 `COCKPIT_TEST_SPEED=1.0` on a loaded machine is evidence about the machine: re-run it before
@@ -76,9 +82,10 @@ green** — the flake moves with the load, never with the code. `notes-test` did
 `cockpit-test` now, for the footer-click checks.
 
 **Last updated:** 2026-08-29
-**Next `pir-work` will:** **implement T05** — park and restore the pair instead of killing it. The
-enter/leave order it needs is already built and asserted; the job is to replace the `kill-pane`
-calls with a park, not to redesign the dance.
+**Next `pir-work` will:** **review T05** — the pair park/restore. Worth the reviewer's attention:
+the three-map state (`diffs` / `browsePairs` / `parkedDiffs`) and whether every path keeps them
+consistent; the failure branches (a split that fails now leaves panes parked and alive rather than
+killed); and the `relaunch` decision `leaveBrowse` returns.
 
 ## Tasks
 
@@ -92,7 +99,7 @@ done · ⛔ blocked, needs a human.
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ✅ | Reviewed, four deviations accepted, **two defects fixed**: the `--conf` chain was the wrong way round (the **first** file wins, so a user's own `enter` beat the cockpit's), and `{line}` is `0`, not empty. Enter is now pressed **for real** — push, `c/` line, directory descent, binary and unreadable files. **223 → 238 checks**, each proven to fail. Enter on a non-text file now opens broot's preview, **per the user**. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, six deviations accepted, **two defects fixed**: `enterBrowse` always seized the keyboard, so an agent moving worktree mid-review put your next keystrokes in broot; and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. Probed micro/broot for title escapes — neither sets one. Added the untested browse→custom path. **221 checks**, the focus one mutant-proven. |
-| T05 | Park/restore the pair instead of killing it | T00, T04 | ⬜ | Heavy. The slot has always held one pane per agent. |
+| T05 | Park/restore the pair instead of killing it | T00, T04 | 🔍 | Built: the pair parks as a unit in one tab, the agent's revdiff parks behind it, and every path (keys, footer clicks, agent switch, prompt cancel, empty-slot rebuild) gives the **same pane ids** back unrelaunched. Tab list reset only on a fresh viewer. **289 checks** (was 221), four mutants each killed by the right assertions. Deviations: geometry is asserted as the ordered calls + the re-imposed `--percent 60` (the stub has no geometry — the 120x15 / 47/72 measurement is T00's); broot's *filter text* surviving a park is asserted nowhere and is one line for T07; `leaveBrowse` now returns `{pane, relaunch}` so both entry points can skip the relaunch; attaching to a browsing agent no longer takes focus into the browser (a restored pair leaves it in the fleet pane, like every other switch); the test stub's `split-pane --move-pane-id` was fixed to join the tab it is split into. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ⬜ | Two independent heals: never rebuild the pair to fix one half. |
 | T07 | Verified by hand with the user | T03, T06 | ⬜ | Cannot be closed by any test. The session waits for the answer. |
 
@@ -100,7 +107,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty)* — T04 is closed. The next thing to review is **T05**, once it is built.
+**Review queue:** **T05** — built 2026-08-29, awaiting a session that did not write it.
 
 ## Blocked on the user
 

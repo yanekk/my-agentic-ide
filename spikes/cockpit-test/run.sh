@@ -131,8 +131,14 @@ case "$sub" in
     ;;
   split-pane)
     moved=$(flag --move-pane-id "$@")
-    if [ -n "$moved" ]; then                       # bring a parked pane back
-      awk -v p="$moved" '{ if ($1 == p) print $1, 0, $3; else print }' "$PANESTATE" > "$PANESTATE.tmp"
+    if [ -n "$moved" ]; then                       # move an existing pane
+      # It joins the tab of the pane it is split INTO. Usually that is the cockpit
+      # tab (a parked pane coming back), but the browse pair parks as a unit by
+      # splitting the viewer in beside its ALREADY-PARKED browser, which lands both
+      # in that browser's tab -- the one call that makes the pair one tab and not
+      # two (T05, spikes/browse-mode/RESULTS.md 1).
+      into=$(awk -v p="$(flag --pane-id "$@")" '$1 == p { print $2 }' "$PANESTATE")
+      awk -v p="$moved" -v t="${into:-0}" '{ if ($1 == p) print $1, t, $3; else print }' "$PANESTATE" > "$PANESTATE.tmp"
       rewrite
       printf '%s\n' "$moved"
     else
@@ -270,6 +276,26 @@ check() {  # check <description> <pattern> <file>
 refute() {
   if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else echo "  ok   $1"; fi
 }
+# same <description> <got> <want>: an exact value, for the ids a park has to give
+# back unchanged. `check` would pass on a substring, and pane ids are substrings of
+# one another (31 is inside 131).
+same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+# Which tab a pane sits in, straight out of the stub's pane table: 0 is the cockpit
+# tab (in a slot), anything else is a park, and empty means the pane is GONE. That
+# distinction is the whole of T05 -- a parked half is alive and off screen, a killed
+# one is not coming back.
+pane_tab() { awk -v p="$1" '$1 == p { print $2 }' "$PANESTATE"; }
+parked() {   # parked <description> <pane>
+  local t; t=$(pane_tab "$2")
+  if [ -n "$t" ] && [ "$t" != 0 ]; then echo "  ok   $1"
+  else echo "  FAIL $1"; echo "       pane $2 is in tab [${t:-gone}], expected a park"; fail=1; fi
+}
+in_slot() {  # in_slot <description> <pane>
+  local t; t=$(pane_tab "$2")
+  if [ "$t" = 0 ]; then echo "  ok   $1"
+  else echo "  FAIL $1"; echo "       pane $2 is in tab [${t:-gone}], expected the cockpit tab"; fail=1; fi
+}
+
 # before <description> <earlier> <later> <file>: both present, in that order. The
 # browse-mode pane dances are ORDERED -- split the incoming occupant in, dispose of
 # the outgoing one afterwards -- and a plain grep passes just as happily backwards,
@@ -875,8 +901,21 @@ echo "== 11. ⌥[ from uncommitted lands on BROWSE and launches both halves =="
 # must not open the custom-range prompt on the way: that is keyed on the transition
 # into `custom` specifically.
 DP="$(pane_key diff)"
+# Entering browse moves the pane revdiff is in out from under it, so it must not
+# happen with a half-written annotation on screen -- the same rule that stops a
+# mode switch typing into the editor, applied to a pane about to be parked.
+echo "$DP" > "$EDITING"
 : > "$CALLS"
 echo "$DP" > "$ACTIVE"                    # focus the diff pane
+echo prev >> "$T/state/cmd"
+nap 3
+check  "browse is refused while the annotation editor is open" \
+                                                  "not entering browse for abc12345" "$T/daemon.log"
+check  "...so the mode is untouched"              '"diffMode":"uncommitted"' "$T/state/terminals.json"
+refute "...and nothing was split off the slot"    "split-pane" "$CALLS"
+: > "$EDITING"
+
+: > "$CALLS"
 echo prev >> "$T/state/cmd"
 nap 3
 
@@ -884,14 +923,18 @@ check  "the mode is now browse"                   '"diffMode":"browse"' "$T/stat
 refute "cycling into browse opens no ref prompt"  "cockpit-custom-prompt.mjs" "$CALLS"
 BR="$(pane_key diff)"; VW="$(pane_key viewer)"
 check  "the BROWSER was split into the slot"      "--top --percent 50 --pane-id $DP" "$CALLS"
-check  "...and the pane that held the slot disposed of afterwards, so it inherits it" \
+check  "...and the revdiff pane PARKED afterwards, so the browser inherits the slot" \
+                                                  "move-pane-to-new-tab --pane-id $DP" "$CALLS"
+refute "...never killed: browse is passed through, not arrived at" \
                                                   "kill-pane --pane-id $DP" "$CALLS"
+parked "...so revdiff is still alive, in a tab of its own" "$DP"
+check  "...and it says so"                        "parked diff pane $DP for abc12345 while it browses" "$T/daemon.log"
 before "...in that order, or the browser comes back at half width" \
-       "--top --percent 50 --pane-id $DP" "kill-pane --pane-id $DP" "$CALLS"
+       "--top --percent 50 --pane-id $DP" "move-pane-to-new-tab --pane-id $DP" "$CALLS"
 check  "the VIEWER was split off the browser's right at 60%" \
                                                   "--right --percent 60 --pane-id $BR" "$CALLS"
 before "...only once the browser held the whole slot (60% of half a slot is not 60%)" \
-       "kill-pane --pane-id $DP" "--right --percent 60 --pane-id $BR" "$CALLS"
+       "move-pane-to-new-tab --pane-id $DP" "--right --percent 60 --pane-id $BR" "$CALLS"
 check  "broot launched, with the cockpit's verb file FIRST in the --conf chain" \
                                                   "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
 check  "micro launched read-only, with NO file argument and no review file" \
@@ -965,14 +1008,24 @@ echo next >> "$T/state/cmd"               # browse -> uncommitted (browse is las
 nap 3
 check  "the keys cycled the MODE with the browser focused" \
                                                   '"diffMode":"uncommitted"' "$T/state/terminals.json"
-check  "the browser was disposed of first, so the viewer inherited the slot" \
-                                                  "kill-pane --pane-id $BR" "$CALLS"
-check  "revdiff's pane was split into the VIEWER" "--top --percent 50 --pane-id $VW" "$CALLS"
-before "...after the browser went, not before"    "kill-pane --pane-id $BR" "--top --percent 50 --pane-id $VW" "$CALLS"
-check  "and the viewer was disposed of last"      "kill-pane --pane-id $VW" "$CALLS"
-before "...after the incoming pane was split into it" \
-       "--top --percent 50 --pane-id $VW" "kill-pane --pane-id $VW" "$CALLS"
-check  "revdiff came back in the slot"            "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
+check  "the browser was PARKED first, so the viewer inherited the slot" \
+                                                  "move-pane-to-new-tab --pane-id $BR" "$CALLS"
+check  "the agent's OWN parked revdiff was split back into the viewer" \
+                                                  "--top --percent 50 --pane-id $VW --move-pane-id $DP" "$CALLS"
+before "...after the browser went, not before" \
+       "move-pane-to-new-tab --pane-id $BR" "--top --percent 50 --pane-id $VW" "$CALLS"
+check  "and the viewer parked LAST, beside its browser, at the same 60%" \
+                                                  "--right --percent 60 --pane-id $BR --move-pane-id $VW" "$CALLS"
+before "...only after the incoming pane was split into it, or the slot is empty" \
+       "--top --percent 50 --pane-id $VW" "--right --percent 60 --pane-id $BR --move-pane-id $VW" "$CALLS"
+# The whole task in four lines: nothing died, and revdiff came back as it was.
+refute "NEITHER half was killed on the way past"  "kill-pane" "$CALLS"
+parked "the browser is parked, still running"     "$BR"
+parked "...and the viewer with it"                "$VW"
+same   "the slot holds the SAME revdiff pane as before browse" "$(pane_key diff)" "$DP"
+in_slot "...and it really is back in the cockpit tab" "$DP"
+refute "revdiff was NOT relaunched into it"       "revdiff --wrap" "$CALLS"
+check  "...it simply came back from its park"     "came back from its park in uncommitted mode" "$T/daemon.log"
 check  "all three viewer keys were cleared together" \
                                                   '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
 
@@ -983,7 +1036,18 @@ echo "$(pane_key diff)" > "$ACTIVE"
 echo prev >> "$T/state/cmd"               # uncommitted -> browse again
 nap 3
 BR2="$(pane_key diff)"; VW2="$(pane_key viewer)"
-check "back in browse with a fresh pair"          '"diffMode":"browse"' "$T/state/terminals.json"
+check "back in browse"                            '"diffMode":"browse"' "$T/state/terminals.json"
+# The round trip, and the reason tabs are worth having: browse is one stop in a
+# four-way cycle, so it is passed through constantly. Two new panes here would mean
+# an empty tab bar and broot back at the top of the tree every time.
+same   "the SAME browser came back, not a new one" "$BR2" "$BR"
+same   "...and the same viewer beside it"          "$VW2" "$VW"
+refute "broot was not relaunched"                  "broot --conf" "$CALLS"
+refute "nor micro"                                 "micro -readonly true" "$CALLS"
+refute "and nothing at all was typed into the browser" "send-text --pane-id $BR2" "$CALLS"
+refute "...nor into the viewer"                    "send-text --pane-id $VW2" "$CALLS"
+check  "the restored browser was moved, not respawned" "--move-pane-id $BR2" "$CALLS"
+check  "...and the viewer split off it at 60% again"   "--right --percent 60 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
 : > "$CALLS"
 echo "$VW2" > "$ACTIVE"                   # the VIEWER holds focus this time
 echo next >> "$T/state/cmd"
@@ -1027,23 +1091,38 @@ cat > "$AGENTS_JSON" <<JSON
  {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
   "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
-VW3="$(pane_key viewer)"
+BRS="$(pane_key diff)"; VWS="$(pane_key viewer)"
 : > "$CALLS"; : > "$ACTIVE"
 echo "second agent" > "$FLEETSTATE"
 nap 4
 check  "the other agent opens in the uncommitted default" \
                                                   '"diffMode":"uncommitted"' "$T/state/terminals.json"
 refute "no browser was launched for it"           "broot --conf" "$CALLS"
-check  "the browsing agent's viewer was disposed of on the way out" \
-                                                  "kill-pane --pane-id $VW3" "$CALLS"
-check  "...and said so"                           "disposed viewer pane $VW3" "$T/daemon.log"
+# Switching away is the case browse is passed through most often of all, so it is
+# the one that must not cost the tabs either.
+check  "the browsing agent's browser was PARKED on the way out" \
+                                                  "move-pane-to-new-tab --pane-id $BRS" "$CALLS"
+check  "...and its viewer parked beside it, in the same tab" \
+                                                  "--right --percent 60 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
+before "...the browser first, so the viewer could hold the slot meanwhile" \
+       "move-pane-to-new-tab --pane-id $BRS" "--right --percent 60 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
+refute "the browser was not killed"               "kill-pane --pane-id $BRS" "$CALLS"
+refute "nor the viewer"                           "kill-pane --pane-id $VWS" "$CALLS"
+parked "the browser is alive, parked"             "$BRS"
+parked "...and so is the viewer"                  "$VWS"
 check  "the viewer keys went with it"             '"viewer":null' "$T/state/panes.json"
+same   "the two are parked TOGETHER, in one tab"  "$(pane_tab "$BRS")" "$(pane_tab "$VWS")"
 
 : > "$CALLS"
 echo "test agent" > "$FLEETSTATE"
 nap 4
 check "the browsing agent kept its OWN browse mode" '"diffMode":"browse"' "$T/state/terminals.json"
-check "and its pair was rebuilt on return"          "entered browse for abc12345" "$T/daemon.log"
+same  "the same browser came back to the slot"      "$(pane_key diff)" "$BRS"
+same  "...and the same viewer"                      "$(pane_key viewer)" "$VWS"
+check "...moved, not respawned"                     "--move-pane-id $BRS" "$CALLS"
+check "...with the viewer split off it at 60%"      "--right --percent 60 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
+refute "neither half was relaunched"                "broot --conf" "$CALLS"
+refute "...nor micro"                               "micro -readonly true" "$CALLS"
 check "panes.json names a viewer again"             '"viewerAgent":"abc12345"' "$T/state/panes.json"
 
 echo
@@ -1059,17 +1138,27 @@ echo "== 11i. clicking the footer's Browse label =="
 # and must not depend on which pane is focused.
 echo "test agent" > "$FLEETSTATE"
 nap 4
+BRC="$(pane_key diff)"; VWC="$(pane_key viewer)"
 : > "$CALLS"; : > "$ACTIVE"
 echo diff-uncommitted >> "$T/state/cmd"   # leave browse by clicking, not by key
 nap 3
 check "clicking Uncommitted left browse"          '"diffMode":"uncommitted"' "$T/state/terminals.json"
 check "...and the pair went with it"              "left browse for abc12345" "$T/daemon.log"
+# How you left browse must not decide whether the tabs survive it: the click path
+# is a different function from the key path and would happily kill what the keys
+# park.
+refute "...parked, not killed -- the browser"     "kill-pane --pane-id $BRC" "$CALLS"
+refute "...nor the viewer"                        "kill-pane --pane-id $VWC" "$CALLS"
+parked "the clicked-away browser is still alive"  "$BRC"
+parked "...and its viewer"                        "$VWC"
 
 : > "$CALLS"
 echo diff-browse >> "$T/state/cmd"
 nap 3
 check "clicking Browse switched, unfocused"       '"diffMode":"browse"' "$T/state/terminals.json"
-check "...and launched the pair"                  "broot --conf" "$CALLS"
+same  "...and brought the SAME browser back"      "$(pane_key diff)" "$BRC"
+same  "...and the same viewer"                    "$(pane_key viewer)" "$VWC"
+refute "...without relaunching broot"             "broot --conf" "$CALLS"
 check "...publishing the viewer with it"          '"viewerAgent":"abc12345"' "$T/state/panes.json"
 
 : > "$CALLS"
@@ -1091,7 +1180,7 @@ nap 3
 SLOT4="$(pane_key diff)"
 check  "the mode is now custom"                   '"diffMode":"custom"' "$T/state/terminals.json"
 check  "the ref prompt opened"                    "cockpit-custom-prompt.mjs" "$CALLS"
-check  "...in the FRESH slot pane the pair handed over" \
+check  "...in the slot pane the pair handed back" \
                                                   "send-text --pane-id $SLOT4" "$CALLS"
 refute "...not into the browser, which is gone"   "send-text --pane-id $BR4" "$CALLS"
 refute "...nor into the viewer"                   "send-text --pane-id $VW4" "$CALLS"
@@ -1106,7 +1195,9 @@ printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
 nap 3
 check  "cancel reverted to browse"                '"diffMode":"browse"' "$T/state/terminals.json"
-check  "...and rebuilt the pair"                  "broot --conf" "$CALLS"
+same   "...and brought the same browser back"     "$(pane_key diff)" "$BR4"
+same   "...and the same viewer"                   "$(pane_key viewer)" "$VW4"
+refute "...without relaunching broot"             "broot --conf" "$CALLS"
 check  "...publishing the viewer again"           '"viewerAgent":"abc12345"' "$T/state/panes.json"
 refute "...rather than putting a diff in the slot" "revdiff --wrap" "$CALLS"
 
@@ -1146,6 +1237,111 @@ BR6="$(pane_key diff)"
 check "the pair moved again"                      "--cwd $MOVED6 --" "$CALLS"
 check "...and focus came with it, since it was in the slot" \
                                                   "activate-pane --pane-id $BR6" "$CALLS"
+
+echo
+echo "== 11l. two agents BOTH in browse: the right pair in the slot, four panes parked =="
+# Each agent now owns THREE panes in the diff slot's world -- its revdiff, its
+# browser and its viewer -- and only one pair may be on screen. Getting this wrong
+# swaps one agent's browser in beside the other agent's viewer.
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED6","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
+ {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
+  "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+# Which pane the daemon last parked as an agent's revdiff -- the third pane of the
+# three, the one no published key names while its pair is in the slot.
+last_parked_diff() { grep -o "parked diff pane [0-9]* for $1" "$T/daemon.log" | tail -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/'; }
+BRA="$(pane_key diff)"; VWA="$(pane_key viewer)"; DPA="$(last_parked_diff abc12345)"
+: > "$CALLS"; : > "$ACTIVE"
+echo "second agent" > "$FLEETSTATE"
+nap 4
+DPB="$(pane_key diff)"                    # the second agent's revdiff, before it browses
+: > "$CALLS"
+echo diff-browse >> "$T/state/cmd"
+nap 3
+BRB="$(pane_key diff)"; VWB="$(pane_key viewer)"
+check  "the second agent got a pair of ITS OWN"        "broot --conf" "$CALLS"
+same   "...a different browser from the first agent's" \
+       "$([ "$BRB" = "$BRA" ] && echo shared || echo separate)" "separate"
+parked "...and its own revdiff parked behind it"       "$DPB"
+# Long enough for several 1s healer ticks and a reap round: a parked half is alive
+# and off screen, and nothing may reach for it. NOT scaled -- the point is the
+# healer's own cadence.
+sleep 4
+parked "the first agent's browser is untouched, parked" "$BRA"
+parked "...and its viewer"                             "$VWA"
+parked "...and its revdiff, parked behind its pair"    "$DPA"
+refute "nothing was typed into the parked browser"     "send-text --pane-id $BRA" "$CALLS"
+refute "...nor into the parked viewer"                 "send-text --pane-id $VWA" "$CALLS"
+
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"
+nap 4
+same   "the first agent's own browser is back in the slot" "$(pane_key diff)" "$BRA"
+same   "...beside its own viewer, not the other agent's"   "$(pane_key viewer)" "$VWA"
+check  "the second agent's browser parked"                 "move-pane-to-new-tab --pane-id $BRB" "$CALLS"
+check  "...with its viewer beside it"                      "--right --percent 60 --pane-id $BRB --move-pane-id $VWB" "$CALLS"
+refute "no pane was killed switching between two pairs"    "kill-pane" "$CALLS"
+parked "the second agent's browser is alive, parked"       "$BRB"
+parked "...and its viewer"                                 "$VWB"
+parked "...and its revdiff"                                "$DPB"
+check  "the viewer keys name the FIRST agent again"        '"viewerAgent":"abc12345"' "$T/state/panes.json"
+
+echo
+echo "== 11m. an EMPTY slot is rebuilt full width, then handed a whole pair =="
+# The slot's pane can die under us (exit the shell revdiff is in). Rebuilding it
+# needs the fleet pane alone in its row, so the terminal steps aside and comes
+# back -- and what is put into the placeholder afterwards is now TWO panes.
+: > "$CALLS"; : > "$ACTIVE"
+echo "second agent" > "$FLEETSTATE"
+nap 4
+echo diff-uncommitted >> "$T/state/cmd"   # the second agent stops browsing
+nap 3
+DEAD="$(pane_key diff)"
+: > "$CALLS"
+awk -v p="$DEAD" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+echo "test agent" > "$FLEETSTATE"         # ...and its slot pane dies as we leave it
+nap 6
+check  "the slot was rebuilt"                     "rebuilt the diff slot" "$T/daemon.log"
+check  "the full-width split came off the fleet pane" "--top --percent 42 --pane-id 20" "$CALLS"
+same   "the browsing agent's browser took the placeholder" "$(pane_key diff)" "$BRA"
+same   "...and its viewer came back beside it"             "$(pane_key viewer)" "$VWA"
+refute "neither half was relaunched into the rebuilt slot"  "broot --conf" "$CALLS"
+refute "...nor micro"                                       "micro -readonly true" "$CALLS"
+
+echo
+echo "== 11n. the viewer tab list: kept across a park, reset by a fresh launch =="
+# The list is the only record of what micro has open -- it cannot be asked. A
+# restored viewer still has every tab, so the list must survive with it; a viewer
+# started from scratch has none, so a leftover list would make the next push a
+# `tabswitch` onto a tab that is not there and jump to the wrong file silently.
+printf '{"abc12345":["bin/a.mjs"]}\n' > "$T/state/viewer-tabs.json"
+: > "$CALLS"; : > "$ACTIVE"
+echo diff-uncommitted >> "$T/state/cmd"
+nap 3
+echo diff-browse >> "$T/state/cmd"
+nap 3
+same  "the same viewer came back from the park"   "$(pane_key viewer)" "$VWA"
+check "...so the list of what was pushed into it is untouched" \
+                                                  "bin/a.mjs" "$T/state/viewer-tabs.json"
+
+# A worktree migration is the one thing that REPLACES the pair: broot would
+# otherwise be rooted in a directory the agent has left. Not scaled -- the
+# migration cooldown and throttle have to expire (same reasoning as 9c).
+MOVED7="$T/moved7"; mkrepo "$MOVED7"
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED7","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
+ {"pid":2,"id":"def67890","cwd":"$WT2","kind":"background",
+  "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+sleep 6
+check  "the pair was rebuilt in the new worktree"  "--cwd $MOVED7 --" "$CALLS"
+check  "...micro started fresh with it"            "micro -readonly true" "$CALLS"
+check  "...so that agent's tab list was reset"     "reset the viewer tab list for abc12345" "$T/daemon.log"
+refute "...and the stale tabs are gone"            "bin/a.mjs" "$T/state/viewer-tabs.json"
 
 echo
 echo "== 12. the footer draws -- and clicks -- a fourth label =="
@@ -1215,7 +1411,6 @@ click() {  # click <label>: send a left-click at that label's column, echo the v
   pkill -f "$CLICKER" 2>/dev/null
   tr -d '\n' < "$SD/cmd"
 }
-same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
 
 same "clicking Browse appends diff-browse"        "$(click Browse)" "diff-browse"
 # The three that were already there must keep their columns and their hit zones: a
