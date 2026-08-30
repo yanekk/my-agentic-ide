@@ -61,10 +61,14 @@ lineno() { grep -nF -- "$2" "$1" | head -1 | cut -d: -f1; }
 leftof() { node -e 'const fs=require("node:fs");process.stdout.write(fs.readFileSync(process.argv[1],"utf8").split("\n").map((l)=>l.split("\u2502")[0]).join("\n"))' "$1"; }
 
 fail=0
-check()  { if grep -qF -- "$2" "$3"; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       expected: $2"; fail=1; fi; }
-refute() { if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; echo "       did not expect: $2"; fail=1; else echo "  ok   $1"; fi; }
-same()   { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
-gt()     { if [ "${2:-0}" -gt "${3:-0}" ] 2>/dev/null; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$2] > [$3]"; fail=1; fi; }
+pass=0
+# Quiet by default: a passing check just bumps the count. VERBOSE=1 restores the
+# per-check "ok" listing. Failures always print in full.
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
+check()  { if grep -qF -- "$2" "$3"; then okline "$1"; else echo "  FAIL $1"; echo "       expected: $2"; fail=1; fi; }
+refute() { if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; echo "       did not expect: $2"; fail=1; else okline "$1"; fi; }
+same()   { if [ "$2" = "$3" ]; then okline "$1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+gt()     { if [ "${2:-0}" -gt "${3:-0}" ] 2>/dev/null; then okline "$1"; else echo "  FAIL $1"; echo "       want [$2] > [$3]"; fail=1; fi; }
 
 echo
 echo "== 1. the command exists only inside a cockpit =="
@@ -385,5 +389,5 @@ refute "...and the pane painted at all"                  "NEVER PAINTED" "$T/out
 check "...from the watch, not the 2s repaint"            "repainted in" "$T/out"
 
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; fi
 exit "$fail"

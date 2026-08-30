@@ -264,9 +264,14 @@ trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
 sleep 1   # node startup is fixed overhead -- not scaled by SPEED
 
 fail=0
+pass=0
+# Quiet by default: a passing check just bumps the count. VERBOSE=1 restores the
+# per-check "ok" listing (~950 lines, ~13k tokens across the suites -- that noise
+# is why it is off unless asked for). Failures always print in full.
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
 check() {  # check <description> <pattern> <file>
   if grep -qF -- "$2" "$3"; then
-    echo "  ok   $1"
+    okline "$1"
   else
     echo "  FAIL $1"
     echo "       expected to find: $2"
@@ -274,12 +279,12 @@ check() {  # check <description> <pattern> <file>
   fi
 }
 refute() {
-  if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else echo "  ok   $1"; fi
+  if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else okline "$1"; fi
 }
 # same <description> <got> <want>: an exact value, for the ids a park has to give
 # back unchanged. `check` would pass on a substring, and pane ids are substrings of
 # one another (31 is inside 131).
-same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+same() { if [ "$2" = "$3" ]; then okline "$1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
 # Which tab a pane sits in, straight out of the stub's pane table: 0 is the cockpit
 # tab (in a slot), anything else is a park, and empty means the pane is GONE. That
 # distinction is the whole of T05 -- a parked half is alive and off screen, a killed
@@ -287,12 +292,12 @@ same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo 
 pane_tab() { awk -v p="$1" '$1 == p { print $2 }' "$PANESTATE"; }
 parked() {   # parked <description> <pane>
   local t; t=$(pane_tab "$2")
-  if [ -n "$t" ] && [ "$t" != 0 ]; then echo "  ok   $1"
+  if [ -n "$t" ] && [ "$t" != 0 ]; then okline "$1"
   else echo "  FAIL $1"; echo "       pane $2 is in tab [${t:-gone}], expected a park"; fail=1; fi
 }
 in_slot() {  # in_slot <description> <pane>
   local t; t=$(pane_tab "$2")
-  if [ "$t" = 0 ]; then echo "  ok   $1"
+  if [ "$t" = 0 ]; then okline "$1"
   else echo "  FAIL $1"; echo "       pane $2 is in tab [${t:-gone}], expected the cockpit tab"; fail=1; fi
 }
 
@@ -305,7 +310,7 @@ before() {
   a=$(grep -nF -- "$2" "$4" | head -1 | cut -d: -f1)
   b=$(grep -nF -- "$3" "$4" | head -1 | cut -d: -f1)
   if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then
-    echo "  ok   $1"
+    okline "$1"
   else
     echo "  FAIL $1"
     echo "       expected [$2] (line ${a:-none}) before [$3] (line ${b:-none})"
@@ -1423,5 +1428,5 @@ same "clicking Uncommitted Changes still appends diff-uncommitted" \
 fi
 
 echo
-if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
+if [ "$fail" = 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
 exit $fail

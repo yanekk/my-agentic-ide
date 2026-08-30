@@ -38,8 +38,13 @@ real_snapshot() {
 BEFORE_REAL="$(real_snapshot)"
 
 fail=0
-check()  { if grep -qF -- "$2" "$3"; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       expected: $2"; fail=1; fi; }
-same()   { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+pass=0
+# Quiet by default: a passing check just bumps the count. VERBOSE=1 restores the
+# per-check "ok" listing. Failures always print in full. (The node suites read the
+# same VERBOSE via harness.mjs.)
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
+check()  { if grep -qF -- "$2" "$3"; then okline "$1"; else echo "  FAIL $1"; echo "       expected: $2"; fail=1; fi; }
+same()   { if [ "$2" = "$3" ]; then okline "$1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
 
 # --- the node suites -------------------------------------------------------
 # One fresh state dir each, so a suite can never inherit another's files. Later
@@ -159,5 +164,5 @@ same "...while it is not a command outside one" \
      "$(PATH="/usr/bin:/bin" command -v agenda >/dev/null 2>&1 && echo found || echo absent)" "absent"
 
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suites counted above)"; else echo "FAILURES"; fi
 exit "$fail"
