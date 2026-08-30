@@ -81,6 +81,12 @@ green** — the flake moves with the load, never with the code. `notes-test` did
 **alone** for the same reason. `browse-test` needs the **broot binary** and `script(1)`; so does
 `cockpit-test` now, for the footer-click checks.
 
+**All four suites are quiet by default** (main's `282d075`, cherry-picked here, plus the same
+convention applied to `browse-test`). A green run prints one line — `ALL PASS (289 checks)` —
+instead of a line per assertion; failures still print in full. `VERBOSE=1` restores the old
+listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentinels: **a waiter
+must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
+
 **Last updated:** 2026-08-29
 **Next `pir-work` will:** **review T05** — the pair park/restore. Worth the reviewer's attention:
 the three-map state (`diffs` / `browsePairs` / `parkedDiffs`) and whether every path keeps them
