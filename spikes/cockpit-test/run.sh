@@ -345,11 +345,23 @@ printf '## a.txt:1 (+)\nfirst flush\n## b.txt:2 (+)\nsecond flush\n' > "$T/state
     && mv "$T/state/tmp2.$$" "$T/state/review-abc12345.md"
 nap 1.5
 check "second flush injected after rename"       "second flush" "$CALLS"
+# Sending a review now ENDS it (see resetDiffAfterReview): the daemon empties the
+# handoff file and relaunches the diff clean. That relaunch drops the annotations
+# revdiff holds in memory and re-reads HEAD, which is what lets the agent's next
+# commit refresh the diff -- a handoff file left full used to freeze it after one
+# send, showing committed work as uncommitted until the next re-attach.
+check "the diff is reset (relaunched clean) on send" \
+      "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+[ -s "$T/state/review-abc12345.md" ] \
+    && { echo "  FAIL the handoff file was not emptied on send"; fail=1; } \
+    || okline "handoff file emptied on send"
 
 : > "$CALLS"
-touch "$T/state/review-abc12345.md"        # same content, new mtime = new gesture
+touch "$T/state/review-abc12345.md"        # bare re-touch: the reset already cleared it
 nap 1.5
-check "re-flushing identical content injects"    "second flush" "$CALLS"
+# "Press O twice to re-send the same review" is deliberately gone: a sent review
+# leaves no annotations, so re-touching the now-empty handoff file injects nothing.
+refute "a spent review does not re-inject"       "second flush" "$CALLS"
 
 echo
 echo "== 4. switch A→B with NO log line: the pane itself is the signal =="

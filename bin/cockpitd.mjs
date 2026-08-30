@@ -1424,6 +1424,54 @@ function injectReview(text) {
 }
 
 /**
+ * Sending a review (`O`) ends the review for that diff: drop the annotations and
+ * let the diff go live again, so the agent's next commit refreshes it.
+ *
+ * Two separate things kept a commit from ever refreshing after a review was sent,
+ * and BOTH have to be undone here:
+ *
+ *   1. The handoff file stayed non-empty. reloadDiff reads it as "a review is in
+ *      flight" and skips the reload, and nothing cleared it until the next attach
+ *      -- so one flush froze the diff until you left and came back. Empty it.
+ *   2. revdiff still held the annotations in memory. Even forcing a reload past (1)
+ *      would land on revdiff's own "discard? y/n" -- a prompt left unanswered on a
+ *      parked, off-screen pane. revdiff has no "clear but stay" action (only `q`
+ *      quit and `Q` discard_quit), so the only way to make it let go is to relaunch
+ *      it (`q` + start). The relaunch also re-reads HEAD, and starts with zero
+ *      annotations since we pass `-o` (write) not `--annotations` (preload).
+ *
+ * Pinned annotations cannot survive a refresh anyway -- the lines they hang on move
+ * the moment the diff reloads -- so "clear on send" is the only coherent behaviour.
+ * This deliberately drops the old "press O twice to re-send the same review": after
+ * a send there are no annotations left to re-send.
+ *
+ * Held under the reconcile lock exactly like diffModeCommand's relaunch: `q` drops
+ * the pane to a shell for ~1s before the new revdiff paints, and without the lock
+ * healQuitDiff would see that shell and race its own relaunch in.
+ */
+async function resetDiffAfterReview(attempt = 0) {
+  if (!attached) return;
+  if (reconciling) {
+    if (attempt < 20) setTimeout(() => resetDiffAfterReview(attempt + 1), 100);
+    return;
+  }
+  reconciling = true;
+  try {
+    if (!attached) return;                        // switched away while we waited
+    const { jobId, worktree, reviewFile } = attached;
+    const pane = diffs.get(jobId);
+    if (pane === undefined) return;
+    // Clear the handoff file so reloadDiff stops treating this spent review as one
+    // still in flight. The write re-triggers watchAnnotations' dir watch, but empty
+    // content is ignored there (!cur.trim()), so there is no re-inject loop.
+    try { fs.writeFileSync(reviewFile, ""); } catch {}
+    await relaunchDiff(jobId, pane, worktree, reviewFile);
+  } finally {
+    reconciling = false;
+  }
+}
+
+/**
  * Watch for review flushes (`O` in revdiff).
  *
  * Two things here are deliberate, and both were learned by getting them wrong:
@@ -1435,12 +1483,13 @@ function injectReview(text) {
  *    forever. Measured: inode 32065744 → 32065765 across one flush. Directory
  *    watches survive the replacement.
  *
- * 2. **Trigger on write identity, not content.** `O` is an explicit "send this to
- *    the agent" gesture, so pressing it twice must inject twice even if nothing
- *    changed -- the reviewer may have cleared the prompt box and want it back.
- *    Deduplicating on content silently swallows that. Keying on mtime+size
- *    instead collapses the several filesystem events of a single write while
- *    still treating a second flush as a second request.
+ * 2. **Trigger on write identity, not content.** A single flush lands as several
+ *    filesystem events; keying on mtime+size collapses them into one inject, while
+ *    a genuinely new flush (new content, hence a new mtime) still counts as a fresh
+ *    request. Content-based dedup would instead swallow a legitimate re-flush that
+ *    happened to reproduce earlier text. (Note a *sent* review now clears its own
+ *    annotations -- see resetDiffAfterReview -- so back-to-back re-sends of the
+ *    same set no longer arise; the dedup earns its keep collapsing one write.)
  */
 function watchAnnotations(file) {
   try { fs.writeFileSync(file, ""); } catch {}
@@ -1460,6 +1509,10 @@ function watchAnnotations(file) {
     if (!cur.trim() || id === lastWrite) return;
     lastWrite = id;
     injectReview(composePrompt(cur));
+    // Sending the review ENDS it: hand the diff back to auto-reload so the agent's
+    // next commit refreshes it. See resetDiffAfterReview for why this is a relaunch
+    // and not just a flag flip.
+    resetDiffAfterReview();
   };
 
   const w = fs.watch(DIR, (_event, changed) => {
@@ -1476,16 +1529,22 @@ function watchAnnotations(file) {
  * Two things must be true before `R` is sent, and only one of them was needed
  * back when the diff pane was rebuilt on every switch:
  *
- * 1. **Nothing flushed yet.** `R` drops annotations, so the diff has to stop
- *    moving the moment you start commenting.
+ * 1. **No review mid-flight.** The handoff file being non-empty means a flush has
+ *    just landed and is being injected; reloading on top of that would race it.
+ *    This is now a brief window only -- resetDiffAfterReview empties the file the
+ *    moment the review is injected -- where it once stayed full until the next
+ *    attach and froze the diff after a single send (the bug this guard's old
+ *    persistence caused). It is kept because the window, though small, is real.
  * 2. **The annotation editor is not open.** revdiff reads every keystroke as
  *    comment text while it is, so `R` would be typed into the comment as a
  *    literal "R" -- unnoticed, in a pane that is not on screen.
  *
- * With a *saved* annotation and no editor open, `R` is safe by revdiff's own
- * doing: it asks "Annotations will be dropped -- press y to confirm", a second
- * `R` counts as "any other key" and cancels, and the annotation survives. So
- * prompts cannot pile up in a parked pane. Measured.
+ * A sent review leaves revdiff holding no annotations (resetDiffAfterReview
+ * relaunches it clean), so `R` reloads without hitting revdiff's "discard? y/n".
+ * And an *unsent* saved annotation is safe by revdiff's own doing: it asks
+ * "Annotations will be dropped -- press y to confirm", a second `R` counts as "any
+ * other key" and cancels, and the annotation survives. So prompts cannot pile up
+ * in a parked pane. Measured.
  */
 function reloadDiff(jobId, reviewFile) {
   const pane = diffs.get(jobId);
