@@ -300,6 +300,14 @@ in_slot() {  # in_slot <description> <pane>
   if [ "$t" = 0 ]; then okline "$1"
   else echo "  FAIL $1"; echo "       pane $2 is in tab [${t:-gone}], expected the cockpit tab"; fail=1; fi
 }
+# gone <description> <pane>: out of the mux altogether. A reap has to leave NOTHING
+# behind -- a pane still sitting in some tab is one nobody can reach again, for the
+# life of the window.
+gone() {
+  local t; t=$(pane_tab "$2")
+  if [ -z "$t" ]; then okline "$1"
+  else echo "  FAIL $1"; echo "       pane $2 is still in tab [$t], expected it killed"; fail=1; fi
+}
 
 # before <description> <earlier> <later> <file>: both present, in that order. The
 # browse-mode pane dances are ORDERED -- split the incoming occupant in, dispose of
@@ -316,6 +324,61 @@ before() {
     echo "       expected [$2] (line ${a:-none}) before [$3] (line ${b:-none})"
     fail=1
   fi
+}
+# before_last: the same, on the LAST occurrence of each. The daemon's log is
+# cumulative and this suite reaps the same agent twice, so `before` would keep
+# answering about the first reap however the second one behaved.
+before_last() {
+  local a b
+  a=$(grep -nF -- "$2" "$4" | tail -1 | cut -d: -f1)
+  b=$(grep -nF -- "$3" "$4" | tail -1 | cut -d: -f1)
+  if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then
+    okline "$1"
+  else
+    echo "  FAIL $1"
+    echo "       expected [$2] (line ${a:-none}) before [$3] (line ${b:-none})"
+    fail=1
+  fi
+}
+
+# retitle <pane> <title>: what WezTerm reports for a pane's foreground process.
+# Setting it to `sh` is how a test says "the user quit the program in that pane" --
+# for the two browse halves it is the ONLY signal, since neither draws a frame.
+retitle() {
+  awk -v p="$1" -v t="$2" '{ if ($1 == p) print $1, $2, t; else print }' \
+      "$PANESTATE" > "$PANESTATE.rt" && mv "$PANESTATE.rt" "$PANESTATE"
+}
+# waitfor <pattern> <file> <seconds>: poll until it shows up. Where the daemon
+# announces what it did, waiting for the announcement beats sleeping a guess --
+# and a wait that ENDS at a known moment is what makes the cooldown checks below
+# measure a window rather than a race.
+waitfor() {
+  local i=0 lim
+  lim=$(awk -v s="$3" 'BEGIN{ printf "%d", s * 10 }')
+  while [ "$i" -lt "$lim" ]; do
+    grep -qF -- "$1" "$2" && return 0
+    sleep 0.1; i=$((i + 1))
+  done
+  return 1
+}
+# The daemon's log is cumulative, so a heal that has happened once already makes
+# `check` pass without the daemon doing anything at all. Where the same line is
+# expected AGAIN, the assertion is on its COUNT against a baseline taken first.
+countof() { grep -cF -- "$1" "$2"; }
+grew() {     # grew <description> <pattern> <file> <baseline>
+  local n; n=$(countof "$2" "$3")
+  if [ "${n:-0}" -gt "$4" ]; then okline "$1"
+  else echo "  FAIL $1"; echo "       [$2] appears $n times, expected more than $4"; fail=1; fi
+}
+waitmore() { # waitmore <pattern> <file> <baseline> <seconds>
+  local i=0 lim n
+  lim=$(awk -v s="$4" 'BEGIN{ printf "%d", s * 10 }')
+  while [ "$i" -lt "$lim" ]; do
+    n=$(countof "$1" "$2")
+    [ "${n:-0}" -gt "$3" ] && return 0
+    sleep 0.1; i=$((i + 1))
+  done
+  return 1
 }
 
 echo
@@ -989,19 +1052,94 @@ refute "nothing was typed into the viewer"        "send-text --pane-id $VW" "$CA
 refute "no revdiff was reinstated over either half" "revdiff --wrap" "$CALLS"
 
 echo
-echo "== 11c. a half that really was quit still reads as a shell =="
+echo "== 11c. a quit VIEWER is healed in its own half, and nothing else is touched =="
 # micro quit with Ctrl+Q: the pane falls back to a shell prompt and its title with
-# it. Healing it is T06; being able to SEE it is this task's half of the bargain.
+# it. The whole of T06 is that the answer is micro in THAT pane -- not a rebuilt
+# pair, which would throw away broot's place in the tree to fix a half that was
+# never broken. The stub retitles the pane back to `micro` when the command lands,
+# so a successful heal closes its own loop.
+printf '{"abc12345":["bin/kept-across-the-heal.mjs"]}\n' > "$T/state/viewer-tabs.json"
 : > "$CALLS"
-awk -v p="$VW" '{ if ($1 == p) print $1, $2, "sh"; else print }' "$PANESTATE" > "$PANESTATE.b" \
-    && mv "$PANESTATE.b" "$PANESTATE"
-sleep 3
+retitle "$VW" sh
+# NOT scaled, same reasoning as section 10: the healer's own interval plus the
+# relaunch cooldown have to pass, and a scaled-down margin made the reinstate flaky.
+sleep 5
 check  "the quit half is reported as a shell"     "browse viewer pane $VW for abc12345: shell" "$T/daemon.log"
-refute "...and nothing was typed into it anyway"  "send-text --pane-id $VW" "$CALLS"
-refute "...nor into the browser that was fine"    "send-text --pane-id $BR" "$CALLS"
-# Put it back so the rest of the section sees a healthy pair.
-awk -v p="$VW" '{ if ($1 == p) print $1, $2, "micro"; else print }' "$PANESTATE" > "$PANESTATE.b" \
-    && mv "$PANESTATE.b" "$PANESTATE"
+check  "...and micro was reinstated in that very pane" \
+                                                  "the browse viewer was quit in abc12345; reinstated it in pane $VW" "$T/daemon.log"
+check  "...typed into the viewer's own pane"      "send-text --pane-id $VW" "$CALLS"
+check  "...read-only, in the agent's worktree"    "cd \"$MOVED4\" && micro -readonly true" "$CALLS"
+# The tabs died with the process, so what we believe micro has open has to die too:
+# a leftover list makes the next push a `tabswitch` onto a tab that is not there.
+check  "the agent's tab list was reset with it"   "reset the viewer tab list for abc12345 (healed viewer)" "$T/daemon.log"
+refute "...so nothing is left claiming to be open" "bin/kept-across-the-heal.mjs" "$T/state/viewer-tabs.json"
+# The four ways a heal could overreach, each asserted rather than assumed.
+refute "the healthy browser was not typed into"   "send-text --pane-id $BR" "$CALLS"
+refute "no pane was killed to fix one half"       "kill-pane" "$CALLS"
+refute "...and the slot was not re-split"         "split-pane" "$CALLS"
+refute "the heal never takes the keyboard"        "activate-pane" "$CALLS"
+same   "the viewer keeps its pane id"             "$(pane_key viewer)" "$VW"
+same   "...and the browser keeps its own"         "$(pane_key diff)" "$BR"
+in_slot "both are still in the cockpit tab"       "$VW"
+
+echo
+echo "== 11c'. a quit BROWSER is healed the same way, and the viewer's tabs survive =="
+# The mirror image, and the half where the difference shows: relaunching broot must
+# NOT reset the tab list -- those tabs belong to a micro that never stopped running.
+printf '{"abc12345":["bin/still-open.mjs"]}\n' > "$T/state/viewer-tabs.json"
+: > "$CALLS"
+retitle "$BR" sh
+sleep 5
+check  "the quit browser is reported as a shell"  "browse browser pane $BR for abc12345: shell" "$T/daemon.log"
+check  "...and broot was reinstated in that pane" "the browse browser was quit in abc12345; reinstated it in pane $BR" "$T/daemon.log"
+check  "...typed into the browser's own pane"     "send-text --pane-id $BR" "$CALLS"
+check  "...with the cockpit's verb file first in the --conf chain" \
+                                                  "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
+refute "the healthy viewer was not typed into"    "send-text --pane-id $VW" "$CALLS"
+check  "...and its tab list is untouched"         "bin/still-open.mjs" "$T/state/viewer-tabs.json"
+refute "no pane was killed"                       "kill-pane" "$CALLS"
+refute "...and the slot was not re-split"         "split-pane" "$CALLS"
+same   "the viewer keeps its pane id"             "$(pane_key viewer)" "$VW"
+same   "...and the browser its own"               "$(pane_key diff)" "$BR"
+
+echo
+echo "== 11c''. BOTH halves quit at once: both come back, in the same pass =="
+# The reason the relaunch cooldown is per PANE and not per agent. A single
+# per-agent stamp is set by the first heal, which then reads as "something was just
+# launched for this agent" and silences the second half -- leaving one of the two
+# at a bare prompt with nothing due to re-arm it.
+HEALB="$(countof "reinstated it in pane $BR" "$T/daemon.log")"
+HEALV="$(countof "reinstated it in pane $VW" "$T/daemon.log")"
+: > "$CALLS"
+retitle "$BR" sh
+retitle "$VW" sh
+sleep 5
+grew   "the browser came back"                    "reinstated it in pane $BR" "$T/daemon.log" "$HEALB"
+grew   "...and so did the viewer"                 "reinstated it in pane $VW" "$T/daemon.log" "$HEALV"
+check  "broot was typed into the browser half"    "send-text --pane-id $BR" "$CALLS"
+check  "micro into the viewer half"               "send-text --pane-id $VW" "$CALLS"
+refute "neither heal killed the other half"       "kill-pane" "$CALLS"
+refute "...nor re-split the slot"                 "split-pane" "$CALLS"
+in_slot "the browser is still in the slot"        "$BR"
+in_slot "...and the viewer beside it"             "$VW"
+
+echo
+echo "== 11c'''. no heal fires inside the cooldown window =="
+# broot and micro each look like a bare shell for a moment while they start, so a
+# heal that fired straight away would type a command line into a live program --
+# where every character is a keybinding. The window is measured from the heal just
+# performed: quit the same half again the moment the daemon says it healed it.
+HEALV="$(countof "reinstated it in pane $VW" "$T/daemon.log")"
+retitle "$VW" sh
+waitmore "reinstated it in pane $VW" "$T/daemon.log" "$HEALV" 8 \
+  || { echo "  FAIL the cooldown window could not be measured -- no heal to start it"; fail=1; }
+# The clock starts HERE, at the moment the daemon says it launched micro.
+: > "$CALLS"
+retitle "$VW" sh
+nap 1.5                                   # well inside the 3s cooldown just armed
+refute "nothing typed into the half that was just launched" "send-text --pane-id $VW" "$CALLS"
+sleep 5                                   # ...and once it expires, the heal happens
+check  "...and it is healed once the cooldown expires" "send-text --pane-id $VW" "$CALLS"
 
 echo
 echo "== 11d. ⌥] out of browse, from the BROWSER half -- the trap case =="
@@ -1033,6 +1171,27 @@ refute "revdiff was NOT relaunched into it"       "revdiff --wrap" "$CALLS"
 check  "...it simply came back from its park"     "came back from its park in uncommitted mode" "$T/daemon.log"
 check  "all three viewer keys were cleared together" \
                                                   '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
+
+echo
+echo "== 11d'. a PARKED half is never healed; the slot's revdiff still is =="
+# Both halves are parked now, in a tab of their own, and the healer's business is
+# the SLOT. A parked pane sitting at a prompt is not a broken cockpit -- nobody can
+# see it -- and typing into one would fight whatever the user does with it next.
+# Meanwhile the ordinary revdiff heal has to go on working exactly as it did.
+: > "$CALLS"
+retitle "$BR" sh
+retitle "$VW" sh
+retitle "$DP" sh                          # ...and quit the revdiff that holds the slot
+sleep 5
+refute "nothing was typed into the parked browser" "send-text --pane-id $BR" "$CALLS"
+refute "...nor into the parked viewer"             "send-text --pane-id $VW" "$CALLS"
+check  "the SLOT's revdiff was reinstated as ever" "send-text --pane-id $DP" "$CALLS"
+check  "...on this agent's own uncommitted range"  "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
+parked "the browser is still parked, untouched"    "$BR"
+parked "...and the viewer with it"                 "$VW"
+# Put the pair back as it was, so the restore below sees two running programs.
+retitle "$BR" broot
+retitle "$VW" micro
 
 echo
 echo "== 11e. ⌥[/⌥] cycle modes from the VIEWER half as well =="
@@ -1197,6 +1356,15 @@ refute "...nor into the viewer"                   "send-text --pane-id $VW4" "$C
 check  "the viewer keys were cleared leaving browse" \
                                                   '"viewer":null,"viewerAgent":null,"viewerRoot":null' "$T/state/panes.json"
 refute "and revdiff is NOT launched until the prompt answers" "revdiff --wrap" "$CALLS"
+
+# The prompt is a plain node process, so the pane it owns reads as a bare `shell` --
+# exactly the healer's cue. Long enough for the relaunch cooldown to expire, so what
+# holds the healer off is the customPromptOpen guard and nothing else; without it,
+# revdiff is typed over a live prompt where every character is an editor keystroke.
+: > "$CALLS"
+sleep 5
+refute "no heal fires while the ref prompt owns the pane" "send-text --pane-id $SLOT4" "$CALLS"
+refute "...so no revdiff was typed over it"              "revdiff --wrap" "$CALLS"
 
 # Cancelling reverts to browse -- which is not a revdiff range at all, so the pair
 # has to come back rather than diffCommand picking something for it.
@@ -1382,6 +1550,70 @@ nap 4
 same   "the same revdiff pane came back to the slot"   "$(pane_key diff)" "$DPARK"
 refute "...and it was NOT relaunched on the way in"    "revdiff --wrap" "$CALLS"
 refute "...nor quit to be relaunched"                  'STDIN:q\n' "$CALLS"
+
+echo
+echo "== 11p. reaping an agent takes its WHOLE pair, and its tab list with it =="
+# An agent can now own four panes: a terminal, a browser, a viewer and the revdiff
+# parked while the pair browses. Every one of them has to go when the agent leaves
+# the fleet, or it lives on -- unreachable, since its agent is no longer in the list
+# -- for the whole life of the window. And the record of what its viewer had open
+# goes with it: job ids are not reused, so an entry left behind is never read again.
+: > "$CALLS"; : > "$ACTIVE"
+echo "second agent" > "$FLEETSTATE"
+nap 4
+TRMD="$(grep -oE '(opened|restored) terminal pane [0-9]+' "$T/daemon.log" | tail -1 | grep -oE '[0-9]+$')"
+DPD="$(pane_key diff)"                    # its revdiff, about to be parked
+echo diff-browse >> "$T/state/cmd"
+nap 4
+BRD="$(pane_key diff)"; VWD="$(pane_key viewer)"
+printf '{"abc12345":["bin/still-mine.mjs"],"def67890":["bin/gone-with-it.mjs"]}\n' > "$T/state/viewer-tabs.json"
+
+# It vanishes from the fleet while its pair is ON SCREEN. The slot must survive
+# that: an agent holding the slot is never a reap candidate, so nothing is killed
+# out from under the window and the slot is left neither empty nor half-occupied.
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED7","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+: > "$CALLS"
+sleep 5
+refute "the on-screen browser was not reaped"     "kill-pane --pane-id $BRD" "$CALLS"
+refute "...nor its viewer"                        "kill-pane --pane-id $VWD" "$CALLS"
+in_slot "the browser still holds the slot"        "$BRD"
+in_slot "...with the viewer beside it"            "$VWD"
+
+# Switch away and it becomes reapable: pair parked, revdiff parked, terminal parked.
+STRIKE0="$(countof "agent def67890 missing (1/2); not reaping yet" "$T/daemon.log")"
+GONE0="$(countof "agent def67890 is gone" "$T/daemon.log")"
+# Cleared BEFORE the switch: the reap interval is a fraction of a second, so the
+# disposal lands inside the switch itself -- clearing afterwards throws away the
+# very calls this section is about.
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"
+waitmore "agent def67890 is gone" "$T/daemon.log" "$GONE0" 20 \
+  || { echo "  FAIL the agent was never reaped"; fail=1; }
+sleep 1                                   # let the rest of the disposal land
+
+check  "the parked BROWSER was killed"            "kill-pane --pane-id $BRD" "$CALLS"
+check  "...and the parked VIEWER with it"         "kill-pane --pane-id $VWD" "$CALLS"
+check  "...and the revdiff parked while it browsed" "kill-pane --pane-id $DPD" "$CALLS"
+check  "...and its terminal"                      "kill-pane --pane-id $TRMD" "$CALLS"
+gone   "the browser pane is out of the mux"       "$BRD"
+gone   "...and the viewer pane"                   "$VWD"
+gone   "...and the parked revdiff"                "$DPD"
+gone   "...and the terminal"                      "$TRMD"
+check  "its tab list was dropped, and said so"    "reset the viewer tab list for def67890 (agent gone)" "$T/daemon.log"
+refute "...so nothing of its is left in the file" "bin/gone-with-it.mjs" "$T/state/viewer-tabs.json"
+check  "the surviving agent's tabs are untouched" "bin/still-mine.mjs" "$T/state/viewer-tabs.json"
+refute "panes.json never names the reaped viewer" "\"viewer\":$VWD" "$T/state/panes.json"
+# Two consecutive misses, still: one failed `claude agents` read must not kill a
+# shell with someone's build running in it. The strike is logged precisely so that
+# a miss which does NOT reap leaves a trace to assert on.
+grew   "the first miss was a strike, not a reap"  "agent def67890 missing (1/2); not reaping yet" "$T/daemon.log" "$STRIKE0"
+before_last "...and it came BEFORE the reap, not after" \
+       "agent def67890 missing (1/2); not reaping yet" "agent def67890 is gone" "$T/daemon.log"
+# The surviving agent is untouched, slot and all.
+in_slot "the attached agent still holds the slot" "$(pane_key diff)"
 
 echo
 echo "== 12. the footer draws -- and clicks -- a fourth label =="

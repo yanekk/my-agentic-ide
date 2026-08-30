@@ -38,12 +38,11 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T05 is reviewed and closed. T06 is next.** The pair parks as a unit — browser and
-viewer together in one tab — and comes back unrelaunched through every entry point: the keys, the
-footer's labels, an agent switch, a cancelled custom-range prompt, an empty-slot rebuild. **One
-defect fixed at review:** handing a parked revdiff back left its launch record still saying
-`browse`, so the next agent switch quit and relaunched the very revdiff the park had saved.
-`spikes/cockpit-test` **295 checks** (was 289); browse (238), agenda and notes green.
+**Status:** **T06 is implemented and awaiting review. T07 is the last task, and it is the
+hands-on one.** The unhappy paths are covered: each half of the browse pair is judged and
+relaunched **on its own**, and a reaped agent takes every pane it owns with it.
+`spikes/cockpit-test` **352 checks** (was 295), two clean runs at load ~2; browse (55 bash +
+its node suites), agenda and notes green.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -58,10 +57,16 @@ the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file 
 anything else; `cockpit-open` refuses unless `panes.json` carries all three viewer keys in the
 right shape. Both are hard prerequisites in the installer and the layout script.
 
-**T06 inherits two crude fallbacks, both deliberate.** A half that has *died* rebuilds the whole
-pair on the next attach (killing the healthy half with it), and an orphaned viewer whose browser
-is gone is disposed of. Healing **one** half in place, without touching the other, is T06's whole
-job — DESIGN §2.n, "two halves, two independent heals".
+**The healer's cooldown is now per PANE (`paneLaunchedAt`), not per agent.** A single per-agent
+stamp is set by the first heal and then reads as "something was just launched here", silencing
+the second half — with both quit at once, one would sit at a bare prompt indefinitely. The
+per-agent `diffLaunchedAt` is untouched and still governs revdiff and the migration follower.
+The browse branch is dispatched *before* that per-agent gate for exactly this reason.
+
+**A half that is GONE is still not the healer's.** `showDiff`/`healMissingPanes` prune a dead
+pane; a dead viewer leaves the browser alone (the next entry spawns a fresh micro beside it) and
+a dead browser disposes the pair, since the viewer cannot hold the slot. Only a half quit to a
+**shell** is healed in place.
 
 **`spikes/cockpit-test` is timing-based end to end.** A red run at
 `COCKPIT_TEST_SPEED=1.0` on a loaded machine is evidence about the machine: re-run it before
@@ -80,10 +85,11 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-08-30
-**Next `pir-work` will:** **implement T06** — heal one quit half in place without touching the
-other, and reap a dead agent's pair (including its `viewer-tabs.json` entry, which the reaper does
-*not* drop yet). The two crude fallbacks named above are what it replaces. Note that the
-per-pane cooldown T06 asks for does not exist yet: `diffLaunchedAt` is per agent.
+**Next `pir-work` will:** **review T06.** Read the two deviations in its Notes cell first — the
+47/72 split after a double heal is asserted only as "nothing was killed, split or focused"
+(the stub has no geometry), and the reaper gained a strike log line so the two-miss rule could
+be asserted by ordering rather than by a 350 ms race. After that, **T07 is the hands-on task
+and it starts by fixing which checkout the live cockpit runs** — see the warning at the top.
 
 ## Tasks
 
@@ -97,16 +103,15 @@ done · ⛔ blocked, needs a human.
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: four suites green, three deviations accepted, **two defects fixed — both in the refusals.** `viewer` was *coerced*: `""`, `" "`, `false`, `[]` all became pane **0** and the push went out (probed). The `\r` guard read the argument, not the realpath — a symlink into a `we\rird/` dir sent `open we`. Plus an unwritable state dir threw a stack trace. **176 checks**; every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ✅ | Reviewed, two defects fixed: the `--conf` chain was backwards (the **first** file wins) and `{line}` is `0`, not empty. Enter is pressed for real. **238 checks**. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
-| T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed, all deviations accepted, **one defect fixed**: the untouched path relaunched nothing but left the launch record saying `browse`, so the next agent switch quit and relaunched the very revdiff the park saved. Probed beyond the doc: the reap, migration and prompt-cancel paths, and the three maps' consistency. **295 checks** (new 11o proven to fail first). Geometry and broot's filter text stay **unverified** → T07. |
-| T06 | Heal a quit half; reap a dead agent's pair | T05 | ⬜ | Two independent heals: never rebuild the pair to fix one half. |
+| T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. Geometry and broot's filter text stay unverified → T07. |
+| T06 | Heal a quit half; reap a dead agent's pair | T05 | 🔍 | `healBrowseHalves` judges each half alone: quit micro → micro + tab-list reset; quit broot → broot, tabs untouched; both → both, one pass. New per-pane cooldown `paneLaunchedAt`. Reaper widened to `browsePairs`/`parkedDiffs`, drops the tab entry. **352 checks.** Deviations: 47/72 not assertable (no stub geometry); added a reaper strike log so the two-miss rule is not a race. |
 | T07 | Verified by hand with the user | T03, T06 | ⬜ | Cannot be closed by any test. The session waits for the answer. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* T05 was reviewed and closed on 2026-08-30 by a session that did not
-write it. T06 is next, and is an implement.
+**Review queue:** **T06**, implemented 2026-08-30. Review it before T07.
 
 ## Blocked on the user
 

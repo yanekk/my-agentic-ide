@@ -360,7 +360,6 @@ const diffs = new Map([[REPO_KEY, panes.diff]]);
  * `pairInSlot` tells a pair that is on screen from one that is parked.
  */
 const browsePairs = new Map();
-const viewerOf = (jobId) => browsePairs.get(jobId)?.viewer;
 /** The agent's pair if it is IN the slot right now, else null. */
 function pairInSlot(key) {
   const pair = browsePairs.get(key);
@@ -444,9 +443,28 @@ const diffLaunchedCwd = new Map();      // jobId -> the worktree its revdiff was
 const diffLaunchedAt = new Map();
 const DIFF_RELAUNCH_COOLDOWN_MS = ms(3000);
 // pane id -> the browse-half status last written to the log. Both halves are
-// checked once a second (see reportBrowseHalves), and a half sitting at a shell
+// checked once a second (see healBrowseHalves), and a half sitting at a shell
 // must say so once, not sixty times a minute.
 const browseHalfStatus = new Map();
+// pane id -> when THAT PANE was last given a command line.
+//
+// The browse healer's cooldown has to be PER PANE, not per agent like
+// `diffLaunchedAt`, because the two halves fail and are healed independently:
+// relaunching broot must not silence the viewer's healer for the next three
+// seconds, and both halves can be quit in the same second. Seeded wherever a pair
+// enters the slot -- a just-moved micro is the case that matters, since its TITLE
+// is the only signal browse-mode detection has and a stale one reads as a shell.
+const paneLaunchedAt = new Map();
+/** Forget everything remembered about a browse half, by pane id. */
+function forgetHalf(pane) {
+  browseHalfStatus.delete(pane);
+  paneLaunchedAt.delete(pane);
+}
+/** Give each named half the same grace against the healer that a fresh launch gets. */
+function armHalves(...halves) {
+  const now = Date.now();
+  for (const pane of halves) if (pane !== undefined && pane !== null) paneLaunchedAt.set(pane, now);
+}
 
 // The per-agent custom base ref (jobId -> branch/SHA), persisted so an agent
 // keeps its base across cockpit rebuilds. The prompt (openCustomPrompt) is the
@@ -584,7 +602,7 @@ function disposePair(jobId, keep) {
   for (const pane of [pair.viewer, pair.browser]) {
     if (pane === undefined || pane === keep) continue;
     wez(["kill-pane", "--pane-id", String(pane)]);
-    browseHalfStatus.delete(pane);
+    forgetHalf(pane);
     log(`disposed browse pane ${pane} for ${jobId}`);
   }
   if (pair.viewer !== undefined) unpublishViewer(pair.viewer);
@@ -631,7 +649,8 @@ function parkDiffPane(jobId, pane, cockpitTab) {
 /**
  * Forget what we last pushed into `jobId`'s viewer.
  *
- * Called whenever a viewer is LAUNCHED FRESH, and never otherwise. The list is the
+ * Called whenever a viewer is LAUNCHED FRESH -- entering browse, healing a quit
+ * one -- and when its agent is reaped, and never otherwise. The list is the
  * only record of what micro has open -- it cannot be asked (DESIGN 2.5) -- so a
  * list left over from a viewer that no longer exists makes the next push a
  * `tabswitch <n>` onto a tab that is not there, which jumps to the wrong file
@@ -643,7 +662,7 @@ function parkDiffPane(jobId, pane, cockpitTab) {
  * held for one read and one rename against a push that holds it for ~300ms, so the
  * 5s stale break is never approached -- but nothing slower may move inside it.
  */
-function resetViewerTabs(jobId) {
+function resetViewerTabs(jobId, why = "fresh viewer") {
   try {
     withLock(() => {
       let all = {};
@@ -653,7 +672,7 @@ function resetViewerTabs(jobId) {
       const tmp = `${VIEWER_TABS}.${process.pid}.tmp`;
       fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
       fs.renameSync(tmp, VIEWER_TABS);
-      log(`reset the viewer tab list for ${jobId} (fresh viewer)`);
+      log(`reset the viewer tab list for ${jobId} (${why})`);
     }, VIEWER_TABS_LOCK);
   } catch (e) {
     // A tab list we could not clear is untidy, not fatal: the next push adds a
@@ -724,7 +743,7 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   // killed: coming back out of browse then costs no revdiff restart at all.
   if (anchorIsBrowser) {
     wez(["kill-pane", "--pane-id", String(anchor)]);
-    browseHalfStatus.delete(anchor);
+    forgetHalf(anchor);
   } else {
     parkDiffPane(jobId, anchor, cockpitTab);
   }
@@ -745,6 +764,11 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
     if (viewer === null) log(`could not open a viewer pane for ${jobId}; the browser is on its own`);
   }
   browsePairs.set(jobId, { browser, viewer: viewer ?? undefined, cwd: worktree });
+  // Per pane, and for BOTH halves whether they were launched or restored: a half
+  // that has just been moved back into the slot has not settled either, and the
+  // healer's only signal is a title. `diffLaunchedAt` below is per agent and stays
+  // that way -- it is what followWorktreeMigration and the revdiff healer read.
+  armHalves(browser, viewer);
 
   // A restored half is already running its program; typing into it would type into
   // broot's filter box and micro's buffer. Only the halves actually spawned here
@@ -1570,16 +1594,16 @@ async function showDiff(key, cwd, label) {
   // then hands the slot a fresh pane instead of chasing a pane that is gone.
   for (const [k, rec] of parkedDiffs) if (!live.has(rec.pane)) parkedDiffs.delete(k);
   for (const [k, pair] of browsePairs) {
-    if (pair.viewer !== undefined && !live.has(pair.viewer)) { browseHalfStatus.delete(pair.viewer); pair.viewer = undefined; }
+    if (pair.viewer !== undefined && !live.has(pair.viewer)) { forgetHalf(pair.viewer); pair.viewer = undefined; }
     // A browser that died takes the pair with it: the viewer cannot hold the slot
     // on its own (the whole dance splits off the browser), so an orphaned viewer
     // has nowhere to be. Healing ONE quit half in place is T06's; this is the
     // different case where the half is gone rather than quit.
     if (!live.has(pair.browser)) {
-      browseHalfStatus.delete(pair.browser);
+      forgetHalf(pair.browser);
       if (pair.viewer !== undefined) {
         wez(["kill-pane", "--pane-id", String(pair.viewer)]);
-        browseHalfStatus.delete(pair.viewer);
+        forgetHalf(pair.viewer);
         unpublishViewer(pair.viewer);
         log(`browser pane ${pair.browser} for ${k} is gone; disposed of its orphaned viewer ${pair.viewer}`);
       }
@@ -1645,6 +1669,10 @@ async function showDiff(key, cwd, label) {
       incoming.viewer = undefined;
     }
   }
+  // This pair has just come back into the slot without going through enterBrowse,
+  // so its halves get their healer grace here instead -- both of them, restored or
+  // not (see paneLaunchedAt).
+  if (incoming !== undefined && incoming.browser === pane) armHalves(pane, viewer);
 
   visibleDiff = key;
   // split-pane activates whatever it put in the slot. Switching agents happens in
@@ -1670,7 +1698,15 @@ async function showDiff(key, cwd, label) {
  * (their agent is no longer in the list).
  */
 async function reapAgents() {
-  const candidates = [...new Set([...terminals.keys(), ...diffs.keys()])]
+  // Every map that can hold a pane for an agent is a source of candidates, not just
+  // the two slots: an agent whose browse pair is parked and whose revdiff is parked
+  // with it has panes in `browsePairs`/`parkedDiffs`, and a leaveBrowse that could
+  // not hand the slot back drops it out of `diffs` altogether -- after which
+  // reaping from `diffs` alone would leave two live panes nobody can reach for the
+  // life of the window. The agent holding the slot is still never a candidate
+  // (`visibleDiff`), so a reap can never empty or half-empty it.
+  const candidates = [...new Set([...terminals.keys(), ...diffs.keys(),
+                                  ...browsePairs.keys(), ...parkedDiffs.keys()])]
     .filter((k) => k !== REPO_KEY && k !== visibleKey && k !== visibleDiff);
   if (!candidates.length) return;
 
@@ -1682,7 +1718,13 @@ async function reapAgents() {
     if (alive.has(key)) { reapStrikes.delete(key); continue; }
     const strikes = (reapStrikes.get(key) ?? 0) + 1;
     reapStrikes.set(key, strikes);
-    if (strikes < REAP_STRIKES) continue;
+    // Said out loud, because the alternative -- reaping on the first miss -- kills
+    // a shell with someone's build running in it, and nothing else about a strike
+    // is observable from outside: a miss that does NOT reap leaves no trace at all.
+    if (strikes < REAP_STRIKES) {
+      log(`agent ${key} missing (${strikes}/${REAP_STRIKES}); not reaping yet`);
+      continue;
+    }
     // An agent has many terminals but one diff; kill every pane it owns.
     const term = terminals.get(key);
     if (term) {
@@ -1698,6 +1740,10 @@ async function reapAgents() {
     // the window. Its browse pair goes through disposePair so the viewer stops
     // being advertised with it.
     disposePair(key);
+    // ...and the record of what that viewer had open goes with the viewer. The file
+    // is keyed by job id and job ids are not reused, so an entry left behind is
+    // never read again -- it just grows the file for the life of the machine.
+    resetViewerTabs(key, "agent gone");
     const parked = parkedDiffs.get(key);
     if (parked !== undefined) {
       wez(["kill-pane", "--pane-id", String(parked.pane)]);
@@ -1714,7 +1760,7 @@ async function reapAgents() {
       diffLaunchedCwd.delete(key);
       diffLaunchedAt.delete(key);
       diffModeByAgent.delete(key);
-      browseHalfStatus.delete(d);
+      forgetHalf(d);
     }
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
@@ -1758,7 +1804,7 @@ function healMissingPanes() {
   if (viewer !== undefined && !live.has(viewer)) {
     log(`viewer pane ${viewer} for ${attached.jobId} is gone; unpublishing it`);
     pair.viewer = undefined;
-    browseHalfStatus.delete(viewer);
+    forgetHalf(viewer);
     unpublishViewer(viewer);
   }
   // The terminal slot is healthy as long as this agent's CURRENT terminal is in
@@ -1789,14 +1835,14 @@ function healMissingPanes() {
 function healQuitDiff() {
   if (!attached || reconciling) return;
   if (customPromptOpen) return;                   // the prompt owns the pane, and reads as a shell
+  // In browse mode the slot holds two panes running two different programs, so
+  // "relaunch revdiff here" is the wrong answer for both halves -- and the cooldown
+  // below is the wrong shape too, being per agent. Dispatched BEFORE it for exactly
+  // that reason: healBrowseHalves keeps its own per-pane clock.
+  if (modeOf(attached.jobId) === "browse") return healBrowseHalves(attached.jobId);
   const pane = diffs.get(attached.jobId);
   if (pane === undefined) return;                 // no pane yet, or gone: not ours to fix
   if (Date.now() - (diffLaunchedAt.get(attached.jobId) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) return;
-  // In browse mode the slot holds two panes running two different programs, so
-  // "relaunch revdiff here" is the wrong answer for both halves. Relaunching the
-  // RIGHT one in the right half is T06; what lands with the mode is the detection
-  // it needs -- and reporting it is what makes that detection observable at all.
-  if (modeOf(attached.jobId) === "browse") return reportBrowseHalves(attached.jobId);
   const table = paneTable();
   if (!table) return;
   if (diffPaneStatus(pane, table) !== "shell") return;
@@ -1818,22 +1864,70 @@ function healQuitDiff() {
 }
 
 /**
- * Say what each half of the browse pair looks like, once per change.
+ * Reinstate whichever half of the browse pair was quit -- and only that half.
  *
- * A healthy pair reads "running" -- which is the whole point of teaching
- * diffPaneStatus about broot and micro, and the only way to see that from outside
- * the daemon, since the correct behaviour here is to do NOTHING. A half that has
- * really been quit reads "shell" and says so once; healing it is T06.
+ * The browse-mode counterpart of healQuitDiff, and the difference that matters is
+ * that there are TWO panes running two different programs and they fail
+ * independently. Ctrl+Q in micro leaves the viewer at a bare shell while broot is
+ * perfectly fine, and quitting broot does the mirror image. So each half is judged
+ * and relaunched on its own:
+ *
+ *   - **Never rebuild the pair to fix one half.** Killing and re-splitting both
+ *     would throw away micro's tabs (or broot's place in the tree) belonging to the
+ *     half that was healthy, which is the opposite of what healing is for. Nothing
+ *     here kills a pane, splits one, or moves focus -- the geometry is untouched.
+ *   - **A relaunched viewer resets that agent's tab list.** The tabs died with the
+ *     process, and the list is the only record of what micro has open (it cannot be
+ *     asked, DESIGN 2.5): left over, the next push is a `tabswitch <n>` onto a tab
+ *     that is not there and jumps to the wrong file silently.
+ *   - **A relaunched browser touches nothing else.** The viewer and its tabs are
+ *     still exactly what they were.
+ *   - **The cooldown is per pane** (`paneLaunchedAt`). broot and micro each look
+ *     like a shell for a moment while they start, and a per-agent clock would let
+ *     healing one half swallow the other half's heal for three seconds -- with both
+ *     quit at once, which is a single Ctrl+Q away in each, the second would sit at a
+ *     bare prompt until something else happened to re-arm it.
+ *
+ * A PARKED pair is never touched: it is not in the slot, so `pairInSlot` is the
+ * gate. A half that is GONE rather than quit is not this function's either --
+ * showDiff and healMissingPanes prune a dead pane, and the pair is rebuilt on the
+ * next entry.
+ *
+ * Reporting is kept from T04 and is not incidental: a healthy pair reads "running",
+ * and since the correct behaviour then is to do NOTHING, the log line is the only
+ * way to see the detection working at all.
  */
-function reportBrowseHalves(jobId) {
+function healBrowseHalves(jobId) {
+  const pair = pairInSlot(jobId);
+  if (pair === null) return;                      // parked, or mid-swap: not in the slot, not ours
   const table = paneTable();
   if (!table) return;
-  for (const [half, pane] of [["browser", diffs.get(jobId)], ["viewer", viewerOf(jobId)]]) {
+  const worktree = pair.cwd ?? attached.worktree;
+  for (const [half, pane, command] of [
+    ["browser", pair.browser, browserCommand],
+    ["viewer", pair.viewer, viewerCommand],
+  ]) {
     if (pane === undefined) continue;
     const status = diffPaneStatus(pane, table);
-    if (browseHalfStatus.get(pane) === status) continue;   // said already
-    browseHalfStatus.set(pane, status);
-    log(`browse ${half} pane ${pane} for ${jobId}: ${status}`);
+    if (browseHalfStatus.get(pane) !== status) {
+      browseHalfStatus.set(pane, status);
+      log(`browse ${half} pane ${pane} for ${jobId}: ${status}`);
+    }
+    if (status !== "shell") continue;
+    if (Date.now() - (paneLaunchedAt.get(pane) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) continue;
+
+    reconciling = true;
+    try {
+      if (diffPaneStatus(pane) !== "shell") continue;   // re-check under the lock
+      launchInPane(pane, command(worktree));
+      armHalves(pane);
+      // A fresh micro has no tabs, so what we think it has open has to go with the
+      // old process. The browser's heal deliberately does nothing of the kind.
+      if (half === "viewer") resetViewerTabs(jobId, "healed viewer");
+      log(`the browse ${half} was quit in ${jobId}; reinstated it in pane ${pane}`);
+    } finally {
+      reconciling = false;
+    }
   }
 }
 
