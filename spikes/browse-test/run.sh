@@ -27,7 +27,12 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 fail=0
-same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+pass=0
+# Quiet by default, the same convention as the suites next door: a passing check
+# just bumps the count, VERBOSE=1 restores the per-check "ok" listing, and a
+# failure always prints in full.
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
+same() { if [ "$2" = "$3" ]; then okline "$1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
 
 # --- the node suites -------------------------------------------------------
 # One fresh state dir each, so a suite can never inherit another's files. T02 adds
@@ -410,5 +415,5 @@ same "...and it is the first one whichever order they are in" \
 chmod 644 "$T/vtree/odd/locked" 2>/dev/null   # so the trap can remove it
 fi
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; the node suites counted their own above)"; else echo "FAILURES"; fi
 exit "$fail"
