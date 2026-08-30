@@ -45,8 +45,8 @@ own**, and a reaped agent takes every pane it owns with it. `spikes/cockpit-test
 
 **Everything in this plan is test-proven and NOTHING is person-proven.** No part of browse mode
 — not the pair, not a heal, not a reap — has ever been seen against a real broot, a real micro or
-a real WezTerm. **T07 is the whole of that evidence**, and its script does not currently quit
-either half, so T06's behaviour would close unseen. See *Blocked on the user*.
+a real WezTerm. **T07 is the whole of that evidence**, and it now covers T06 too: steps **10 and
+11** quit each half and watch it come back (the user's decision, 2026-08-30).
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -91,10 +91,10 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-08-30
-**Next `pir-work` will:** **do T07, the hands-on task** — and it starts by fixing which
-checkout the live cockpit runs, see the warning at the top. **Answer the question under
-*Blocked on the user* first:** T07's script never quits a half, so as written the plan closes
-without anyone having seen T06 work.
+**Next `pir-work` will:** **do T07, the hands-on task** — and it starts by fixing which checkout
+the live cockpit runs, see the warning at the top. Nothing is open: T07's script now covers T06's
+heals at steps 10 and 11. **The session raises the whole script with the user and waits**; it
+ends when the answers are in FINDINGS, not before.
 
 ## Tasks
 
@@ -120,15 +120,13 @@ message.
 
 ## Blocked on the user
 
-**T07's script never quits either half, so T06 would close having been seen by nobody.** T06 is
-the recovery task — quit micro, quit broot, both at once — and every claim about it rests on a
-stubbed WezTerm. In particular *nothing has ever confirmed that a real pane's title stops saying
-`micro` when micro exits*, which is the single signal the heal fires on. Raised at T06's review,
-2026-08-30. **The decision is the user's**: add two steps and two questions to T07, or accept the
-heal as test-proven only. Recommended: add them — it is two keystrokes inside a check already
-being run.
+*(Nothing.)* The question T06's review raised — T07's script never quit either half, so the
+recovery task would have closed having been seen by nobody, and *nothing has ever confirmed that
+a real pane stops reporting `micro` when micro exits*, which is the one signal every heal fires
+on — was answered on 2026-08-30: **add the steps.** T07 now carries **10 and 11** (quit the
+reader, quit the tree, hands off, watch) and the two questions that go with them.
 
-*(Otherwise nothing.)* The question the T03 review raised — what Enter should do on a file broot calls
+The question the T03 review raised — what Enter should do on a file broot calls
 **binary**, given `apply_to: text_file` was leaving it to macOS — was answered on 2026-08-29:
 **show it in broot's own preview panel.** Built, tested and recorded in DESIGN §7.
 

@@ -12,7 +12,8 @@ date — a ✅ there is the entire record that anything was seen working for rea
 
 ## Design sections this implements
 
-DESIGN §5.1 (what the test command cannot reach), and the success criteria in §1.
+DESIGN §5.1 (what the test command cannot reach), the success criteria in §1, and — for
+steps 10 and 11 — the three quit rows of §2.n.
 
 ## Files
 
@@ -74,7 +75,19 @@ the second seatbelt here: nothing in this check runs against a half-migrated coc
 7. Press ⌥] twice to leave browse and ⌥[ twice to come back.
 8. Switch to another agent and back.
 9. Click the word "Browse" in the footer, then click "Uncommitted Changes", then "Browse".
+10. In the READER (right half), press Ctrl+Q to quit it. Wait, hands off, and watch.
+    Then press Enter on a file in the tree.
+11. In the TREE (left half), press Ctrl+Q — or type :q and press Enter — to quit it.
+    Wait, hands off, and watch.
 ```
+
+**Steps 10 and 11 are the whole of T06 and they are added deliberately** *(the user's decision,
+2026-08-30, at T06's review)*. Everything T06 does rests on the cockpit noticing that a half has
+stopped running, and it notices by asking the terminal which program a pane is running. **Nothing
+has ever confirmed that a real pane stops reporting `micro` the moment micro exits** — the test
+suite stubs that answer. If it does not, no heal ever fires, and no automated test in this
+project would know. Do them **last**, after 7 and 8: quitting the reader deliberately throws away
+the tabs those steps are checking.
 
 Expect: at 2 the top pane splits — the file tree on the left, an empty editor on the right — and
 **you can start typing immediately**, without clicking anything: the tree already has focus. At 3
@@ -83,12 +96,24 @@ tabs. At 5 it opens **on the matching line**. At 6 your own preview keys still w
 three tabs are still there and the tree is where you left it. At 8 the same, and it is still your
 agent's files. At 9 the clicks do exactly what the keys did.
 
+At **10**, within a second or two and with you touching nothing, the right half comes back as an
+empty reader — and the tree on the left is **exactly where you left it**, same position, same
+filter text. The Enter that follows opens the file as the **first** tab of the new reader: the
+list of what was open died with it, so nothing jumps to the wrong file. At **11**, the mirror
+image — the tree comes back on its own, at the top of the agent's worktree, and the reader beside
+it keeps every tab it had.
+
 Tell me:
 - **Could you drive the whole thing without touching the mouse or typing a command?** That is the
   point of the shape you chose, and this is the only check of it.
 - Did focus ever jump out of the tree?
 - Did the tabs survive steps 7 and 8?
 - Did step 5 land on the right line?
+- **Did each half you quit come back on its own, without you doing anything?** Roughly how long —
+  a blink, a second, several? If one never came back, say which, and that is the answer that
+  matters most in this list.
+- **Did the half you did NOT quit stay exactly as it was?** The tree at the same position and
+  filter when you quit the reader; every tab still open when you quit the tree.
 - **Did ⌥p / ⌥o still open and close the preview?** They come from *your* `verbs.hjson`, and the
   cockpit adds its own file to the same `--conf` chain — this is the only check that the
   layering did not shadow your own keys (DESIGN §5.1, and the layering measurement in FINDINGS).
