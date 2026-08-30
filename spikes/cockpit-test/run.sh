@@ -1106,16 +1106,26 @@ echo
 echo "== 11c''. BOTH halves quit at once: both come back, in the same pass =="
 # The reason the relaunch cooldown is per PANE and not per agent. A single
 # per-agent stamp is set by the first heal, which then reads as "something was just
-# launched for this agent" and silences the second half -- leaving one of the two
-# at a bare prompt with nothing due to re-arm it.
+# launched for this agent" and silences the second half for the whole cooldown.
+#
+# SAME PASS is the assertion, and it has to be: waiting a flat 5s for both would
+# pass under a per-agent clock too -- the second half is merely held for three
+# seconds and then healed, not abandoned (measured: keyed per agent, this section
+# went green). So the wait ENDS at the browser's heal, and the viewer's is required
+# a second later -- comfortably longer than the two log writes of one pass, and
+# comfortably shorter than the 3s a per-agent stamp would impose.
 HEALB="$(countof "reinstated it in pane $BR" "$T/daemon.log")"
 HEALV="$(countof "reinstated it in pane $VW" "$T/daemon.log")"
 : > "$CALLS"
 retitle "$BR" sh
 retitle "$VW" sh
-sleep 5
+waitmore "reinstated it in pane $BR" "$T/daemon.log" "$HEALB" 8 \
+  || { echo "  FAIL the browser was never healed, so the pass cannot be timed"; fail=1; }
+sleep 1
 grew   "the browser came back"                    "reinstated it in pane $BR" "$T/daemon.log" "$HEALB"
-grew   "...and so did the viewer"                 "reinstated it in pane $VW" "$T/daemon.log" "$HEALV"
+grew   "...and the viewer in the SAME pass, not a cooldown later" \
+                                                  "reinstated it in pane $VW" "$T/daemon.log" "$HEALV"
+sleep 4                                   # the section's original 5s of settling, so what follows is unchanged
 check  "broot was typed into the browser half"    "send-text --pane-id $BR" "$CALLS"
 check  "micro into the viewer half"               "send-text --pane-id $VW" "$CALLS"
 refute "neither heal killed the other half"       "kill-pane" "$CALLS"
@@ -1595,6 +1605,12 @@ waitmore "agent def67890 is gone" "$T/daemon.log" "$GONE0" 20 \
 sleep 1                                   # let the rest of the disposal land
 
 check  "the parked BROWSER was killed"            "kill-pane --pane-id $BRD" "$CALLS"
+# ONCE. In browse mode `diffs` names the browser, so the reaper used to kill it a
+# second time on its way through the diff slot. The stub shrugs that off -- its
+# kill-pane always succeeds -- but a real `wezterm cli` fails, and a failed call
+# sends the daemon hunting for a dead mux socket, relinking it and spending the
+# repair cooldown a genuine failure would need.
+same   "...once, not twice"                       "$(grep -cE "kill-pane --pane-id $BRD\$" "$CALLS")" 1
 check  "...and the parked VIEWER with it"         "kill-pane --pane-id $VWD" "$CALLS"
 check  "...and the revdiff parked while it browsed" "kill-pane --pane-id $DPD" "$CALLS"
 check  "...and its terminal"                      "kill-pane --pane-id $TRMD" "$CALLS"

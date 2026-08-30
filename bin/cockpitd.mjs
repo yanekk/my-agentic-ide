@@ -1739,6 +1739,17 @@ async function reapAgents() {
     // them has to go, or a pane nobody can reach any more survives for the life of
     // the window. Its browse pair goes through disposePair so the viewer stops
     // being advertised with it.
+    //
+    // Its pane ids are noted BEFORE the disposal, because in browse mode `diffs`
+    // names the BROWSER: without this the kill below repeats one disposePair has
+    // just done, and a repeated kill is not merely untidy. Against a real WezTerm
+    // it FAILS, and every failed `wezterm cli` call sends the daemon looking for a
+    // dead mux socket (`wez` -> `repairMuxSocket`) -- relinking the socket symlink
+    // and burning the repair cooldown that a genuine socket failure then needs, on
+    // nothing at all. The stub cannot show this: its kill-pane always succeeds. So
+    // the suite asserts the COUNT instead.
+    const pair = browsePairs.get(key);
+    const pairPanes = new Set([pair?.browser, pair?.viewer]);
     disposePair(key);
     // ...and the record of what that viewer had open goes with the viewer. The file
     // is keyed by job id and job ids are not reused, so an entry left behind is
@@ -1751,17 +1762,21 @@ async function reapAgents() {
       parkedDiffs.delete(key);
     }
     const d = diffs.get(key);
-    if (d !== undefined) {
+    if (d !== undefined && !pairPanes.has(d)) {
       wez(["kill-pane", "--pane-id", String(d)]);
       log(`reaped diff pane ${d} — agent ${key} is gone`);
-      diffs.delete(key);
-      diffLaunchedMode.delete(key);
-      diffLaunchedRef.delete(key);
-      diffLaunchedCwd.delete(key);
-      diffLaunchedAt.delete(key);
-      diffModeByAgent.delete(key);
-      forgetHalf(d);
     }
+    if (d !== undefined) forgetHalf(d);
+    // Cleared whether or not this agent still had a pane in `diffs`. An agent whose
+    // leaveBrowse could not hand the slot back has none -- and that is precisely
+    // the case the candidate list above was widened for, so gating the bookkeeping
+    // on `diffs` left its records behind in the one case worth widening for.
+    diffs.delete(key);
+    diffLaunchedMode.delete(key);
+    diffLaunchedRef.delete(key);
+    diffLaunchedCwd.delete(key);
+    diffLaunchedAt.delete(key);
+    diffModeByAgent.delete(key);
     stopWorktreeWatch(key);
     reapStrikes.delete(key);
   }
