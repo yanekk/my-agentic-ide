@@ -1053,6 +1053,11 @@ refute "and nothing at all was typed into the browser" "send-text --pane-id $BR2
 refute "...nor into the viewer"                    "send-text --pane-id $VW2" "$CALLS"
 check  "the restored browser was moved, not respawned" "--move-pane-id $BR2" "$CALLS"
 check  "...and the viewer split off it at 60% again"   "--right --percent 60 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
+# The same order the fresh launch is held to, asserted again on the RESTORE path so
+# a later session cannot "tidy" the two calls into the other order: the browser is
+# the half that carries the slot, and 60% taken off half a slot is not 60%.
+before "...the browser back in the slot FIRST, never the viewer" \
+       "--move-pane-id $BR2" "--right --percent 60 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
 : > "$CALLS"
 echo "$VW2" > "$ACTIVE"                   # the VIEWER holds focus this time
 echo next >> "$T/state/cmd"
@@ -1347,6 +1352,36 @@ check  "the pair was rebuilt in the new worktree"  "--cwd $MOVED7 --" "$CALLS"
 check  "...micro started fresh with it"            "micro -readonly true" "$CALLS"
 check  "...so that agent's tab list was reset"     "reset the viewer tab list for abc12345" "$T/daemon.log"
 refute "...and the stale tabs are gone"            "bin/a.mjs" "$T/state/viewer-tabs.json"
+
+echo
+echo "== 11o. the park's saving SURVIVES the next agent switch =="
+# What a parked revdiff was last launched with is recorded per agent, and entering
+# browse overwrites that record with `browse` -- correctly, while the pair is up.
+# Handing the revdiff back without relaunching it therefore has to put the record
+# straight again: left saying `browse`, the next attach reads a mode that does not
+# match the agent's and quits and relaunches the very revdiff the park just saved,
+# losing the selected file, the scroll position and any unflushed annotations.
+: > "$CALLS"; : > "$ACTIVE"
+echo diff-uncommitted >> "$T/state/cmd"   # out of browse (stale: the agent moved in 11n)
+nap 3
+echo diff-browse >> "$T/state/cmd"        # in again -- the revdiff parks in uncommitted
+nap 3
+: > "$CALLS"
+echo diff-uncommitted >> "$T/state/cmd"   # and out: nothing to relaunch
+nap 3
+DPARK="$(pane_key diff)"
+refute "the revdiff came back from its park untouched" "revdiff --wrap" "$CALLS"
+check  "...and the daemon said so"                     "came back from its park in uncommitted mode" "$T/daemon.log"
+
+: > "$CALLS"
+echo "second agent" > "$FLEETSTATE"
+nap 4
+: > "$CALLS"                              # the other agent's own launch is not ours
+echo "test agent" > "$FLEETSTATE"
+nap 4
+same   "the same revdiff pane came back to the slot"   "$(pane_key diff)" "$DPARK"
+refute "...and it was NOT relaunched on the way in"    "revdiff --wrap" "$CALLS"
+refute "...nor quit to be relaunched"                  'STDIN:q\n' "$CALLS"
 
 echo
 echo "== 12. the footer draws -- and clicks -- a fourth label =="

@@ -863,6 +863,20 @@ async function leaveBrowse(jobId, worktree) {
              || (mode === "custom" && parked.ref !== ref)
              || normCwd(parked.cwd ?? "") !== normCwd(worktree)
              || diffPaneStatus(slot) !== "running";
+  // An untouched pane is about to be handed back with nothing launched into it, so
+  // the record of what it was last launched with has to stop saying `browse`.
+  // enterBrowse set it on the way in -- correctly, while the pair held the slot --
+  // but it is read again on the NEXT attach, where onEnter compares it against this
+  // agent's mode, finds a mismatch and relaunches: `q` into a live revdiff and the
+  // whole command typed back, losing the selected file, the scroll position and any
+  // unflushed annotations. That is precisely the saving the park just bought. The
+  // stale branch needs nothing -- its caller relaunches, and relaunchDiff records
+  // what it launched itself.
+  if (!stale) {
+    diffLaunchedMode.set(jobId, mode);
+    diffLaunchedRef.set(jobId, ref);
+    diffLaunchedCwd.set(jobId, worktree);
+  }
   log(`left browse for ${jobId}; slot pane is now ${slot}`
     + `${restored ? ` (restored from its park${stale ? ", stale" : ", untouched"})` : " (fresh)"}`);
   return { pane: slot, relaunch: stale };
