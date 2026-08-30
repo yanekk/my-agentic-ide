@@ -256,9 +256,14 @@ trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
 sleep 1   # node startup is fixed overhead -- not scaled by SPEED
 
 fail=0
+pass=0
+# Quiet by default: a passing check just bumps the count. VERBOSE=1 restores the
+# per-check "ok" listing (~950 lines, ~13k tokens across the suites -- that noise
+# is why it is off unless asked for). Failures always print in full.
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
 check() {  # check <description> <pattern> <file>
   if grep -qF -- "$2" "$3"; then
-    echo "  ok   $1"
+    okline "$1"
   else
     echo "  FAIL $1"
     echo "       expected to find: $2"
@@ -266,7 +271,7 @@ check() {  # check <description> <pattern> <file>
   fi
 }
 refute() {
-  if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else echo "  ok   $1"; fi
+  if grep -qF -- "$2" "$3"; then echo "  FAIL $1"; fail=1; else okline "$1"; fi
 }
 
 echo
@@ -892,7 +897,7 @@ D2PID=""; D3PID=""; GPID=""
 
 same() {  # same <description> <actual> <expected>
   if [ "$2" = "$3" ]; then
-    echo "  ok   $1"
+    okline "$1"
   else
     echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
   fi
@@ -1165,5 +1170,5 @@ kill $D3PID 2>/dev/null; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""
 
 echo
-if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
+if [ "$fail" = 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
 exit $fail

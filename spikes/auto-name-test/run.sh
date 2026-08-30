@@ -27,7 +27,12 @@ settings_fingerprint() {
 BEFORE_SETTINGS="$(settings_fingerprint)"
 
 fail=0
-same() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
+pass=0
+# Quiet by default: a passing check just bumps the count. VERBOSE=1 restores the
+# per-check "ok" listing. Failures always print in full. (The node suites read the
+# same VERBOSE inline.)
+okline() { pass=$((pass+1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"; return 0; }
+same() { if [ "$2" = "$3" ]; then okline "$1"; else echo "  FAIL $1"; echo "       want [$3] got [$2]"; fail=1; fi; }
 
 # --- the node suites -------------------------------------------------------
 # One fresh state dir each, so a suite can never inherit another's session
@@ -88,5 +93,5 @@ same "...and reports it under --check first" \
      "$(grep -cE '\$NAMING" --check' "$ROOT/bin/install.sh")" "1"
 
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAILURES"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suites counted above)"; else echo "FAILURES"; fi
 exit "$fail"

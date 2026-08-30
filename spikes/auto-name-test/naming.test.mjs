@@ -15,7 +15,7 @@ const T = mkdtempSync(join(process.env.COCKPIT_DIR || tmpdir(), "naming-"));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
-  if (cond) { pass++; console.log(`  ok   ${name}`); }
+  if (cond) { pass++; if (process.env.VERBOSE) console.log(`  ok   ${name}`); }
   else { fail++; console.log(`  FAIL ${name}`); if (detail) console.log(`       got [${detail}]`); }
 };
 const sh = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
