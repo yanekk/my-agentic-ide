@@ -10,6 +10,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-08-31 | ✅ | T03 live verify (full hook, real gateway, fresh session): `add a retry to the upload path` → `my-agentic-ide / upload-retry`, the Haiku label. End-to-end ~9s. The route, request and gateway all work as designed. |
+| 2026-08-31 | 🐞 | The 2s hold was too short for the real gateway: it answers in **5.5–8s every time** (measured across 5 prompts; streaming's first byte is also ~7s, so it's pure end-to-end latency, not TTFT). Every Bedrock call aborted at 2s → silent fallback to the opening-words placeholder. |
+| 2026-08-31 | 🔄 | User chose to hold the first prompt up to **15s** on the Bedrock route so the label wins (the ~2s design assumption was wrong for this gateway). Fix: per-route timeout (2s Anthropic, 15s Bedrock) + hook kill-timeout raised 10s→20s so it can't die mid-call. Public-API route unchanged. |
 | 2026-08-31 | 🐞 | T02 review fixed its own guard tests (see commit): `fetch: explode` + `c===null` passes even with a guard gutted, since fetchTopic swallows the throw. The pre-existing gate tests (447–477) share this; out of T02 scope, left alone. |
 | 2026-08-31 | ✅ | Planning probe (the spike). A live `curl` to `{ANTHROPIC_BEDROCK_BASE_URL}/model/{model}/invoke` with only a content-type header and a 16-token body returned `200` + `ok`. The company gateway authorizes on Tailscale network identity alone — no key, no SigV4. |
 | 2026-08-31 | 📌 | The model id from `ANTHROPIC_DEFAULT_HAIKU_MODEL` worked verbatim in the URL path (no `:0` suffix, no encoding). Use it raw; encoding could break the gateway's routing. Body uses `anthropic_version: "bedrock-2023-05-31"` and no `model` field. |

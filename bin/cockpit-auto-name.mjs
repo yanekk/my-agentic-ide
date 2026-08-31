@@ -54,6 +54,22 @@ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 const SLUG_RE = /^\s*\/?pir-(?:work|plan|review-plan)\s+([A-Za-z0-9][A-Za-z0-9._-]*)/;
 
+// Per-route hold budgets. The public Anthropic API answers in ~1s, so 2s keeps
+// the first-prompt hold barely noticeable. The company Bedrock gateway is far
+// slower -- MEASURED 5.5-8s per call, every time (FINDINGS 2026-08-31), pure
+// end-to-end latency that streaming does not shorten -- so a 2s cap there aborts
+// every call and the session silently falls back to the opening-words
+// placeholder. 15s lets the Haiku label win; it is only ever paid on the FIRST
+// prompt of a new agent (later prompts are frozen and skip the call), and the
+// hook's own kill-timeout in registerIn is set safely above it.
+const ANTHROPIC_TIMEOUT_MS = 2000;
+const BEDROCK_TIMEOUT_MS = 15000;
+// The hook's kill-timeout (settings.json). Must clear BEDROCK_TIMEOUT_MS plus
+// node startup and JSON handling, or Claude Code SIGKILLs the hook mid-call and
+// no title is ever emitted -- the exact failure that made Bedrock naming look
+// broken when this was 10s.
+const HOOK_TIMEOUT_S = 20;
+
 const done = () => process.exit(0);
 
 // ---------------------------------------------------------------- naming ---
@@ -251,7 +267,8 @@ export function truthy(v) {
 
 // Decide whether to spend a Haiku call on this prompt, and if so make it, over
 // whichever transport the session's environment selects. The call -- and therefore
-// the ~2s hold -- happens ONLY for a cockpit session (COCKPIT_REPO present, DESIGN
+// the hold (2s on the Anthropic route, up to 15s on the slow Bedrock gateway) --
+// happens ONLY for a cockpit session (COCKPIT_REPO present, DESIGN
 // 2.4) that has no settled name yet and whose first message is ordinary prose. It is
 // skipped when a stronger deterministic signal already names the session: a /pir-work
 // slug or a worktree cwd outranks the Haiku topic anyway (DESIGN 2.1/2.3), so calling
@@ -292,12 +309,16 @@ export async function candidateTopic(input, state, env = {}, opts = {}) {
     // Haiku slot, SMALL_FAST Claude Code's documented small-fast fallback (DESIGN 2.2).
     const bedrockModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_SMALL_FAST_MODEL;
     if (!tidy(baseUrl) || !bedrockModel) return null;   // on Bedrock but under-configured: OFF
-    return fetchTopic(input.prompt, { kind: "bedrock", baseUrl, model: bedrockModel }, { fetch, timeoutMs });
+    // The gateway is slow (5.5-8s measured), so it gets the long budget; a test
+    // may still override via opts.timeoutMs.
+    return fetchTopic(input.prompt, { kind: "bedrock", baseUrl, model: bedrockModel },
+      { fetch, timeoutMs: timeoutMs ?? BEDROCK_TIMEOUT_MS });
   }
 
   const apiKey = readKey(dir);
   if (!apiKey) return null;                                          // 2.6: not on Bedrock, no key -> off
-  return fetchTopic(input.prompt, { kind: "anthropic", apiKey, model }, { fetch, timeoutMs });
+  return fetchTopic(input.prompt, { kind: "anthropic", apiKey, model },
+    { fetch, timeoutMs: timeoutMs ?? ANTHROPIC_TIMEOUT_MS });
 }
 
 // Claude writes its own summary into the transcript as a {"type":"ai-title"}
@@ -438,7 +459,8 @@ async function runHook() {
 
   const state = readState(input.session_id);
   // The one impure step: hold the prompt while Haiku names an ordinary first
-  // message, bounded by fetchTopic's own ~2s timeout. Whether the call happens at
+  // message, bounded by fetchTopic's per-route timeout (2s Anthropic, 15s the
+  // slow Bedrock gateway). Whether the call happens at
   // all -- the COCKPIT_REPO gate, the key, "no name yet", prose not a slug, not a
   // worktree -- is decided in candidateTopic; here the result is just data.
   const candidate = await candidateTopic(input, state, process.env);
@@ -469,7 +491,7 @@ export function registerIn(settings, command) {
     .filter((g) => g.hooks.length > 0);
   const had = groups.length !== kept.length ||
     groups.some((g, i) => (g.hooks ?? []).length !== (kept[i]?.hooks ?? []).length);
-  next.hooks.UserPromptSubmit = [...kept, { hooks: [{ type: "command", command, timeout: 10 }] }];
+  next.hooks.UserPromptSubmit = [...kept, { hooks: [{ type: "command", command, timeout: HOOK_TIMEOUT_S }] }];
   return { settings: next, replaced: had };
 }
 

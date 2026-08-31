@@ -72,9 +72,12 @@ signal available at the moment the session is first named — a name **you** typ
 a `/pir-work` slug, else the worktree it sits in, else a **one-to-three-word label
 Claude Haiku 4.5 infers from the first message** (`implement the OAuth loopback flow`
 → `oauth-loopback`), else the opening words of the prompt as a placeholder. To get that
-Haiku label the hook holds the first prompt for up to ~2s, calls the model and releases
-with the topic already set; a greeting or content-free message returns no label and just
-keeps the placeholder. The label is **set once and then frozen**: the first real name
+Haiku label the hook holds the first prompt, calls the model and releases with the topic
+already set; a greeting or content-free message returns no label and just keeps the
+placeholder. The hold is bounded per route — ~2s on the public Anthropic API, but up to
+**15s** on the company Bedrock gateway, which is measurably slower (5.5–8s a call); the
+hook's own kill-timeout sits above that at 20s so it is never killed mid-call. Only the
+*first* message of a new agent pays it; later prompts are frozen and skip the call. The label is **set once and then frozen**: the first real name
 (slug, worktree, Haiku topic, or Claude's own summary when there is no key) locks it, and
 after that only *you* rename it (`/rename` or the fleet list). The old "follows the work"
 rule — re-naming a session when it later ran `/pir-work` or entered a worktree — is

@@ -118,8 +118,9 @@ All of these collapse to "no name", never an error in the prompt box, unchanged 
 from `smart-agent-names/DESIGN.md §2.6`:
 
 - Gateway unreachable, times out, or returns a non-2xx: the call returns null within the
-  ~2s timeout and the session keeps its placeholder. The prompt is never held longer than
-  the timeout.
+  route's timeout (2s on the Anthropic route, 15s on the slow Bedrock gateway — see the
+  latency note below) and the session keeps its placeholder. The prompt is never held
+  longer than that timeout, and the hook's own kill-timeout is set safely above it.
 - On Bedrock but the base URL or model id is missing: naming is off (2.1), the key is not
   read, nothing is sent anywhere.
 - The gateway returns a body that is not a valid label (a clarifying sentence, empty, wrong
@@ -211,17 +212,20 @@ uses the global `fetch`.
 
 | Cannot be tested automatically | Why it needs a person |
 |---|---|
-| A real agent in a Bedrock session is named through the gateway within ~2s | needs the company Bedrock environment, the live gateway and real network latency — none present on the machine the suite runs on |
+| A real agent in a Bedrock session is named through the gateway | needs the company Bedrock environment, the live gateway and real network latency — none present on the machine the suite runs on |
 
 The gateway's reachability without credentials is already established (FINDINGS, planning:
 a live call returned 200), so it is not a pending row — only the end-to-end naming of a real
-agent and its latency remain for a person.
+agent remained for a person. **Verified 2026-08-31** (FINDINGS): a full hook run on the
+company machine named `add a retry to the upload path` → `my-agentic-ide / upload-retry`.
+That verify also **corrected the latency assumption**: the gateway answers in 5.5–8s, not
+~2s, so the Bedrock route's hold was raised to 15s (see §5.2).
 
 ### 5.2 Seatbelts
 
 | Flag / mechanism | Default | Effect |
 |---|---|---|
-| The fetch timeout | ~2000ms | no gateway call can hang the prompt box |
+| The fetch timeout (per route) | 2000ms Anthropic · 15000ms Bedrock | no gateway call can hang the prompt box; the Bedrock budget matches its measured 5.5–8s latency, and the hook's own 20s kill-timeout sits above it so the process cannot be killed mid-call |
 | `max_tokens: 16` on the request | on | the call is tiny; a runaway response cannot accrue cost |
 | The call target is the company's own gateway | — | no public metered API is involved, so a leaked or repeated call has no external bill |
 | An injected fake fetch in the tests | on in tests | the suite never touches the network or the gateway |
