@@ -67,15 +67,27 @@ labels a session with a one-line summary Claude writes from your first message
 ("read handoff document") — fine on its own, poor in a list of six, because
 nothing says which repo it belongs to and two agents in different projects can
 read identically. `cockpit-auto-name.mjs` supplies the missing half: every session
-in a git repo becomes **`<repo folder> / <what it is doing>`**, from the strongest
-signal available — a `/pir-work` slug, else the worktree it sits in, else Claude's
-own summary once that exists (the opening words of the first prompt stand in until
-it does). The name **follows the work**: a session that later runs `/pir-work`, or
-moves into a worktree, is renamed to match. A name **you** type (`/rename`, or the
-fleet list) ends it — that session is never touched again. Unlike `note` and
-`agenda` this is deliberately *not* cockpit-only: it is registered in
-`~/.claude/settings.json` by `bin/install.sh`, because an agent dispatched from the
-fleet view is an ordinary claude session and naming it is the whole point.
+in a git repo becomes **`<repo folder> / <topic>`**, and the topic is the strongest
+signal available at the moment the session is first named — a name **you** typed, else
+a `/pir-work` slug, else the worktree it sits in, else a **one-to-three-word label
+Claude Haiku 4.5 infers from the first message** (`implement the OAuth loopback flow`
+→ `oauth-loopback`), else the opening words of the prompt as a placeholder. To get that
+Haiku label the hook holds the first prompt for up to ~2s, calls the model and releases
+with the topic already set; a greeting or content-free message returns no label and just
+keeps the placeholder. The label is **set once and then frozen**: the first real name
+(slug, worktree, Haiku topic, or Claude's own summary when there is no key) locks it, and
+after that only *you* rename it (`/rename` or the fleet list). The old "follows the work"
+rule — re-naming a session when it later ran `/pir-work` or entered a worktree — is
+**retired for the label**, because a good Haiku label makes that just the machine
+shuffling your labels around; only a placeholder still climbs to a real name on a later
+prompt. (The daemon's pane migration still follows the work — that is a different concern.)
+
+The Haiku call, and any use of the key, is confined to **cockpit sessions** — the hook is
+registered globally in `~/.claude/settings.json` by `bin/install.sh` (an agent dispatched
+from the fleet view is an ordinary claude session, so naming it needs the global hook), but
+it only calls the model when `COCKPIT_REPO` is present in its environment. The key comes
+from **`config anthropic-api-key`** (below); with no key, or in a non-cockpit terminal, the
+naming degrades silently to today's summary behaviour — no hold, no spend, no error.
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
@@ -143,7 +155,8 @@ bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daem
 bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
 bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes column
-bin/cockpit-auto-name.mjs  names every session "<repo> / <task>"; registers itself
+bin/cockpit-auto-name.mjs  names every session "<repo> / <topic>"; registers itself; the Haiku call
+bin/cockpit-config.mjs  the `config` command and the API-key store (cockpit terminals only)
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
@@ -184,10 +197,14 @@ setup), `agenda.json` (the sign-ins and the attached calendars — a corrupt one
 throwing a refresh token away costs two browser round trips) and
 `agenda-cache.json` (the fetched events, written by the daemon and watched by the
 pane), `auto-names/` (one small file per session — what the naming hook last called
-it, and whether it has stood down because you renamed it by hand; a file each rather
-than one shared JSON so concurrent agents need no lock, pruned at 30 days), all three `0600` — the cache included, it holds your meeting titles — under
-one shared `agenda.lock`, `bin/note` and `bin/agenda` (symlinks to
-`cockpit-note.mjs` and `cockpit-agenda.mjs`, relinked on every
+it, whether it has **frozen** on a real name, and whether it has stood down because you
+renamed it by hand; a file each rather
+than one shared JSON so concurrent agents need no lock, pruned at 30 days),
+`anthropic-api-key` (the key `config anthropic-api-key` writes — plain text, `0600`, atomic
+temp-then-rename; an absent file simply means the Haiku naming is off, and it is read
+directly by the hook, never exported as a variable), all three agenda files `0600` — the cache included, it holds your meeting titles — under
+one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to
+`cockpit-note.mjs`, `cockpit-agenda.mjs` and `cockpit-config.mjs`, relinked on every
 rebuild — the whole of how the commands are "inside the cockpit only"), and `cmd`
 (the command channel
 the terminal keybindings append to — the custom prompt appends `custom-ok`/
@@ -263,6 +280,14 @@ something was attached, never *which*.
 - Unflushed annotations are invisible to the daemon, so auto-reload's "have you
   started commenting?" check is based on the flushed file.
 - One agent at a time, by design.
+- The Anthropic key is guarded against **other users** by the file's `0600`, not against
+  **your own** processes: an agent runs as you and can read
+  `~/.claude/cockpit/anthropic-api-key` off disk. A real wall is the macOS Keychain, which
+  fights "keep it small"; the mitigation is a **spend-capped** key, and this residual is
+  accepted, not defended.
+- `config anthropic-api-key <key>` takes the key as a command argument, so it also lands in
+  your shell history — a second at-rest copy, no weaker than the disk read above. Accepted;
+  clear the history entry, or set the key from a history-ignored shell, if you mind.
 
 
 ---
