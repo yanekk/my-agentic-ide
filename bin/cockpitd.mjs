@@ -817,19 +817,28 @@ async function terminalCommand(verb, attempt = 0) {
  * Restart revdiff in `pane` with the current mode's range.
  *
  * Switching the range means RESTARTING revdiff -- `R` only reloads the same range
- * -- so the TUI is quit back to its shell (`q`) and relaunched. Never done while
+ * -- so the TUI is quit back to its shell and relaunched. Never done while
  * the annotation editor is open: revdiff reads every keystroke as comment text, so
- * the `q` and the whole command would land in the comment. On a pane already at a
- * shell (revdiff was quit with `q`) there is nothing to quit, so skip straight to
- * the launch.
+ * the quit key and the whole command would land in the comment. On a pane already
+ * at a shell (revdiff was already quit) there is nothing to quit, so skip straight
+ * to the launch.
+ *
+ * `discard` picks the quit key. revdiff writes its annotations to the `-o` file
+ * *on quit* (its documented behaviour: "stdout on quit, or -o file"), so a plain
+ * `q` after an `O` flush re-writes the just-flushed annotations -- which the
+ * annotation watcher then injects a SECOND time (the review is copied twice). The
+ * reset-after-review path passes `discard: true` to quit with `Q` instead:
+ * `--no-confirm-discard` is set, so `Q` throws the annotations away and quits in
+ * one stroke without writing the file. `q` stays the default for a mode/worktree
+ * relaunch, where the pane normally holds no flushed annotations to re-emit.
  */
-async function relaunchDiff(jobId, pane, worktree, reviewFile) {
+async function relaunchDiff(jobId, pane, worktree, reviewFile, { discard = false } = {}) {
   const status = diffPaneStatus(pane);
   if (status === "editing") {
     return log(`not switching diff mode for ${jobId}: annotation editor is open`);
   }
   if (status === "running") {
-    sendRaw(pane, "q");                 // quit revdiff back to the shell
+    sendRaw(pane, discard ? "Q" : "q");  // quit revdiff back to the shell (Q discards, q writes)
     await sleep(SHELL_SETTLE_MS);       // let the prompt return before we type
   }
   const mode = modeOf(jobId);
@@ -1437,8 +1446,12 @@ function injectReview(text) {
  *      would land on revdiff's own "discard? y/n" -- a prompt left unanswered on a
  *      parked, off-screen pane. revdiff has no "clear but stay" action (only `q`
  *      quit and `Q` discard_quit), so the only way to make it let go is to relaunch
- *      it (`q` + start). The relaunch also re-reads HEAD, and starts with zero
+ *      it (quit + start). The relaunch also re-reads HEAD, and starts with zero
  *      annotations since we pass `-o` (write) not `--annotations` (preload).
+ *      The quit MUST be `Q` (discard), not `q`: revdiff writes its annotations to
+ *      the `-o` file on quit, so a plain `q` here re-writes the annotations we just
+ *      flushed and the watcher injects the same review a SECOND time. `Q` discards
+ *      them without writing -- see relaunchDiff's `discard` option.
  *
  * Pinned annotations cannot survive a refresh anyway -- the lines they hang on move
  * the moment the diff reloads -- so "clear on send" is the only coherent behaviour.
@@ -1465,7 +1478,9 @@ async function resetDiffAfterReview(attempt = 0) {
     // still in flight. The write re-triggers watchAnnotations' dir watch, but empty
     // content is ignored there (!cur.trim()), so there is no re-inject loop.
     try { fs.writeFileSync(reviewFile, ""); } catch {}
-    await relaunchDiff(jobId, pane, worktree, reviewFile);
+    // discard: quit with `Q`, not `q` -- `q` re-writes the flushed annotations to
+    // the -o file, which the watcher would inject a second time (review copied twice).
+    await relaunchDiff(jobId, pane, worktree, reviewFile, { discard: true });
   } finally {
     reconciling = false;
   }

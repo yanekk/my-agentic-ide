@@ -352,6 +352,12 @@ check "second flush injected after rename"       "second flush" "$CALLS"
 # send, showing committed work as uncommitted until the next re-attach.
 check "the diff is reset (relaunched clean) on send" \
       "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
+# The reset must quit revdiff with Q (discard), not q. revdiff writes its
+# annotations to the -o file ON QUIT, so a plain q re-writes the annotations just
+# flushed and the watcher injects the SAME review a second time -- the comments
+# arrive twice. Q discards without writing (--no-confirm-discard is set).
+check "revdiff quit with Q (discard) on send, not q" "STDIN:Q" "$CALLS"
+refute "the send did not quit with a plain q"        "STDIN:q" "$CALLS"
 [ -s "$T/state/review-abc12345.md" ] \
     && { echo "  FAIL the handoff file was not emptied on send"; fail=1; } \
     || okline "handoff file emptied on send"
