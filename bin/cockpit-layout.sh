@@ -68,6 +68,7 @@ COCKPIT_BIN="$DIR/bin"
 mkdir -p "$COCKPIT_BIN"
 ln -sf "$HERE/cockpit-note.mjs" "$COCKPIT_BIN/note"
 ln -sf "$HERE/cockpit-agenda.mjs" "$COCKPIT_BIN/agenda"
+ln -sf "$HERE/cockpit-config.mjs" "$COCKPIT_BIN/config"
 
 # Exported HERE, before anything is spawned, so it reaches (a) the daemon started
 # below, which passes it on to every terminal it opens, and (b) `claude agents` at

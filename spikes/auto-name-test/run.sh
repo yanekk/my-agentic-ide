@@ -75,6 +75,19 @@ foreign="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/bin/cockpit-auto-name.mjs"
   | grep -oE "[\"'][^\"']+[\"']" | grep -vcE "^[\"']node:")"
 same "the hook imports nothing outside node:*" "$foreign" "0"
 
+# The config command holds the same line -- run.sh checks it because config is
+# symlinked onto the cockpit PATH and the whole repo must stay installable with
+# only node present. Same extraction as above.
+cfg_foreign="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$ROOT/bin/cockpit-config.mjs" \
+  | grep -oE "(from|import|require)[[:space:]]*\(?[[:space:]]*[\"'][^\"']+[\"']" \
+  | grep -oE "[\"'][^\"']+[\"']" | grep -vcE "^[\"']node:")"
+same "cockpit-config.mjs imports nothing outside node:*" "$cfg_foreign" "0"
+
+# `config` must be relinked on every rebuild, alongside `note` and `agenda`, or
+# it would exist in the checkout but never on any cockpit shell's PATH.
+same "cockpit-layout.sh symlinks config onto the cockpit PATH" \
+     "$(grep -cE 'cockpit-config\.mjs" "\$COCKPIT_BIN/config"' "$ROOT/bin/cockpit-layout.sh")" "1"
+
 # It runs on EVERY prompt of every session, so a crash here is a crash in the
 # prompt box. The contract is that it never exits non-zero in hook mode.
 for bad in 'not json' '{}' '{"session_id":"x"}' '[]' 'null'; do
