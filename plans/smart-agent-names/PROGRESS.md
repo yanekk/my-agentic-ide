@@ -6,12 +6,11 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
 **Plan reviewed:** 2026-08-31 — 1 fixed, 4 decided with the user.
 
-**Status:** T01, T02, T03 reviewed. T04 implemented and hands-on-verified: all four DESIGN
-5.1 checks PASS (live name `agentic-ide / pizza-baking`). One T02 defect found & fixed
-(`config` was non-executable), now test-guarded. T04 awaits fresh-eyes review — the last task.
+**Status:** All four tasks ✅. **The plan is complete.** T04 reviewed clean: CLAUDE.md
+verified line-by-line against the code (10 doc claims TRUE), the executability guard proven
+to defend, suite ALL PASS, and all five DESIGN 5.1 hands-on rows recorded in FINDINGS.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** review T04 (docs accuracy, the executability guard, findings), then
-mark it ✅ — which finishes the plan.
+**Next `pir-work` will:** nothing — every task is reviewed and done.
 
 ## Tasks
 
@@ -21,11 +20,11 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | Haiku topic-namer and label guard | — | ✅ | Clean. Model-alias + live label quality are T04 (5.1). |
-| T02 | `config` command and key store | — | ✅ | Clean, no fix commit. All 7 task checks defend (masking test fails if the length-1 cap is dropped — verified). Probed: masking at lengths 0–5 (a 1-char key reveals nothing), unknown-setting exit, empty-file reads as off, realpath entrypoint guard (import runs no CLI). 0600 atomic write; read path masks. `config` name is a T04 hands-on check. |
-| T03 | Wire into the hook: gate, hold, freeze | T01, T02 | ✅ | One fix: a real name (candidate/summary) whose text equalled the placeholder hit `decide`'s "title unchanged" early-out and never froze — endless re-fetch/climb; the freeze-crossing now persists (defended, fails pre-fix). Probed: `candidateTopic` mirrors `decide`'s guards so a settled session is never held; empty input never spends. Daemon untouched. Suite 70+13. |
-| T04 | Relink, docs, hands-on verify | T03 | 🔍 | Docs + one-line `chmod +x` + run.sh executability guard (16 bash checks). All four DESIGN 5.1 checks PASS: gate fires in a dispatched agent, key never a variable, live name `agentic-ide / pizza-baking`, `config` confined to cockpit shells. Found & fixed a T02 defect (`config` shipped `0644`). Measured table untouched. Awaiting review. |
+| T02 | `config` command and key store | — | ✅ | Clean. 7 checks defend the key store: 0600 atomic write, masking (a length-1 key reveals nothing), unknown-setting exit, import-safe entrypoint guard. |
+| T03 | Wire into the hook: gate, hold, freeze | T01, T02 | ✅ | Clean; one fix — a real name coinciding with the placeholder text hit `decide`'s "unchanged" early-out and never froze (endless re-fetch); freeze-crossing now persists, defended. |
+| T04 | Relink, docs, hands-on verify | T03 | ✅ | Reviewed clean, no fix commit. CLAUDE.md verified line-by-line against the code — all 10 doc claims TRUE (model id, 2000ms hold, `COCKPIT_REPO` gate, freeze rule, 0600 key never a variable, symlink+PATH-prepend, length-1 mask). Executability guard proven to defend (a dropped bit fails). Suite ALL PASS; all five 5.1 hands-on rows recorded. |
 
-**Review queue:** T04
+**Review queue:** *(empty — plan complete)*
 
 ## Blocked on the user
 
