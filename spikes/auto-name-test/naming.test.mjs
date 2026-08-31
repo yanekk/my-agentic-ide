@@ -330,6 +330,19 @@ const inp = (o) => ({ session_id: "sess-1", cwd: repo, prompt: "", session_title
      out.title === "myrepo / browse-mode-review" && out.state.frozen === true, JSON.stringify(out));
 }
 
+{ // The coincidence gap: a REAL name whose TEXT equals the placeholder it replaces
+  // must still freeze. Otherwise the "nothing changed" early-out drops the freeze
+  // and the session climbs/re-fetches for ever (DESIGN 2.2).
+  const first = decide(inp({ prompt: "read the docs" }), null, {}, null);
+  ok("placeholder set, unfrozen (coincidence setup)",
+     first.title === "myrepo / read the docs" && !first.state.frozen, JSON.stringify(first));
+  const trPath = transcriptWith(freshState(), "read the docs");   // summary == placeholder text
+  const second = decide(inp({ prompt: "go on", session_title: first.title, transcript_path: trPath }),
+    first.state, {}, null);
+  ok("a real name equal to the placeholder still freezes, silently",
+     second.title === null && second.state?.frozen === true, JSON.stringify(second));
+}
+
 { // The placeholder is not settled, so it still climbs: a later worktree move is
   // taken and freezes (DESIGN 2.2 -- retirement is of REAL names, not stand-ins).
   const first = decide(inp({ prompt: "start here" }), null, {}, null);

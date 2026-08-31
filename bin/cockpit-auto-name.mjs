@@ -337,8 +337,19 @@ export function decide(input, state, env = {}, candidate = null) {
   if (!right) return { title: null };
 
   const title = clip(`${ctx.repo} / ${right}`, MAX_TITLE);
-  if (state && title === state.title) return { title: null };   // nothing changed
-  return { title, state: real ? { title, frozen: true } : { title }, isNew: !state };
+  const nextState = real ? { title, frozen: true } : { title };
+  if (state && title === state.title) {
+    // The title text is unchanged, so nothing is emitted -- but a REAL name whose
+    // text happens to equal the placeholder it replaces must still freeze. Without
+    // this, a candidate/summary that coincides with the opening words leaves the
+    // session unfrozen for ever: it keeps re-fetching Haiku (a hold + spend on
+    // every later prompt) and stays free to be renamed by a later slug/worktree --
+    // the "follows the work" behaviour DESIGN 2.2 retires. Persist only the
+    // freeze-crossing; a same-state re-emit still stays silent.
+    if (nextState.frozen && !state.frozen) return { title: null, state: nextState };
+    return { title: null };
+  }
+  return { title, state: nextState, isNew: !state };
 }
 
 async function runHook() {
