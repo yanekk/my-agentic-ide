@@ -10,8 +10,7 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 `smart-agent-names` code in `bin/cockpit-auto-name.mjs`. The gateway was proven reachable
 without credentials during planning (see FINDINGS), so there is no spike.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** review T01, then implement T02 (the env route decision in
-`candidateTopic`).
+**Next `pir-work` will:** implement T02 (the env route decision in `candidateTopic`).
 
 ## Tasks
 
@@ -20,11 +19,11 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | Bedrock transport in `fetchTopic` | — | 🔍 | Added `provider` param + `buildRequest` (both routes); Bedrock path/headers/body per DESIGN 2.3. 24 new checks. **Deviation:** touched `candidateTopic`'s one `fetchTopic` call (wrap `apiKey`→`{kind:"anthropic"}`) — the signature change forced it or the suite went red; env route stays T02. |
+| T01 | Bedrock transport in `fetchTopic` | — | ✅ | Clean, no fix commit. Both request shapes match DESIGN 2.3; `buildRequest` returns null for under-filled/unknown providers so no fetch fires; timer set after that guard and cleared in `finally`. Verified the recorded `candidateTopic` deviation preserves behaviour — `model` stays undefined and still defaults to `claude-haiku-4-5`. Probed early-null timer safety, trailing slash, verbatim `:`, null provider. |
 | T02 | Route decision in `candidateTopic` | T01 | ⬜ | Bedrock wins, exclusive; key path only off-Bedrock (DESIGN 2.1/2.2). |
 | T03 | CLAUDE.md + live verify | T01, T02 | ⬜ | Doc the route; hands-on: name a real agent via the gateway within ~2s (DESIGN 5.1). |
 
-**Review queue:** T01
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
