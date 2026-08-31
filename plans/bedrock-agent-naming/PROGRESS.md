@@ -6,11 +6,11 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
 **Plan reviewed:** 2026-08-31 — clean, nothing found
 
-**Status:** T02 implemented, awaiting review. The route decision now lives in
-`candidateTopic`; T03 (doc the route in CLAUDE.md, then the one hands-on gateway check) is
-the last task and depends on this review passing.
+**Status:** T02 reviewed and done. The route decision lives in `candidateTopic`; both code
+tasks are ✅. T03 (doc the route in CLAUDE.md, then the one hands-on gateway check) is the
+last task and its dependencies are now met.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** review T02.
+**Next `pir-work` will:** implement T03.
 
 ## Tasks
 
@@ -19,11 +19,11 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | Bedrock transport in `fetchTopic` | — | ✅ | Clean, no fix commit. Both request shapes match DESIGN 2.3; `buildRequest` returns null for under-filled/unknown providers so no fetch fires. Reviewed the recorded deviation (call site left anthropic-only until T02). |
-| T02 | Route decision in `candidateTopic` | T01 | 🔍 | Route in `candidateTopic`: Bedrock wins and is exclusive (key never read), else the key path, else off (DESIGN 2.1/2.2); model DEFAULT_HAIKU then SMALL_FAST. +25 tests: full route matrix, guards short-circuit before the route, spy proves the key unread on Bedrock. Deviation: key reader made injectable via `opts.readKey` (default `readKeyFile`) so the spy assertion the task lists is possible. |
+| T01 | Bedrock transport in `fetchTopic` | — | ✅ | Clean. Both request shapes match DESIGN 2.3; `buildRequest` returns null for under-filled/unknown providers. |
+| T02 | Route decision in `candidateTopic` | T01 | ✅ | Route correct: Bedrock exclusive (key never read, proven by spy), model DEFAULT_HAIKU→SMALL_FAST, under-configured Bedrock is off. Fix commit: the 5 guard-short-circuit tests asserted only `c===null`, which fetchTopic yields for a swallowed throw too — proved weak by gutting the worktree guard, now assert `fetch.calls.length===0`. Injectable `readKey` deviation sound. |
 | T03 | CLAUDE.md + live verify | T01, T02 | ⬜ | Doc the route; hands-on: name a real agent via the gateway within ~2s (DESIGN 5.1). |
 
-**Review queue:** T02
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 

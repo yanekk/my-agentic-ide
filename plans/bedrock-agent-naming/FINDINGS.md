@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-08-31 | 🐞 | T02 review fixed its own guard tests (see commit): `fetch: explode` + `c===null` passes even with a guard gutted, since fetchTopic swallows the throw. The pre-existing gate tests (447–477) share this; out of T02 scope, left alone. |
 | 2026-08-31 | ✅ | Planning probe (the spike). A live `curl` to `{ANTHROPIC_BEDROCK_BASE_URL}/model/{model}/invoke` with only a content-type header and a 16-token body returned `200` + `ok`. The company gateway authorizes on Tailscale network identity alone — no key, no SigV4. |
 | 2026-08-31 | 📌 | The model id from `ANTHROPIC_DEFAULT_HAIKU_MODEL` worked verbatim in the URL path (no `:0` suffix, no encoding). Use it raw; encoding could break the gateway's routing. Body uses `anthropic_version: "bedrock-2023-05-31"` and no `model` field. |
 | 2026-08-31 | 📌 | `aws` CLI v2 is installed with `bedrock-runtime` (~0.2s cold start), but the shipped code needs none of it — the gateway route is a plain `fetch`. The CLI would only matter for the out-of-scope direct-AWS path (DESIGN 8). |
