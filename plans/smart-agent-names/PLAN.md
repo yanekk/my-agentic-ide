@@ -79,9 +79,11 @@ DESIGN 2.4 is wrong.
 
 ## Decisions still open
 
-- **The `COCKPIT_REPO` gate (DESIGN 2.4).** The plan assumes a hook fired inside a dispatched
-  agent sees `COCKPIT_REPO`. It is verified at the top of T04, and it also wants confirming
-  by the review that this is the gate the person wants rather than "key is configured". It
-  blocks nothing until T04, where a wrong answer forces a rethink of the gate.
+- **The `COCKPIT_REPO` gate (DESIGN 2.4).** The plan review (2026-08-31) confirmed
+  `COCKPIT_REPO` is the right gate over "key is configured": the hook is globally registered,
+  so a key-configured gate would hold and spend on every claude session on the machine, which
+  breaks "the key stays in the cockpit". The only thing still open is the *empirical* question
+  — does a hook fired inside a dispatched agent actually see `COCKPIT_REPO`? — verified at the
+  top of T04, where a wrong answer forces a rethink of the gate. It blocks nothing until then.
 
 Nothing else is open.

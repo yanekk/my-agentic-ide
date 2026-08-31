@@ -24,7 +24,11 @@ signature, the flow).
   the config module — read the same file directly, so the dependency-boundary check stays
   green), gate on `COCKPIT_REPO`, and call `fetchTopic` bounded by the timeout before calling
   `decide`.
-- `spikes/auto-name-test/naming.test.mjs` — add the freeze and wiring cases below.
+- `spikes/auto-name-test/naming.test.mjs` — add the freeze and wiring cases below, and
+  **remove the now-contradicting case** "the name follows a move into a worktree" (it asserts
+  the retired 2.2 behaviour, replaced by the "does NOT rename" case here). Re-check the other
+  RANK-era cases still hold under the freeze model (a frozen slug still refuses a later
+  summary; the no-key placeholder→summary path still works) and adjust any that assumed RANK.
 
 ## Design sections this implements — the freeze model in `decide`
 
@@ -44,7 +48,9 @@ export function decide(input, state, env = {}, candidate = null) → { title, st
 
 // runHook: reads DIR/anthropic-api-key directly; only calls fetchTopic when
 //   process.env.COCKPIT_REPO is set AND a key is present AND the session has no name yet
-//   AND the first message is ordinary prose (not a /pir-work slug).
+//   AND the first message is ordinary prose (not a /pir-work slug)
+//   AND the cwd is not already inside a worktree (DESIGN 2.3 — the worktree name would win
+//   anyway, so calling Haiku would only hold the prompt ~2s and spend a discarded call).
 ```
 
 The hook reads the key file directly rather than importing `cockpit-config.mjs`, so
@@ -59,6 +65,7 @@ The hook reads the key file directly rather than importing `cockpit-config.mjs`,
 - [ ] candidate null with no key: placeholder now, unfrozen; a later prompt takes Claude's summary and freezes (today's behaviour)
 - [ ] candidate null from a timeout with a key: placeholder now, unfrozen; a later prompt with a candidate freezes
 - [ ] first message is `/pir-work slug`: uses the slug, freezes, and `fetchTopic` is not called
+- [ ] first prompt with the cwd already inside a worktree: uses the worktree name, freezes, and `fetchTopic` is not called
 - [ ] `runHook` does not call `fetchTopic` when `COCKPIT_REPO` is absent (mock/env-controlled)
 - [ ] `runHook` does not call `fetchTopic` when no key is present
 - [ ] every malformed hook input still exits 0 (the existing robustness cases keep passing)

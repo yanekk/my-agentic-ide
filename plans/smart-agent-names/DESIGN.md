@@ -79,7 +79,13 @@ different concerns and conflating them would break the pane migration the cockpi
 
 On the first prompt of a not-yet-named cockpit session whose first message is ordinary
 prose, the hook calls Haiku synchronously and returns the topic, so the prompt is held for
-up to the timeout and released with the correct name already set. The fleet-list name can
+up to the timeout and released with the correct name already set. The call is skipped
+entirely — no hold, no spend — when the session is already named by a stronger deterministic
+signal at that first prompt: a `/pir-work` slug (2.1 rank 2) or a worktree cwd (rank 3). The
+order of authority (2.1) means Haiku's topic would lose to either anyway, so calling it would
+hold the prompt ~2s and spend a call only to discard the result. This matters because agents
+dispatched into a worktree are the common cockpit case; without the short-circuit they would
+be held on every first prompt for a name they already have. The fleet-list name can
 only be written at the instant a prompt is submitted, because the `UserPromptSubmit` hook's
 stdout is the only channel that sets a session title. An instant correct name therefore
 requires doing the naming before that stdout is written. There is no way to show an interim
@@ -206,7 +212,8 @@ the guarded Haiku topic or null. The order inside it:
 
 `UserPromptSubmit` fires. `runHook` reads the hook JSON from stdin, the session's state
 file, and — if a key is configured and `COCKPIT_REPO` is present and the session has no name
-yet and the message is ordinary prose — calls `fetchTopic` bounded by the timeout. It then
+yet and the message is ordinary prose (no `/pir-work` slug) and the cwd is not already inside
+a worktree (2.3) — calls `fetchTopic` bounded by the timeout. It then
 calls `decide(input, state, env, candidate)`. If `decide` returns a title, `runHook` writes
 the state file and emits `{hookSpecificOutput: {hookEventName, sessionTitle}}`. Any failure
 anywhere exits 0 with no output.
@@ -274,7 +281,7 @@ standing rule of the repository, not a choice of this plan.
 | The ~2s hold feels right and the name appears in the live fleet list | needs the real claude binary, real API latency, and eyes on the GUI |
 | An agent cannot read the key as a variable | needs a live agent terminal; `env \| grep -i anthropic` must be empty |
 | `config` works inside a cockpit terminal and nowhere else | needs a real cockpit window versus a plain shell |
-| Haiku returns a good label for a real message with the real key | needs the real key and network; done once in the spike on 2026-08-31 |
+| Haiku returns a good label for a real message with the real key | needs the real key and network. The spike proved the *model* is good enough (2026-08-31), but T01 authors a fresh prompt (the spike's exact wording was not kept), so the label quality of *this* prompt is confirmed live in T04, not inherited from the spike |
 
 ### 5.2 Seatbelts
 
@@ -329,6 +336,19 @@ behaviour. A frozen bad label is fixed by renaming the session by hand, which wi
   macOS Keychain with a per-application access list, which is brittle for a plain node script
   and fights "keep it small". The capped key is the mitigation, and this residual is the
   known limit written down here so no session mistakes the file for a vault.
+- Keeping the key out of shell history. `config anthropic-api-key <key>` takes the key as a
+  command argument, so it lands in the shell's history file — a second at-rest copy beside
+  the key file. This is accepted (the user's decision, 2026-08-31), not defended: it is no
+  weaker than the same-user disk read already conceded above, and a stdin/hidden-input path is
+  more surface than the threat model warrants. T04 documents the caveat so it is a known cost,
+  not a surprise; a person who minds clears their history or unsets and re-adds out of a
+  history-ignored shell.
+- Preventing same-name collisions between agents. Short labels collide more readily than full
+  sentences, and two agents in one repo can reach the same `<repo> / <topic>`. The cockpit
+  already treats ambiguous names as unresolvable and leaves the panes alone (CLAUDE.md, Known
+  limits), and the person owns the label and renames one by hand. Auto-disambiguation (a
+  machine-chosen suffix on a label meant to be the person's) is more code and more edges for a
+  low-frequency case; accepted as-is (the user's decision, 2026-08-31).
 - Making the model configurable. Haiku 4.5 is fixed; the spike showed it is ample and a
   setting is complexity nobody asked for.
 - Naming non-cockpit sessions with Haiku. They keep today's behaviour by 2.4.

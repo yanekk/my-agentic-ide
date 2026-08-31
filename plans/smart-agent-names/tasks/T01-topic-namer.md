@@ -41,9 +41,14 @@ It reads `data.content[0].text`, runs it through `asLabel`, and clips to `MAX_RI
 timeout is an `AbortController` on `opts.timeoutMs`. Any thrown error, aborted call, non-ok
 status, or unexpected shape returns null — a naming call never throws to its caller.
 
-The system prompt is the one the spike settled on: label a coding-agent session, output only
-a 1-3 word lowercase kebab topic (the noun subject), no verbs, no filler, no punctuation, no
-quotes, with the three worked examples from the spike.
+The system prompt is **authored here** from this specification — the exact wording used in
+the Aug-31 spike was not recorded, so T01 writes a fresh one rather than reproducing it (the
+user's decision, 2026-08-31). It must: instruct the model to label a coding-agent session,
+output only a 1-3 word lowercase kebab topic (the noun subject), no verbs, no filler, no
+punctuation, no quotes; and carry the three worked examples from FINDINGS
+(`oauth-loopback`, `daemon-panes`, `flaky-tests`). Because this prompt is new rather than the
+proven one, its real-message label quality is confirmed live with the capped key in T04 (5.1)
+— the suite only proves the guard and the plumbing, never that the wording yields good names.
 
 ## Tests
 

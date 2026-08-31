@@ -4,8 +4,7 @@
 
 What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
-**Plan reviewed:** not yet — run `/pir-review-plan smart-agent-names` before the first
-`/pir-work`.
+**Plan reviewed:** 2026-08-31 — 1 fixed, 4 decided with the user.
 
 **Status:** Plan written, nothing built. The `claude -p` versus API spike is already done
 (FINDINGS, 2026-08-31): the API with Haiku 4.5 is ~1s and its labels are good, `claude -p`

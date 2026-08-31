@@ -21,7 +21,8 @@ written into CLAUDE.md).
 - `CLAUDE.md` — update the fleet-list naming paragraph to describe the Haiku topic, the
   set-once-then-frozen rule, and the retirement of "follows the work" for the label. Add the
   `config` command and the `anthropic-api-key` file to the state inventory. Add the key's
-  known limit (a same-user process can read the file) to the appropriate place. Touch the
+  known limits (a same-user process can read the file; and `config anthropic-api-key <key>`
+  leaves the key in shell history — DESIGN 8) to the appropriate place. Touch the
   "things that are true because they were measured" table only under its own rule: adding a
   row means retiring one, so if a row is added, retire the weakest and move its content to the
   record it points at.
