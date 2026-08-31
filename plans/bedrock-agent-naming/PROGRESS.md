@@ -4,14 +4,14 @@
 
 What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
-**Plan reviewed:** not yet — run `/pir-review-plan bedrock-agent-naming` before the first `/pir-work`
+**Plan reviewed:** 2026-08-31 — clean, nothing found
 
-**Status:** Freshly planned, not yet reviewed or built. Three tasks in two phases, extending
-the finished `smart-agent-names` code in `bin/cockpit-auto-name.mjs`. The gateway was proven
-reachable without credentials during planning (see FINDINGS), so there is no spike.
+**Status:** Reviewed and ready to build. Three tasks in two phases, extending the finished
+`smart-agent-names` code in `bin/cockpit-auto-name.mjs`. The gateway was proven reachable
+without credentials during planning (see FINDINGS), so there is no spike.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** nothing yet — the plan must be reviewed first. After that, T01
-(the Bedrock transport in `fetchTopic`), which has no dependencies.
+**Next `pir-work` will:** implement T01 (the Bedrock transport in `fetchTopic`), which has no
+dependencies.
 
 ## Tasks
 
