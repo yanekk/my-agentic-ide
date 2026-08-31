@@ -240,18 +240,32 @@ function readKeyFile(dir = DIR) {
   } catch { return null; }
 }
 
-// Decide whether to spend a Haiku call on this prompt, and if so make it. The call
-// -- and therefore the ~2s hold and any use of the key -- happens ONLY for a
-// cockpit session (COCKPIT_REPO present, DESIGN 2.4) that has no settled name yet
-// and whose first message is ordinary prose. It is skipped when a stronger
-// deterministic signal already names the session: a /pir-work slug or a worktree
-// cwd outranks the Haiku topic anyway (DESIGN 2.1/2.3), so calling Haiku would only
-// hold the prompt and spend a discarded call -- and agents dispatched into a
-// worktree are the common cockpit case. Returns the guarded kebab label or null.
-// fetch/timeout/dir are injectable so the suite drives every branch with no
+// A boolean-ish env flag is "on" only when present, non-empty, and not a
+// spelled-out off value. This is the reading Claude Code itself gives
+// CLAUDE_CODE_USE_BEDROCK (DESIGN 2.2), so the namer routes on exactly the same
+// signal Claude Code used to route the session to Bedrock in the first place.
+export function truthy(v) {
+  const t = String(v ?? "").trim().toLowerCase();
+  return t !== "" && t !== "0" && t !== "false";
+}
+
+// Decide whether to spend a Haiku call on this prompt, and if so make it, over
+// whichever transport the session's environment selects. The call -- and therefore
+// the ~2s hold -- happens ONLY for a cockpit session (COCKPIT_REPO present, DESIGN
+// 2.4) that has no settled name yet and whose first message is ordinary prose. It is
+// skipped when a stronger deterministic signal already names the session: a /pir-work
+// slug or a worktree cwd outranks the Haiku topic anyway (DESIGN 2.1/2.3), so calling
+// Haiku would only hold the prompt and spend a discarded call -- and agents dispatched
+// into a worktree are the common cockpit case.
+//
+// Past the guards, the ROUTE is chosen from env (DESIGN 2.1/2.2): a Bedrock session
+// names through the company gateway with no key; otherwise the anthropic key path,
+// exactly as before; with neither available, naming is off. Bedrock is checked first
+// and is EXCLUSIVE -- see the body. Returns the guarded kebab label or null.
+// fetch/timeout/dir/readKey are injectable so the suite drives every branch with no
 // network and no real key.
 export async function candidateTopic(input, state, env = {}, opts = {}) {
-  const { fetch, timeoutMs, model, dir = DIR } = opts;
+  const { fetch, timeoutMs, model, dir = DIR, readKey = readKeyFile } = opts;
 
   if (!env.COCKPIT_REPO) return null;                                 // 2.4: cockpit only
   // Mirror decide's guards, so we never hold or spend on a session we will not
@@ -266,12 +280,23 @@ export async function candidateTopic(input, state, env = {}, opts = {}) {
   const ctx = repoContext(input.cwd);
   if (!ctx || ctx.worktree) return null;                             // 2.3: a worktree wins anyway
 
-  const apiKey = readKeyFile(dir);
-  if (!apiKey) return null;                                          // 2.6: no key -> feature off
+  // The route (DESIGN 2.1/2.2), decided per call from the session's own environment.
+  // Bedrock is checked FIRST and is EXCLUSIVE: a session on Bedrock reaches Haiku only
+  // through the company gateway, never the key path -- quietly routing a work prompt to
+  // the public API from a company session is a policy breach, not a fallback. So this
+  // branch never falls through to readKey: under-configured, it returns null (naming
+  // off) rather than reaching for the key.
+  if (truthy(env.CLAUDE_CODE_USE_BEDROCK)) {
+    const baseUrl = env.ANTHROPIC_BEDROCK_BASE_URL;
+    // Bedrock addresses the model by id in the request; DEFAULT_HAIKU is the explicit
+    // Haiku slot, SMALL_FAST Claude Code's documented small-fast fallback (DESIGN 2.2).
+    const bedrockModel = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_SMALL_FAST_MODEL;
+    if (!tidy(baseUrl) || !bedrockModel) return null;   // on Bedrock but under-configured: OFF
+    return fetchTopic(input.prompt, { kind: "bedrock", baseUrl, model: bedrockModel }, { fetch, timeoutMs });
+  }
 
-  // T01 only adapts this call site to fetchTopic's new provider shape; the route
-  // DECISION (Bedrock vs. this key path, read from env) is T02. Until then every
-  // call here is the anthropic transport, exactly as before.
+  const apiKey = readKey(dir);
+  if (!apiKey) return null;                                          // 2.6: not on Bedrock, no key -> off
   return fetchTopic(input.prompt, { kind: "anthropic", apiKey, model }, { fetch, timeoutMs });
 }
 

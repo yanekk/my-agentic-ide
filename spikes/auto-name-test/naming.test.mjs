@@ -478,6 +478,114 @@ const answers = (label) => async () => ({ ok: true, json: async () => ({ content
   ok("cockpit + key + prose first prompt -> the guarded label", c === "oauth-loopback", c);
 }
 
+// ---- candidateTopic: the route (DESIGN 2.1/2.2) ---------------------------
+// Which TRANSPORT the namer selects from the session's own environment. Bedrock
+// wins over the key and is exclusive: a Bedrock session must never read or use the
+// key. Every case injects fetch (capturing or throwing) and, where the point is
+// that the key is untouched, a readKey spy -- so nothing here reaches a network,
+// a gateway or a real key.
+console.log("== candidateTopic: the route (DESIGN 2.1/2.2) ==");
+
+const GW = "https://gw.example.net";
+const HAIKU = "us.anthropic.claude-haiku-4-5:0";
+const SMALLFAST = "us.anthropic.claude-small-fast:0";
+const ANTHRO_URL = "https://api.anthropic.com/v1/messages";
+
+// A full "on Bedrock" env (flag + gateway + DEFAULT_HAIKU), with overrides.
+const bedrockEnv = (over = {}) => ({
+  COCKPIT_REPO: repo,
+  CLAUDE_CODE_USE_BEDROCK: "1",
+  ANTHROPIC_BEDROCK_BASE_URL: GW,
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU,
+  ...over,
+});
+
+// A fetch that records where it was aimed and answers with a label.
+const capturing = (label = "oauth-loopback") => {
+  const calls = [];
+  const fn = async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ content: [{ text: label }] }) }; };
+  fn.calls = calls;
+  return fn;
+};
+// A key reader that COUNTS its reads, so "the key is never read on Bedrock" is an
+// assertion on a spy, not an inference from which URL fetch got.
+const spyKey = () => { const s = () => { s.reads++; return "sk-should-not-be-read"; }; s.reads = 0; return s; };
+
+{ // On Bedrock: the gateway route, the DEFAULT_HAIKU model in the path, no key read.
+  const f = capturing("oauth-loopback");
+  const key = spyKey();
+  const c = await candidateTopic(inp({ prompt: "add the oauth loopback flow" }), null,
+    bedrockEnv(), { fetch: f, readKey: key, dir: keyDir });
+  ok("on Bedrock -> the gateway URL and the guarded label",
+     c === "oauth-loopback" && f.calls.length === 1 && f.calls[0].url === `${GW}/model/${HAIKU}/invoke`,
+     `${c} ${f.calls[0]?.url}`);
+  ok("...the key is never read on Bedrock (proven by the spy)", key.reads === 0, String(key.reads));
+  ok("...and the bedrock call carries no auth header", !("x-api-key" in f.calls[0].init.headers));
+}
+{ // On Bedrock with only SMALL_FAST set: it is used as the model.
+  const f = capturing("x");
+  await candidateTopic(inp({ prompt: "some ordinary prose" }), null,
+    bedrockEnv({ ANTHROPIC_DEFAULT_HAIKU_MODEL: undefined, ANTHROPIC_SMALL_FAST_MODEL: SMALLFAST }),
+    { fetch: f, dir: keyDir });
+  ok("only SMALL_FAST set -> that model id in the path",
+     f.calls[0]?.url === `${GW}/model/${SMALLFAST}/invoke`, f.calls[0]?.url);
+}
+{ // DEFAULT_HAIKU wins over SMALL_FAST when both are present.
+  const f = capturing("x");
+  await candidateTopic(inp({ prompt: "some ordinary prose" }), null,
+    bedrockEnv({ ANTHROPIC_SMALL_FAST_MODEL: SMALLFAST }), { fetch: f, dir: keyDir });
+  ok("DEFAULT_HAIKU wins over SMALL_FAST", f.calls[0]?.url === `${GW}/model/${HAIKU}/invoke`, f.calls[0]?.url);
+}
+{ // On Bedrock but no base URL: OFF -- and the key is NOT read as a fall-back.
+  const key = spyKey();
+  const c = await candidateTopic(inp({ prompt: "prose" }), null,
+    bedrockEnv({ ANTHROPIC_BEDROCK_BASE_URL: undefined }), { fetch: explode, readKey: key, dir: keyDir });
+  ok("Bedrock on, no base URL -> null, no fetch", c === null, c);
+  ok("...and the key is not read (no fall-through)", key.reads === 0, String(key.reads));
+}
+{ // On Bedrock but no model in either var: OFF, key not read.
+  const key = spyKey();
+  const c = await candidateTopic(inp({ prompt: "prose" }), null,
+    bedrockEnv({ ANTHROPIC_DEFAULT_HAIKU_MODEL: undefined }), { fetch: explode, readKey: key, dir: keyDir });
+  ok("Bedrock on, no model id -> null, no fetch", c === null, c);
+  ok("...key still not read", key.reads === 0, String(key.reads));
+}
+{ // The flag set to an OFF value is NOT on Bedrock: the key route runs even though
+  // the gateway vars are present. (`0`, `false`, empty, whitespace, and FALSE.)
+  for (const off of ["0", "false", "FALSE", "", "  "]) {
+    const f = capturing("from-key");
+    const c = await candidateTopic(inp({ prompt: "some prose here" }), null,
+      { COCKPIT_REPO: repo, CLAUDE_CODE_USE_BEDROCK: off, ANTHROPIC_BEDROCK_BASE_URL: GW, ANTHROPIC_DEFAULT_HAIKU_MODEL: HAIKU },
+      { fetch: f, dir: keyDir });
+    ok(`USE_BEDROCK=${JSON.stringify(off)} is off -> the anthropic key route`,
+       c === "from-key" && f.calls[0]?.url === ANTHRO_URL, `${c} ${f.calls[0]?.url}`);
+  }
+}
+{ // No Bedrock flag at all, key present: the anthropic route, as before.
+  const f = capturing("oauth-loopback");
+  const c = await candidateTopic(inp({ prompt: "add the oauth flow" }), null,
+    { COCKPIT_REPO: repo }, { fetch: f, dir: keyDir });
+  ok("no Bedrock flag + key -> the anthropic route",
+     c === "oauth-loopback" && f.calls[0]?.url === ANTHRO_URL, `${c} ${f.calls[0]?.url}`);
+}
+{ // The upstream guards still short-circuit BEFORE any route choice, even with a
+  // full Bedrock env -- so no route is selected and fetch never fires.
+  const key = spyKey();
+  ok("no COCKPIT_REPO short-circuits before the route",
+     (await candidateTopic(inp({ prompt: "prose" }), null, bedrockEnv({ COCKPIT_REPO: undefined }),
+        { fetch: explode, readKey: key })) === null && key.reads === 0);
+  ok("a worktree cwd short-circuits before the bedrock route",
+     (await candidateTopic(inp({ cwd: wt, prompt: "carry on" }), null, bedrockEnv(), { fetch: explode })) === null);
+  ok("a slug short-circuits before the bedrock route",
+     (await candidateTopic(inp({ prompt: "/pir-work cockpit-agenda" }), null, bedrockEnv(), { fetch: explode })) === null);
+  ok("a frozen state short-circuits before the bedrock route",
+     (await candidateTopic(inp({ prompt: "prose", session_title: "myrepo / x" }),
+        { title: "myrepo / x", frozen: true }, bedrockEnv(), { fetch: explode })) === null);
+  ok("a hand-renamed title short-circuits before the bedrock route",
+     (await candidateTopic(inp({ prompt: "prose", session_title: "my own wording" }),
+        { title: "myrepo / placeholder" }, bedrockEnv(), { fetch: explode })) === null);
+}
+
 rmSync(T, { recursive: true, force: true });
 console.log(`  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
