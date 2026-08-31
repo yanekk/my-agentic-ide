@@ -85,9 +85,19 @@ prompt. (The daemon's pane migration still follows the work — that is a differ
 The Haiku call, and any use of the key, is confined to **cockpit sessions** — the hook is
 registered globally in `~/.claude/settings.json` by `bin/install.sh` (an agent dispatched
 from the fleet view is an ordinary claude session, so naming it needs the global hook), but
-it only calls the model when `COCKPIT_REPO` is present in its environment. The key comes
-from **`config anthropic-api-key`** (below); with no key, or in a non-cockpit terminal, the
-naming degrades silently to today's summary behaviour — no hold, no spend, no error.
+it only calls the model when `COCKPIT_REPO` is present in its environment. The namer reaches
+Haiku by **one of two routes, chosen from the session's own environment**. When the session
+is itself on **Bedrock** — Claude Code's own `CLAUDE_CODE_USE_BEDROCK` set, a company-gateway
+`ANTHROPIC_BEDROCK_BASE_URL`, and a Haiku model id (`ANTHROPIC_DEFAULT_HAIKU_MODEL`, else
+`ANTHROPIC_SMALL_FAST_MODEL`) — it names through **that gateway**: a keyless POST the
+company's Tailscale identity alone authorizes, no `config` step needed. Otherwise it takes
+the **Anthropic** route — the key from **`config anthropic-api-key`** (below) against
+`api.anthropic.com`. **Bedrock wins and is exclusive**: a session on Bedrock reaches Haiku
+only through the gateway, never the public API, even when a personal key happens to be set on
+the same machine — routing a company work prompt to the public API would be a policy breach,
+not a fallback, so an *under-configured* Bedrock session produces no name rather than falling
+through to the key. With no route at all — no key, off Bedrock, or in a non-cockpit terminal
+— the naming degrades silently to today's summary behaviour: no hold, no spend, no error.
 
 Each agent has **many** terminals, not one — VSCode's terminal-tab model. The
 narrow strip on the right edge lists them and marks the active one; `⌥t` opens
@@ -280,6 +290,11 @@ something was attached, never *which*.
 - Unflushed annotations are invisible to the daemon, so auto-reload's "have you
   started commenting?" check is based on the flushed file.
 - One agent at a time, by design.
+- A Bedrock session with **no company gateway** (`CLAUDE_CODE_USE_BEDROCK` on but no
+  `ANTHROPIC_BEDROCK_BASE_URL`) gets no Haiku name — it keeps the opening-words placeholder.
+  Claude Code is then talking to Amazon's Bedrock endpoints directly, which need AWS SigV4
+  request signing the namer does not do; building a signing path for a setup no one here uses
+  is cost without a user (see `plans/bedrock-agent-naming/DESIGN.md §8`).
 - The Anthropic key is guarded against **other users** by the file's `0600`, not against
   **your own** processes: an agent runs as you and can read
   `~/.claude/cockpit/anthropic-api-key` off disk. A real wall is the macOS Keychain, which
