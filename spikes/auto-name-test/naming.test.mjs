@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 // The topic-namer's pure pieces are imported and driven directly (with an
 // injected fake fetch), not spawned -- no case here ever touches the network.
-import { asLabel, fetchTopic } from "../../bin/cockpit-auto-name.mjs";
+import { asLabel, fetchTopic, decide, candidateTopic } from "../../bin/cockpit-auto-name.mjs";
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), "..", "..");
 const HOOK = join(ROOT, "bin", "cockpit-auto-name.mjs");
@@ -153,13 +153,6 @@ console.log("== naming ==");
   ok("later prompts do not re-apply the opening words", second === null, second);
 }
 
-{ // An agent that creates a worktree mid-session and moves into it.
-  const s = freshState();
-  const first = run({ state: s, cwd: repo, prompt: "start here" });
-  const second = run({ state: s, cwd: wt, prompt: "now in the worktree", sessionTitle: first });
-  ok("the name follows a move into a worktree", second === "myrepo / browse-mode-review", second);
-}
-
 { // The fleet list is a narrow column.
   const t = run({ state: freshState(), cwd: repo,
     prompt: "please investigate the intermittent failure in the calendar refresh that only happens on Mondays" });
@@ -268,6 +261,128 @@ const answering = (text, { ok: okStatus = true } = {}) =>
   ok("...capping tokens low with a non-empty system prompt", body.max_tokens === 16 && typeof body.system === "string" && body.system.length > 0);
   ok("...passing the first message through", body.messages[0].content.includes("the daemon keeps losing panes"));
   ok("...and returning the guarded, clipped label", t === "daemon-panes", t);
+}
+
+// ---- decide: the freeze model ---------------------------------------------
+// decide is driven DIRECTLY here, with the Haiku candidate supplied as an
+// argument, so no case touches the network (DESIGN 3.1). repoContext still shells
+// to the real git fixtures above -- the worktree rules are the ones a fake gets
+// wrong. A candidate is a string (a good call) or null (no key / failed / junk).
+console.log("== decide: the freeze model ==");
+
+const inp = (o) => ({ session_id: "sess-1", cwd: repo, prompt: "", session_title: "", transcript_path: "", ...o });
+
+{ // A Haiku candidate on the first prompt is a real name and freezes.
+  const out = decide(inp({ prompt: "please add the OAuth loopback flow" }), null, {}, "oauth-loopback");
+  ok("a candidate on the first prompt names and freezes",
+     out.title === "myrepo / oauth-loopback" && out.state.frozen === true && out.isNew === true, JSON.stringify(out));
+}
+
+{ // The headline change: a settled name does NOT follow a later worktree move.
+  const st = { title: "myrepo / oauth-loopback", frozen: true };
+  const out = decide(inp({ cwd: wt, prompt: "carry on", session_title: st.title }), st, {}, null);
+  ok("a frozen name does not follow a move into a worktree", out.title === null, JSON.stringify(out));
+}
+
+{ // ...nor a later /pir-work slug.
+  const st = { title: "myrepo / oauth-loopback", frozen: true };
+  const out = decide(inp({ prompt: "/pir-work cockpit-agenda", session_title: st.title }), st, {}, null);
+  ok("a frozen name does not follow a later slug", out.title === null, JSON.stringify(out));
+}
+
+{ // A person renaming AFTER the freeze is caught and wins forever.
+  const st = { title: "myrepo / oauth-loopback", frozen: true };
+  const out = decide(inp({ prompt: "carry on", session_title: "my own wording" }), st, {}, null);
+  ok("a human rename after freezing backs off and wins",
+     out.title === null && out.state.backedOff === true, JSON.stringify(out));
+}
+
+{ // No key -> candidate null: placeholder now (unfrozen), then Claude's summary
+  // freezes it -- exactly today's behaviour (DESIGN 2.6).
+  const first = decide(inp({ prompt: "read the handoff document" }), null, {}, null);
+  ok("no candidate -> placeholder, unfrozen",
+     first.title === "myrepo / read the handoff document" && !first.state.frozen, JSON.stringify(first));
+  const trPath = transcriptWith(freshState(), "read handoff document");
+  const second = decide(inp({ prompt: "yes go on", session_title: first.title, transcript_path: trPath }),
+    first.state, {}, null);
+  ok("...then Claude's summary is taken and freezes",
+     second.title === "myrepo / read handoff document" && second.state.frozen === true, JSON.stringify(second));
+}
+
+{ // Timeout with a key -> candidate null now, a candidate on a later prompt freezes.
+  const first = decide(inp({ prompt: "investigate the flaky calendar tests" }), null, {}, null);
+  ok("a timed-out call -> placeholder, unfrozen",
+     first.title.startsWith("myrepo / ") && !first.state.frozen, JSON.stringify(first));
+  const second = decide(inp({ prompt: "still on it", session_title: first.title }), first.state, {}, "flaky-tests");
+  ok("...a later candidate names and freezes",
+     second.title === "myrepo / flaky-tests" && second.state.frozen === true, JSON.stringify(second));
+}
+
+{ // A first-prompt slug uses the slug and freezes; the candidate is irrelevant.
+  const out = decide(inp({ prompt: "/pir-work cockpit-agenda" }), null, {}, null);
+  ok("a first-prompt slug names and freezes",
+     out.title === "myrepo / cockpit-agenda" && out.state.frozen === true, JSON.stringify(out));
+}
+
+{ // A first prompt already inside a worktree uses the worktree name and freezes.
+  const out = decide(inp({ cwd: wt, prompt: "carry on in here" }), null, {}, null);
+  ok("a first-prompt worktree names and freezes",
+     out.title === "myrepo / browse-mode-review" && out.state.frozen === true, JSON.stringify(out));
+}
+
+{ // The placeholder is not settled, so it still climbs: a later worktree move is
+  // taken and freezes (DESIGN 2.2 -- retirement is of REAL names, not stand-ins).
+  const first = decide(inp({ prompt: "start here" }), null, {}, null);
+  const second = decide(inp({ cwd: wt, prompt: "now in the worktree", session_title: first.title }),
+    first.state, {}, null);
+  ok("a placeholder climbs to a worktree name and freezes",
+     second.title === "myrepo / browse-mode-review" && second.state.frozen === true, JSON.stringify(second));
+}
+
+// ---- candidateTopic: the gate ---------------------------------------------
+// Whether the Haiku call happens at all. The injected fetch THROWS, so any case
+// that wrongly reaches it fails loudly; a correctly gated case never calls it.
+console.log("== candidateTopic: the gate ==");
+
+const keyDir = freshState();
+writeFileSync(join(keyDir, "anthropic-api-key"), "sk-secret\n");
+const noKeyDir = freshState();
+const explode = () => { throw new Error("fetchTopic must not be called"); };
+const answers = (label) => async () => ({ ok: true, json: async () => ({ content: [{ text: label }] }) });
+
+{ // No COCKPIT_REPO: a plain claude session is never held or charged (DESIGN 2.4).
+  const c = await candidateTopic(inp({ prompt: "add the oauth flow" }), null, {}, { fetch: explode, dir: keyDir });
+  ok("no COCKPIT_REPO -> no call", c === null, c);
+}
+{ // COCKPIT_REPO but no key file: the feature is off (DESIGN 2.6).
+  const c = await candidateTopic(inp({ prompt: "add the oauth flow" }), null,
+    { COCKPIT_REPO: repo }, { fetch: explode, dir: noKeyDir });
+  ok("COCKPIT_REPO but no key -> no call", c === null, c);
+}
+{ // A /pir-work slug outranks Haiku, so the call is skipped (DESIGN 2.3).
+  const c = await candidateTopic(inp({ prompt: "/pir-work cockpit-agenda" }), null,
+    { COCKPIT_REPO: repo }, { fetch: explode, dir: keyDir });
+  ok("a slug first message -> no call", c === null, c);
+}
+{ // A worktree cwd outranks Haiku, so the call is skipped (DESIGN 2.3).
+  const c = await candidateTopic(inp({ cwd: wt, prompt: "carry on" }), null,
+    { COCKPIT_REPO: repo }, { fetch: explode, dir: keyDir });
+  ok("a worktree cwd -> no call", c === null, c);
+}
+{ // A frozen session is already named: no retry, no spend.
+  const c = await candidateTopic(inp({ prompt: "add the oauth flow", session_title: "myrepo / x" }),
+    { title: "myrepo / x", frozen: true }, { COCKPIT_REPO: repo }, { fetch: explode, dir: keyDir });
+  ok("a frozen session -> no call", c === null, c);
+}
+{ // A session the person has renamed is theirs: no spend on it either.
+  const c = await candidateTopic(inp({ prompt: "add the oauth flow", session_title: "my own wording" }),
+    { title: "myrepo / placeholder" }, { COCKPIT_REPO: repo }, { fetch: explode, dir: keyDir });
+  ok("a hand-renamed session -> no call", c === null, c);
+}
+{ // All gates open: the call is made and its guarded label comes back.
+  const c = await candidateTopic(inp({ prompt: "add the oauth loopback flow" }), null,
+    { COCKPIT_REPO: repo }, { fetch: answers("oauth-loopback"), dir: keyDir });
+  ok("cockpit + key + prose first prompt -> the guarded label", c === "oauth-loopback", c);
 }
 
 rmSync(T, { recursive: true, force: true });

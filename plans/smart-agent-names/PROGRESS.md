@@ -6,10 +6,10 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
 **Plan reviewed:** 2026-08-31 — 1 fixed, 4 decided with the user.
 
-**Status:** T01 and T02 reviewed clean. T03 now unblocked. Four tasks, two phases.
+**Status:** T01 and T02 reviewed clean. T03 implemented, awaiting review. Four tasks, two phases.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** implement T03 (wire Haiku into the hook: gate on `COCKPIT_REPO`,
-hold the first prompt, freeze once named). T01 and T02 are both ✅, so its deps are met.
+**Next `pir-work` will:** review T03 (the freeze model in `decide`, the `candidateTopic` gate,
+and the async `runHook`/hold wiring). Then T04 remains — install/docs/hands-on verify.
 
 ## Tasks
 
@@ -20,10 +20,10 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | Haiku topic-namer and label guard | — | ✅ | Clean (+30 checks); boundary/guard/2s-timeout per DESIGN. Model-alias + label quality deferred to T04 (5.1). |
 | T02 | `config` command and key store | — | ✅ | Clean, no fix commit. All 7 task checks defend (masking test fails if the length-1 cap is dropped — verified). Probed: masking at lengths 0–5 (a 1-char key reveals nothing), unknown-setting exit, empty-file reads as off, realpath entrypoint guard (import runs no CLI). 0600 atomic write; read path masks. `config` name is a T04 hands-on check. |
-| T03 | Wire into the hook: gate, hold, freeze | T01, T02 | ⬜ | |
+| T03 | Wire into the hook: gate, hold, freeze | T01, T02 | 🔍 | `decide` takes a candidate + freezes; `candidateTopic` gates the call (COCKPIT_REPO, key, no-name-yet, prose, not-worktree); `runHook`/`main` async. Suite 68+ checks, boundary green. Retired "follows the work" for real names only — a placeholder still climbs. Daemon untouched. |
 | T04 | Relink, docs, hands-on verify | T03 | ⬜ | Verifies the `COCKPIT_REPO` gate first (DESIGN 2.4) |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 

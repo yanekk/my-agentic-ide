@@ -20,16 +20,24 @@
 //   <this> --install             register in ~/.claude/settings.json, idempotent
 //   <this> --check               say what --install would do, write nothing
 //
-// The name is picked from the strongest signal available, and a stronger signal
-// may later overwrite a weaker one but never the other way round:
+// The name is picked from the strongest signal available at the first prompt:
 //
-//   slug (3)         /pir-work <slug>    ->  agentic-ide / cockpit-agenda
-//   worktree (2)     .claude/worktrees/… ->  agentic-ide / browse-mode-review
-//   aiTitle (1)      Claude's own summary of the session
-//   placeholder (0)  the opening words of the first prompt
+//   slug        /pir-work <slug>       ->  agentic-ide / cockpit-agenda
+//   worktree    .claude/worktrees/…    ->  agentic-ide / browse-mode-review
+//   Haiku       a 1-3 word kebab topic Haiku infers from the first message
+//   summary     Claude's own summary of the session (only when there is no key)
+//   placeholder the opening words of the first prompt -- a stand-in, not a name
+//
+// The first REAL name (slug, worktree, Haiku topic, or -- no key -- the summary)
+// is set and FREEZES the session: the machine never renames a frozen session, so
+// "follows the work" is retired for the label (the daemon still moves the PANES
+// when an agent enters a worktree; a different concern, untouched). Only the
+// opening-words placeholder is non-frozen, so a placeholdered session keeps
+// climbing on later prompts until a real name is reached (DESIGN 2.2).
 //
 // Two rules are absolute. It must never block a prompt, so every failure path
-// exits 0 with no output. And it must never overwrite a name a PERSON typed --
+// exits 0 with no output -- the Haiku call included, bounded and collapsing to no
+// answer on any failure. And it must never overwrite a name a PERSON typed --
 // see backedOff.
 
 import { execFileSync } from "node:child_process";
@@ -43,11 +51,6 @@ const STATE_DIR = join(DIR, "auto-names");
 const MAX_TITLE = 60;   // the whole title; the fleet list is a narrow column
 const MAX_RIGHT = 44;   // the half after the slash
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
-
-// placeholder is deliberately lowest: it is the opening words of the FIRST
-// prompt, and re-applying it on every later prompt would rename the session
-// continuously. It is therefore only ever used for the first naming.
-const RANK = { placeholder: 0, aiTitle: 1, worktree: 2, slug: 3 };
 
 const SLUG_RE = /^\s*\/?pir-(?:work|plan|review-plan)\s+([A-Za-z0-9][A-Za-z0-9._-]*)/;
 
@@ -173,6 +176,50 @@ export async function fetchTopic(text, apiKey, opts = {}) {
   }
 }
 
+// The key file the config command writes (DESIGN 3.5). The hook reads it DIRECTLY
+// rather than importing cockpit-config.mjs -- a relative import would trip the
+// "imports nothing outside node:*" boundary check (DESIGN 3.2) -- so this mirrors
+// cockpit-config's readApiKey by hand. Trim so a hand-appended newline is not part
+// of the key; an absent or empty file means the feature is off (DESIGN 2.6).
+function readKeyFile(dir = DIR) {
+  try {
+    const raw = readFileSync(join(dir, "anthropic-api-key"), "utf8").trim();
+    return raw || null;
+  } catch { return null; }
+}
+
+// Decide whether to spend a Haiku call on this prompt, and if so make it. The call
+// -- and therefore the ~2s hold and any use of the key -- happens ONLY for a
+// cockpit session (COCKPIT_REPO present, DESIGN 2.4) that has no settled name yet
+// and whose first message is ordinary prose. It is skipped when a stronger
+// deterministic signal already names the session: a /pir-work slug or a worktree
+// cwd outranks the Haiku topic anyway (DESIGN 2.1/2.3), so calling Haiku would only
+// hold the prompt and spend a discarded call -- and agents dispatched into a
+// worktree are the common cockpit case. Returns the guarded kebab label or null.
+// fetch/timeout/dir are injectable so the suite drives every branch with no
+// network and no real key.
+export async function candidateTopic(input, state, env = {}, opts = {}) {
+  const { fetch, timeoutMs, model, dir = DIR } = opts;
+
+  if (!env.COCKPIT_REPO) return null;                                 // 2.4: cockpit only
+  // Mirror decide's guards, so we never hold or spend on a session we will not
+  // name: a foreign-id hook, an already-settled name, a name the person owns.
+  if (env.CLAUDE_CODE_SESSION_ID && env.CLAUDE_CODE_SESSION_ID !== input.session_id) return null;
+  if (state?.frozen || state?.backedOff) return null;
+  const current = tidy(input.session_title);
+  if (current && (!state || state.title !== current)) return null;    // person renamed it
+
+  const prompt = tidy(input.prompt);
+  if (!prompt || SLUG_RE.test(prompt)) return null;                   // 2.3: a slug wins anyway
+  const ctx = repoContext(input.cwd);
+  if (!ctx || ctx.worktree) return null;                             // 2.3: a worktree wins anyway
+
+  const apiKey = readKeyFile(dir);
+  if (!apiKey) return null;                                          // 2.6: no key -> feature off
+
+  return fetchTopic(input.prompt, apiKey, { fetch, timeoutMs, model });
+}
+
 // Claude writes its own summary into the transcript as a {"type":"ai-title"}
 // record, but only AFTER the first reply -- which is why it cannot be used at
 // the moment a session is first named, and why the opening words stand in until
@@ -222,10 +269,18 @@ function prune() {
   } catch { /* nothing to prune */ }
 }
 
-// The whole decision, as a pure function of the hook input plus the state we
-// last wrote. Returns the title to emit, or null to stay silent, alongside the
-// state to persist -- so the tests can drive it without a process each.
-export function decide(input, state, env = {}) {
+// The whole decision, as a pure function of the hook input, the state we last
+// wrote, and the guarded Haiku candidate runHook produced (a kebab label, or null
+// when there is no key / the call failed / the answer was junk). Returns the title
+// to emit, or null to stay silent, alongside the state to persist -- so the tests
+// can drive it without a process each and without the network (DESIGN 3.1/3.3).
+//
+// The order (DESIGN 3.3): backedOff short-circuit; the live human-rename check;
+// then, if the session is frozen, stop -- the machine never moves a settled name;
+// then pick the strongest signal and, if it is a REAL name, freeze. The opening-
+// words placeholder is the one non-frozen outcome, so an unnamed session keeps
+// climbing until a real name is reached.
+export function decide(input, state, env = {}, candidate = null) {
   const sessionId = input.session_id;
   if (!sessionId) return { title: null };
 
@@ -241,48 +296,62 @@ export function decide(input, state, env = {}) {
   // A title we did not set means a person typed one (/rename, or the fleet
   // list). Stand down permanently: their wording outranks anything computed
   // here, and a name that fights the person who typed it is worse than none.
+  // This runs BEFORE the frozen check, so a hand rename of a frozen name is
+  // still caught and wins.
   const current = tidy(input.session_title);
   if (current && (!state || state.title !== current)) {
     return { title: null, state: { backedOff: true } };
   }
 
+  // The freeze: a settled name is never moved by the machine. "Follows the work"
+  // is retired for the label here (DESIGN 2.2).
+  if (state?.frozen) return { title: null };
+
   const ctx = repoContext(input.cwd);
   if (!ctx) return { title: null };      // not a git repo: leave the session alone
 
-  let right = null, rank = -1;
+  // Strongest signal wins (DESIGN 2.1). A slug, a worktree or a Haiku candidate is
+  // a REAL name and freezes; Claude's own summary is real too, and only ever fills
+  // in when there is no key (a key would have produced a candidate ahead of it);
+  // the opening-words placeholder is a first-naming stand-in and does NOT freeze.
+  let right = null, real = false;
   const slug = SLUG_RE.exec(tidy(input.prompt));
   if (slug) {
-    right = slug[1];
-    rank = RANK.slug;
+    right = slug[1]; real = true;
   } else if (ctx.worktree) {
-    right = ctx.worktree;
-    rank = RANK.worktree;
+    right = ctx.worktree; real = true;
+  } else if (candidate) {
+    right = clip(candidate, MAX_RIGHT); real = true;
   } else {
-    const ai = (!state || state.rank <= RANK.aiTitle) ? aiTitle(input.transcript_path) : null;
+    const ai = aiTitle(input.transcript_path);
     if (ai) {
-      right = clip(ai, MAX_RIGHT);
-      rank = RANK.aiTitle;
+      right = clip(ai, MAX_RIGHT); real = true;
     } else if (!state) {
+      // placeholder is a FIRST-naming device only: re-applying the opening words
+      // on every later prompt would rename the session continuously, so it is
+      // taken only when there is no prior state to climb from.
       const p = placeholder(input.prompt);
-      if (p) { right = p; rank = RANK.placeholder; }
+      if (p) { right = p; real = false; }
     }
   }
   if (!right) return { title: null };
 
   const title = clip(`${ctx.repo} / ${right}`, MAX_TITLE);
-  if (state) {
-    if (rank < state.rank) return { title: null };
-    if (title === state.title) return { title: null };   // nothing changed; do not churn
-  }
-  return { title, state: { title, rank }, isNew: !state };
+  if (state && title === state.title) return { title: null };   // nothing changed
+  return { title, state: real ? { title, frozen: true } : { title }, isNew: !state };
 }
 
-function runHook() {
+async function runHook() {
   let input;
   try { input = JSON.parse(readFileSync(0, "utf8")); } catch { return done(); }
 
   const state = readState(input.session_id);
-  const out = decide(input, state, process.env);
+  // The one impure step: hold the prompt while Haiku names an ordinary first
+  // message, bounded by fetchTopic's own ~2s timeout. Whether the call happens at
+  // all -- the COCKPIT_REPO gate, the key, "no name yet", prose not a slug, not a
+  // worktree -- is decided in candidateTopic; here the result is just data.
+  const candidate = await candidateTopic(input, state, process.env);
+  const out = decide(input, state, process.env, candidate);
   if (out.state) writeState(input.session_id, out.state, out.isNew);
   if (!out.title) return done();
 
@@ -351,7 +420,10 @@ function install({ settingsPath, command, dryRun }) {
 
 // ------------------------------------------------------------------ main ---
 
-function main() {
+// async because runHook now holds the prompt on an awaited fetch; install stays
+// synchronous inside it. The entrypoint below awaits the returned promise before
+// exiting, or process.exit would kill the pending Haiku call.
+async function main() {
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const i = argv.indexOf(name);
@@ -368,11 +440,12 @@ function main() {
     });
     return;
   }
-  runHook();
+  await runHook();
 }
 
-// Importable by the tests without running anything.
+// Importable by the tests without running anything. Awaiting main() lets the
+// Haiku hold finish before exit; any rejection still exits 0 -- never block a
+// prompt.
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
-  try { main(); } catch { /* never block a prompt */ }
-  process.exit(0);
+  main().catch(() => { /* never block a prompt */ }).finally(() => process.exit(0));
 }
