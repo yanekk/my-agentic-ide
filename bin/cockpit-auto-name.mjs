@@ -132,41 +132,93 @@ const LABEL_PROMPT = [
   '  "the calendar tests fail at random on CI" -> flaky-tests',
 ].join("\n");
 
+// Build the one POST that reaches Haiku, for whichever transport the provider
+// names. Both routes send the SAME body payload (the low token cap, the system
+// prompt, the tidied first message) and parse the SAME reply shape -- they differ
+// only in URL, headers and one body field, so the "never throw, never hang,
+// validate the label" contract in fetchTopic stays a single call site (DESIGN
+// 3.3). Returns { url, headers, body } or null when the provider is under-filled
+// (no api key / no gateway url / no model) or of an unknown kind -- a null here
+// collapses to "no name" without ever calling fetch.
+//
+//   { kind: "anthropic", apiKey, model }   POST api.anthropic.com, x-api-key
+//   { kind: "bedrock",   baseUrl, model }   POST the company gateway, no auth
+export function buildRequest(provider, tidied) {
+  const payload = {
+    max_tokens: 16,
+    system: LABEL_PROMPT,
+    messages: [{ role: "user", content: "First message: " + tidied }],
+  };
+
+  if (provider?.kind === "anthropic") {
+    const { apiKey, model = "claude-haiku-4-5" } = provider;
+    if (!apiKey) return null;   // no key -> feature off, never spend a call
+    return {
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",   // the public API's date-stamped version
+        "content-type": "application/json",
+      },
+      // Anthropic carries the model in the BODY.
+      body: JSON.stringify({ model: model, ...payload }),
+    };
+  }
+
+  if (provider?.kind === "bedrock") {
+    const { baseUrl, model } = provider;
+    if (!baseUrl || !model) return null;   // no gateway or no model id -> route off
+    // Bedrock carries the model in the URL PATH, verbatim -- the live probe used the
+    // raw env value and encoding it risks the gateway's own routing (DESIGN 2.3).
+    // A trailing slash on the base would double the separator, so strip it.
+    const base = baseUrl.replace(/\/+$/, "");
+    return {
+      url: `${base}/model/${model}/invoke`,
+      // No auth header: the gateway authorizes on Tailscale network identity alone,
+      // proven live with a content-type-only request (FINDINGS 2026-08-31).
+      headers: { "content-type": "application/json" },
+      // `anthropic_version` is the Bedrock literal, NOT the public API's date, and
+      // there is no `model` field -- it is in the path.
+      body: JSON.stringify({ anthropic_version: "bedrock-2023-05-31", ...payload }),
+    };
+  }
+
+  return null;   // unknown transport
+}
+
 // Ask Haiku for a topic, bounded by a hard timeout, and return a validated kebab
 // label or null. A naming call must NEVER throw to its caller and never wedge the
 // prompt box: every network error, non-2xx, malformed body, abort, or non-label
 // answer collapses to null. The web call needs no import -- `fetch` is a node 24
 // global -- which is what keeps the whole file inside node:* (DESIGN 3.1). fetch
 // and the timeout are injectable so the suite drives every path with no network.
-export async function fetchTopic(text, apiKey, opts = {}) {
+//
+// `provider` names the transport and carries everything transport-specific
+// (DESIGN 3.3); which provider a session uses is decided in candidateTopic (T02),
+// not here -- this call only makes both reachable.
+export async function fetchTopic(text, provider, opts = {}) {
   const {
     fetch = globalThis.fetch,
     timeoutMs = 2000,
-    model = "claude-haiku-4-5",
   } = opts;
   const t = tidy(text);
-  if (!t || !apiKey) return null;   // no message or no key: never spend a call
+  if (!t) return null;                     // no message: never spend a call
+  const req = buildRequest(provider, t);
+  if (!req) return null;                   // under-filled/unknown provider: no call
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(req.url, {
       method: "POST",
       signal: ctrl.signal,
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 16,
-        system: LABEL_PROMPT,
-        messages: [{ role: "user", content: "First message: " + t }],
-      }),
+      headers: req.headers,
+      body: req.body,
     });
     if (!res.ok) return null;
     const data = await res.json();
+    // The reply is the Anthropic message shape on BOTH routes (FINDINGS), so the
+    // label extraction is identical regardless of transport.
     const label = asLabel(data?.content?.[0]?.text);
     return label ? clip(label, MAX_RIGHT) : null;
   } catch {
@@ -217,7 +269,10 @@ export async function candidateTopic(input, state, env = {}, opts = {}) {
   const apiKey = readKeyFile(dir);
   if (!apiKey) return null;                                          // 2.6: no key -> feature off
 
-  return fetchTopic(input.prompt, apiKey, { fetch, timeoutMs, model });
+  // T01 only adapts this call site to fetchTopic's new provider shape; the route
+  // DECISION (Bedrock vs. this key path, read from env) is T02. Until then every
+  // call here is the anthropic transport, exactly as before.
+  return fetchTopic(input.prompt, { kind: "anthropic", apiKey, model }, { fetch, timeoutMs });
 }
 
 // Claude writes its own summary into the transcript as a {"type":"ai-title"}

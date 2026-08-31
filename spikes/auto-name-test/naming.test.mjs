@@ -189,78 +189,158 @@ console.log("== the label guard ==");
   ok("empty and nullish are rejected", asLabel("") === null && asLabel(null) === null && asLabel(undefined) === null);
 }
 
-// ---- fetchTopic ----------------------------------------------------------
-// Every case injects opts.fetch, so nothing here reaches the real API. A naming
-// call must never throw to its caller: every failure collapses to null.
+// ---- fetchTopic: two transports ------------------------------------------
+// fetchTopic now takes a `provider` in place of the bare apiKey (DESIGN 3.3):
+//   { kind: "anthropic", apiKey, model = "claude-haiku-4-5" }
+//   { kind: "bedrock",   baseUrl, model }
+// Every case injects opts.fetch, so nothing here reaches a real API or gateway.
+// A naming call must never throw to its caller: every failure collapses to null,
+// identically on both routes.
 console.log("== fetchTopic (injected fetch, no network) ==");
+
+// Shorthands for the two providers. The bedrock model carries a `:` on purpose --
+// a real Bedrock model id has one, and the path must NOT percent-encode it.
+const anthropic = (apiKey = "sk-test", model) => ({ kind: "anthropic", apiKey, ...(model ? { model } : {}) });
+const BEDROCK_MODEL = "us.anthropic.claude-haiku-4-5:0";
+const bedrock = (baseUrl = "https://gw.example.net", model = BEDROCK_MODEL) => ({ kind: "bedrock", baseUrl, model });
 
 // A fake fetch that answers with a body and status; the throwing variant proves
 // a rejected fetch never becomes a throw out of fetchTopic.
 const answering = (text, { ok: okStatus = true } = {}) =>
   async () => ({ ok: okStatus, json: async () => ({ content: [{ text }] }) });
 
-{
-  const t = await fetchTopic("implement the OAuth loopback flow", "sk-test",
-    { fetch: answering("oauth-loopback") });
-  ok("a normal message returns the label", t === "oauth-loopback", t);
+// The label guard, the failure paths and the timeout must hold IDENTICALLY on
+// both transports, so every route-agnostic case is run once per provider.
+for (const [label, provider] of [["anthropic", anthropic()], ["bedrock", bedrock()]]) {
+  {
+    const t = await fetchTopic("implement the OAuth loopback flow", provider,
+      { fetch: answering("oauth-loopback") });
+    ok(`${label}: a normal message returns the label`, t === "oauth-loopback", t);
+  }
+  { // The measured failure mode: a content-free message gets a sentence, guarded out.
+    const t = await fetchTopic("hey", provider,
+      { fetch: answering("Hi! What would you like to work on today?") });
+    ok(`${label}: a sentence answer returns null`, t === null, t);
+  }
+  {
+    const t = await fetchTopic("x", provider, { fetch: answering("OAuth Loopback.") });
+    ok(`${label}: spaces/capitals/punctuation in the answer -> null`, t === null, t);
+  }
+  {
+    const t = await fetchTopic("x", provider, { fetch: async () => { throw new Error("ENOTFOUND"); } });
+    ok(`${label}: a rejecting fetch returns null, not a throw`, t === null, t);
+  }
+  {
+    const t = await fetchTopic("x", provider, { fetch: answering("oauth-loopback", { ok: false }) });
+    ok(`${label}: a non-2xx response returns null`, t === null, t);
+  }
+  {
+    const badJson = async () => ({ ok: true, json: async () => { throw new SyntaxError("bad json"); } });
+    ok(`${label}: malformed JSON returns null`, (await fetchTopic("x", provider, { fetch: badJson })) === null);
+    const emptyBody = async () => ({ ok: true, json: async () => ({}) });
+    ok(`${label}: an answerless body returns null`, (await fetchTopic("x", provider, { fetch: emptyBody })) === null);
+  }
+  { // A hung request must be cut at timeoutMs, not left to hold the prompt box.
+    const hanging = (url, init) => new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+    const started = Date.now();
+    const t = await fetchTopic("x", provider, { fetch: hanging, timeoutMs: 50 });
+    ok(`${label}: a never-resolving fetch is aborted at timeoutMs`,
+       t === null && Date.now() - started < 1500, `${t} in ${Date.now() - started}ms`);
+  }
+  { // An empty message must never even call fetch -- no hold, no spend, on either route.
+    const explode = () => { throw new Error("fetch must not be called"); };
+    ok(`${label}: an empty message returns null without calling fetch`,
+       (await fetchTopic("   ", provider, { fetch: explode })) === null);
+  }
 }
-{ // The measured failure mode: a content-free message gets a sentence, guarded out.
-  const t = await fetchTopic("hey", "sk-test",
-    { fetch: answering("Hi! What would you like to work on today?") });
-  ok("a sentence answer returns null", t === null, t);
+
+{ // The label extraction is the SAME on both routes for the same reply body --
+  // asserted head to head so a divergence here cannot hide.
+  const same = answering("daemon-panes");
+  const a = await fetchTopic("the daemon keeps losing panes", anthropic(), { fetch: same });
+  const b = await fetchTopic("the daemon keeps losing panes", bedrock(), { fetch: same });
+  ok("both routes extract the same label from the same body", a === "daemon-panes" && a === b, `${a} / ${b}`);
 }
-{
-  const t = await fetchTopic("x", "sk-test", { fetch: answering("OAuth Loopback.") });
-  ok("spaces/capitals/punctuation in the answer -> null", t === null, t);
-}
-{
-  const t = await fetchTopic("x", "sk-test", { fetch: answering("one-two-three-four-five") });
-  ok("a five-word dashed answer -> null", t === null, t);
-}
-{
-  const t = await fetchTopic("x", "sk-test", { fetch: async () => { throw new Error("ENOTFOUND"); } });
-  ok("a rejecting fetch returns null, not a throw", t === null, t);
-}
-{
-  const t = await fetchTopic("x", "sk-test", { fetch: answering("oauth-loopback", { ok: false }) });
-  ok("a non-2xx response returns null", t === null, t);
-}
-{
-  const badJson = async () => ({ ok: true, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } });
-  ok("malformed JSON returns null", (await fetchTopic("x", "sk-test", { fetch: badJson })) === null);
-  const emptyBody = async () => ({ ok: true, json: async () => ({}) });
-  ok("an answerless body returns null", (await fetchTopic("x", "sk-test", { fetch: emptyBody })) === null);
-}
-{ // A hung request must be cut at timeoutMs, not left to hold the prompt box.
-  const hanging = (url, init) => new Promise((_, reject) => {
-    init.signal.addEventListener("abort", () => reject(new Error("aborted")));
-  });
-  const started = Date.now();
-  const t = await fetchTopic("x", "sk-test", { fetch: hanging, timeoutMs: 50 });
-  ok("a never-resolving fetch is aborted at timeoutMs", t === null && Date.now() - started < 1500, `${t} in ${Date.now() - started}ms`);
-}
-{ // No key and no message must never even call fetch -- no hold, no spend.
+
+{ // An under-filled provider is off, and off means never calling fetch (no hold,
+  // no spend): no api key, no gateway url, no model id, or an unknown kind.
   const explode = () => { throw new Error("fetch must not be called"); };
-  ok("no key returns null without calling fetch", (await fetchTopic("x", "", { fetch: explode })) === null);
-  ok("an empty message returns null without calling fetch", (await fetchTopic("   ", "sk-test", { fetch: explode })) === null);
+  ok("anthropic with no key -> null, no call",
+     (await fetchTopic("x", { kind: "anthropic", apiKey: "" }, { fetch: explode })) === null);
+  ok("bedrock with no baseUrl -> null, no call",
+     (await fetchTopic("x", { kind: "bedrock", model: BEDROCK_MODEL }, { fetch: explode })) === null);
+  ok("bedrock with no model -> null, no call",
+     (await fetchTopic("x", { kind: "bedrock", baseUrl: "https://gw" }, { fetch: explode })) === null);
+  ok("an unknown provider kind -> null, no call",
+     (await fetchTopic("x", { kind: "mystery" }, { fetch: explode })) === null);
+  ok("a null provider -> null, no call",
+     (await fetchTopic("x", null, { fetch: explode })) === null);
 }
-{ // The request shape: endpoint, method, headers, and the low token cap.
+
+console.log("== fetchTopic: the anthropic request shape ==");
+{ // Endpoint, method, headers, model-in-body, low token cap.
   let captured = null;
   const capturing = async (url, init) => {
     captured = { url, init };
     return { ok: true, json: async () => ({ content: [{ text: "daemon-panes" }] }) };
   };
-  const t = await fetchTopic("the daemon keeps losing panes", "sk-abc123",
-    { fetch: capturing, model: "claude-haiku-4-5" });
+  const t = await fetchTopic("the daemon keeps losing panes", anthropic("sk-abc123", "claude-haiku-4-5"),
+    { fetch: capturing });
   ok("posts to the messages endpoint", captured.url === "https://api.anthropic.com/v1/messages", captured?.url);
   ok("...as a POST", captured.init.method === "POST");
   ok("...with the x-api-key header", captured.init.headers["x-api-key"] === "sk-abc123");
   ok("...and the anthropic-version header", captured.init.headers["anthropic-version"] === "2023-06-01");
   const body = JSON.parse(captured.init.body);
-  ok("...naming the model", body.model === "claude-haiku-4-5", body.model);
+  ok("...naming the model in the body", body.model === "claude-haiku-4-5", body.model);
   ok("...capping tokens low with a non-empty system prompt", body.max_tokens === 16 && typeof body.system === "string" && body.system.length > 0);
   ok("...passing the first message through", body.messages[0].content.includes("the daemon keeps losing panes"));
   ok("...and returning the guarded, clipped label", t === "daemon-panes", t);
+}
+{ // The anthropic model defaults when the provider omits it (existing callers).
+  let captured = null;
+  const capturing = async (url, init) => { captured = { url, init }; return { ok: true, json: async () => ({ content: [{ text: "x" }] }) }; };
+  await fetchTopic("hello there", { kind: "anthropic", apiKey: "sk" }, { fetch: capturing });
+  ok("the anthropic model defaults to claude-haiku-4-5", JSON.parse(captured.init.body).model === "claude-haiku-4-5");
+}
+
+console.log("== fetchTopic: the bedrock request shape (DESIGN 2.3) ==");
+{ // Path built from baseUrl + model; content-type ONLY; body has the bedrock
+  // literal and NO model field.
+  let captured = null;
+  const capturing = async (url, init) => {
+    captured = { url, init };
+    return { ok: true, json: async () => ({ content: [{ text: "daemon-panes" }] }) };
+  };
+  const t = await fetchTopic("the daemon keeps losing panes", bedrock("https://gw.example.net", BEDROCK_MODEL),
+    { fetch: capturing });
+  ok("posts to {baseUrl}/model/{model}/invoke",
+     captured.url === `https://gw.example.net/model/${BEDROCK_MODEL}/invoke`, captured?.url);
+  ok("...as a POST", captured.init.method === "POST");
+  const hdrs = Object.keys(captured.init.headers);
+  ok("...with a content-type header", captured.init.headers["content-type"] === "application/json");
+  ok("...and NO auth header at all", hdrs.length === 1 && !("x-api-key" in captured.init.headers) && !("authorization" in captured.init.headers), hdrs.join(","));
+  const body = JSON.parse(captured.init.body);
+  ok("...carrying anthropic_version: bedrock-2023-05-31", body.anthropic_version === "bedrock-2023-05-31", body.anthropic_version);
+  ok("...with NO model field in the body", !("model" in body), JSON.stringify(body));
+  ok("...capping tokens low with a non-empty system prompt", body.max_tokens === 16 && typeof body.system === "string" && body.system.length > 0);
+  ok("...passing the first message through", body.messages[0].content.includes("the daemon keeps losing panes"));
+  ok("...and returning the guarded, clipped label", t === "daemon-panes", t);
+}
+{ // A trailing slash on the base must not double the separator.
+  let captured = null;
+  const capturing = async (url, init) => { captured = { url, init }; return { ok: true, json: async () => ({ content: [{ text: "x" }] }) }; };
+  await fetchTopic("hello", bedrock("https://gw.example.net/", BEDROCK_MODEL), { fetch: capturing });
+  ok("a trailing slash on baseUrl still yields a single-slash path",
+     captured.url === `https://gw.example.net/model/${BEDROCK_MODEL}/invoke`, captured.url);
+}
+{ // The model id goes in the path VERBATIM -- a `:` is not percent-encoded (DESIGN 2.3).
+  let captured = null;
+  const capturing = async (url, init) => { captured = { url, init }; return { ok: true, json: async () => ({ content: [{ text: "x" }] }) }; };
+  await fetchTopic("hello", bedrock("https://gw", "us.anthropic.claude-haiku-4-5:0"), { fetch: capturing });
+  ok("the model id is verbatim in the path, its `:` not encoded",
+     captured.url === "https://gw/model/us.anthropic.claude-haiku-4-5:0/invoke" && !captured.url.includes("%3A"), captured.url);
 }
 
 // ---- decide: the freeze model ---------------------------------------------

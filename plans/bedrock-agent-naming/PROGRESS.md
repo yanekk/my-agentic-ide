@@ -10,8 +10,8 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 `smart-agent-names` code in `bin/cockpit-auto-name.mjs`. The gateway was proven reachable
 without credentials during planning (see FINDINGS), so there is no spike.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** implement T01 (the Bedrock transport in `fetchTopic`), which has no
-dependencies.
+**Next `pir-work` will:** review T01, then implement T02 (the env route decision in
+`candidateTopic`).
 
 ## Tasks
 
@@ -20,11 +20,11 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | Bedrock transport in `fetchTopic` | — | ⬜ | Add a `provider` transport param; build the Bedrock InvokeModel request (DESIGN 2.3). |
+| T01 | Bedrock transport in `fetchTopic` | — | 🔍 | Added `provider` param + `buildRequest` (both routes); Bedrock path/headers/body per DESIGN 2.3. 24 new checks. **Deviation:** touched `candidateTopic`'s one `fetchTopic` call (wrap `apiKey`→`{kind:"anthropic"}`) — the signature change forced it or the suite went red; env route stays T02. |
 | T02 | Route decision in `candidateTopic` | T01 | ⬜ | Bedrock wins, exclusive; key path only off-Bedrock (DESIGN 2.1/2.2). |
 | T03 | CLAUDE.md + live verify | T01, T02 | ⬜ | Doc the route; hands-on: name a real agent via the gateway within ~2s (DESIGN 5.1). |
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 
