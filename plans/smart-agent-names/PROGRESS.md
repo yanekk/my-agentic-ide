@@ -6,12 +6,12 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
 **Plan reviewed:** 2026-08-31 — 1 fixed, 4 decided with the user.
 
-**Status:** T01, T02, T03 reviewed. T04 in progress: docs committed. Hands-on checks 1
-(gate) & 2 (key) PASS; check 3 caught a T02 defect (`config` was non-executable), now fixed
-and test-guarded. Awaiting the user's re-run of checks 3 & 4.
+**Status:** T01, T02, T03 reviewed. T04 implemented and hands-on-verified: all four DESIGN
+5.1 checks PASS (live name `agentic-ide / pizza-baking`). One T02 defect found & fixed
+(`config` was non-executable), now test-guarded. T04 awaits fresh-eyes review — the last task.
 **Last updated:** 2026-08-31
-**Next `pir-work` will:** finish T04 — record the user's hands-on answers in FINDINGS with the
-date, then mark T04 ✅ (or, if the gate check fails, rework the gate and revisit T03).
+**Next `pir-work` will:** review T04 (docs accuracy, the executability guard, findings), then
+mark it ✅ — which finishes the plan.
 
 ## Tasks
 
@@ -23,17 +23,11 @@ done · ⛔ blocked, needs a human.
 | T01 | Haiku topic-namer and label guard | — | ✅ | Clean. Model-alias + live label quality are T04 (5.1). |
 | T02 | `config` command and key store | — | ✅ | Clean, no fix commit. All 7 task checks defend (masking test fails if the length-1 cap is dropped — verified). Probed: masking at lengths 0–5 (a 1-char key reveals nothing), unknown-setting exit, empty-file reads as off, realpath entrypoint guard (import runs no CLI). 0600 atomic write; read path masks. `config` name is a T04 hands-on check. |
 | T03 | Wire into the hook: gate, hold, freeze | T01, T02 | ✅ | One fix: a real name (candidate/summary) whose text equalled the placeholder hit `decide`'s "title unchanged" early-out and never froze — endless re-fetch/climb; the freeze-crossing now persists (defended, fails pre-fix). Probed: `candidateTopic` mirrors `decide`'s guards so a settled session is never held; empty input never spends. Daemon untouched. Suite 70+13. |
-| T04 | Relink, docs, hands-on verify | T03 | 🟡 | Docs committed. Checks 1 (COCKPIT_REPO gate) & 2 (key not a variable) PASS in a dispatched agent. Check 3 exposed a T02 defect: `config` was `0644` → `zsh: permission denied`; fixed (`chmod +x`) and run.sh now guards note/agenda/config executability (16 bash checks). Awaiting user re-run of checks 3 & 4 with the fix. Measured table untouched. |
+| T04 | Relink, docs, hands-on verify | T03 | 🔍 | Docs + one-line `chmod +x` + run.sh executability guard (16 bash checks). All four DESIGN 5.1 checks PASS: gate fires in a dispatched agent, key never a variable, live name `agentic-ide / pizza-baking`, `config` confined to cockpit shells. Found & fixed a T02 defect (`config` shipped `0644`). Measured table untouched. Awaiting review. |
 
-**Review queue:** *(empty)*
+**Review queue:** T04
 
 ## Blocked on the user
 
-T04's four hands-on checks (DESIGN 5.1) are with the user, seatbelt is the spend-capped key:
-1. **Load-bearing gate** — in a fleet-dispatched agent's shell, `env | grep -i cockpit_repo`
-   is set. If not, T03's gate must change; stop.
-2. Key never a variable — `env | grep -i anthropic` is empty in that agent.
-3. Live naming + hold — capped key set, fresh agent, ordinary first message: fleet shows
-   `<repo> / <1-3 word topic>` within ~2s, prompt briefly held then answers. Report the
-   label, the hold feel, any slowness.
-4. `config` confinement — runs in a cockpit terminal, "command not found" in a plain shell.
+*(Empty — all four DESIGN 5.1 hands-on checks are verified and recorded in FINDINGS
+with today's date.)*
