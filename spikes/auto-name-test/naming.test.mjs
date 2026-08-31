@@ -569,21 +569,35 @@ const spyKey = () => { const s = () => { s.reads++; return "sk-should-not-be-rea
      c === "oauth-loopback" && f.calls[0]?.url === ANTHRO_URL, `${c} ${f.calls[0]?.url}`);
 }
 { // The upstream guards still short-circuit BEFORE any route choice, even with a
-  // full Bedrock env -- so no route is selected and fetch never fires.
+  // full Bedrock env -- so no route is selected and fetch never fires. The proof is
+  // `f.calls.length === 0`, NOT merely `c === null`: fetchTopic SWALLOWS a throwing
+  // fetch and returns null (its catch), and the Bedrock route never reads the key,
+  // so a bare `fetch: explode` + `c === null` would pass even with a guard gutted
+  // (verified: removing the worktree guard left the whole count unchanged). A
+  // capturing fetch that records its calls is what actually closes the guard.
   const key = spyKey();
+  const f0 = capturing();
   ok("no COCKPIT_REPO short-circuits before the route",
      (await candidateTopic(inp({ prompt: "prose" }), null, bedrockEnv({ COCKPIT_REPO: undefined }),
-        { fetch: explode, readKey: key })) === null && key.reads === 0);
+        { fetch: f0, readKey: key })) === null && f0.calls.length === 0 && key.reads === 0);
+  const f1 = capturing();
   ok("a worktree cwd short-circuits before the bedrock route",
-     (await candidateTopic(inp({ cwd: wt, prompt: "carry on" }), null, bedrockEnv(), { fetch: explode })) === null);
+     (await candidateTopic(inp({ cwd: wt, prompt: "carry on" }), null, bedrockEnv(), { fetch: f1 })) === null
+        && f1.calls.length === 0);
+  const f2 = capturing();
   ok("a slug short-circuits before the bedrock route",
-     (await candidateTopic(inp({ prompt: "/pir-work cockpit-agenda" }), null, bedrockEnv(), { fetch: explode })) === null);
+     (await candidateTopic(inp({ prompt: "/pir-work cockpit-agenda" }), null, bedrockEnv(), { fetch: f2 })) === null
+        && f2.calls.length === 0);
+  const f3 = capturing();
   ok("a frozen state short-circuits before the bedrock route",
      (await candidateTopic(inp({ prompt: "prose", session_title: "myrepo / x" }),
-        { title: "myrepo / x", frozen: true }, bedrockEnv(), { fetch: explode })) === null);
+        { title: "myrepo / x", frozen: true }, bedrockEnv(), { fetch: f3 })) === null
+        && f3.calls.length === 0);
+  const f4 = capturing();
   ok("a hand-renamed title short-circuits before the bedrock route",
      (await candidateTopic(inp({ prompt: "prose", session_title: "my own wording" }),
-        { title: "myrepo / placeholder" }, bedrockEnv(), { fetch: explode })) === null);
+        { title: "myrepo / placeholder" }, bedrockEnv(), { fetch: f4 })) === null
+        && f4.calls.length === 0);
 }
 
 rmSync(T, { recursive: true, force: true });
