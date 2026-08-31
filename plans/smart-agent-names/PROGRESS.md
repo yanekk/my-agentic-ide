@@ -6,9 +6,9 @@ What the build taught lives next door in [FINDINGS.md](FINDINGS.md).
 
 **Plan reviewed:** 2026-08-31 — 1 fixed, 4 decided with the user.
 
-**Status:** T01, T02, T03 reviewed. T04 in progress: docs written and committed; the four
-hands-on checks (DESIGN 5.1) are handed to the user and awaiting answers — the load-bearing
-`COCKPIT_REPO` gate first.
+**Status:** T01, T02, T03 reviewed. T04 in progress: docs committed. Hands-on checks 1
+(gate) & 2 (key) PASS; check 3 caught a T02 defect (`config` was non-executable), now fixed
+and test-guarded. Awaiting the user's re-run of checks 3 & 4.
 **Last updated:** 2026-08-31
 **Next `pir-work` will:** finish T04 — record the user's hands-on answers in FINDINGS with the
 date, then mark T04 ✅ (or, if the gate check fails, rework the gate and revisit T03).
@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 | T01 | Haiku topic-namer and label guard | — | ✅ | Clean. Model-alias + live label quality are T04 (5.1). |
 | T02 | `config` command and key store | — | ✅ | Clean, no fix commit. All 7 task checks defend (masking test fails if the length-1 cap is dropped — verified). Probed: masking at lengths 0–5 (a 1-char key reveals nothing), unknown-setting exit, empty-file reads as off, realpath entrypoint guard (import runs no CLI). 0600 atomic write; read path masks. `config` name is a T04 hands-on check. |
 | T03 | Wire into the hook: gate, hold, freeze | T01, T02 | ✅ | One fix: a real name (candidate/summary) whose text equalled the placeholder hit `decide`'s "title unchanged" early-out and never froze — endless re-fetch/climb; the freeze-crossing now persists (defended, fails pre-fix). Probed: `candidateTopic` mirrors `decide`'s guards so a settled session is never held; empty input never spends. Daemon untouched. Suite 70+13. |
-| T04 | Relink, docs, hands-on verify | T03 | 🟡 | Docs done: CLAUDE.md naming para (Haiku topic, set-once-frozen, "follows the work" retired for the label), `config`+key+`bin/config` in inventory, two key limits in Known limits. `config` symlink already relinked in T02. Measured table left as-is (no new row worth retiring one). Hands-on verify (4 checks, gate first) handed to user — awaiting answers. |
+| T04 | Relink, docs, hands-on verify | T03 | 🟡 | Docs committed. Checks 1 (COCKPIT_REPO gate) & 2 (key not a variable) PASS in a dispatched agent. Check 3 exposed a T02 defect: `config` was `0644` → `zsh: permission denied`; fixed (`chmod +x`) and run.sh now guards note/agenda/config executability (16 bash checks). Awaiting user re-run of checks 3 & 4 with the fix. Measured table untouched. |
 
 **Review queue:** *(empty)*
 

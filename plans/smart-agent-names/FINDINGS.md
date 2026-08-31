@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-08-31 | ✅🐞 | T04 verify: gate (check 1) and key-not-a-variable (check 2) PASS in a dispatched agent. But `config` shipped `0644` (T02), so the symlink ran as `zsh: permission denied` — the command never worked. Fixed: `chmod +x`; run.sh now guards all three command targets are executable. |
 | 2026-08-31 | 🐞 | T03 review: `decide`'s "title unchanged" early-out returned before persisting `frozen`, so a real name (candidate/summary) whose text equalled the placeholder never froze — endless re-fetch/climb. Fixed: persist the freeze-crossing even when the text is unchanged. |
 | 2026-08-31 | 📌 | `candidateTopic` and `decide` each shell `repoContext` on the naming path (two git probes per held prompt). Correct but redundant; watch it when T04 measures the ~2s hold latency. |
 | 2026-08-31 | 📌 | "Follows the work" is retired only for a REAL (frozen) name; a placeholder still climbs to a slug/worktree/summary/candidate. In `decide`, `aiTitle` is read whenever `candidate` is null and treated as a real name that freezes — covering the no-key path. |

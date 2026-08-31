@@ -88,6 +88,15 @@ same "cockpit-config.mjs imports nothing outside node:*" "$cfg_foreign" "0"
 same "cockpit-layout.sh symlinks config onto the cockpit PATH" \
      "$(grep -cE 'cockpit-config\.mjs" "\$COCKPIT_BIN/config"' "$ROOT/bin/cockpit-layout.sh")" "1"
 
+# The symlink invokes the target directly, so a target without its executable bit
+# is `zsh: permission denied: config` -- a break no import- or symlink-check catches,
+# and one that only surfaces when a person runs the command. config shipped 0644 once
+# (T02) and reached a hands-on check before it was found; guard all three commands.
+for cmd in note agenda config; do
+  same "cockpit-$cmd.mjs is executable (else zsh: permission denied)" \
+       "$([ -x "$ROOT/bin/cockpit-$cmd.mjs" ] && echo yes || echo no)" "yes"
+done
+
 # It runs on EVERY prompt of every session, so a crash here is a crash in the
 # prompt box. The contract is that it never exits non-zero in hook mode.
 for bad in 'not json' '{}' '{"session_id":"x"}' '[]' 'null'; do
