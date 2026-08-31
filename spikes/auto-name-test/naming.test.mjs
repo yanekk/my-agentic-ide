@@ -8,6 +8,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+// The topic-namer's pure pieces are imported and driven directly (with an
+// injected fake fetch), not spawned -- no case here ever touches the network.
+import { asLabel, fetchTopic } from "../../bin/cockpit-auto-name.mjs";
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), "..", "..");
 const HOOK = join(ROOT, "bin", "cockpit-auto-name.mjs");
@@ -172,6 +175,99 @@ console.log("== naming ==");
   const empty = execFileSync("node", [HOOK], { input: "{}", encoding: "utf8",
     env: { PATH: process.env.PATH, HOME: process.env.HOME, COCKPIT_DIR: s } });
   ok("input with no session is silent too", empty.trim() === "");
+}
+
+// ---- the label guard -----------------------------------------------------
+// asLabel is the whole reason a naming call is safe: the model's answer is never
+// trusted, only what survives this regex. A rejected answer is a no-answer.
+console.log("== the label guard ==");
+{
+  ok("a clean kebab label is accepted", asLabel("oauth-loopback") === "oauth-loopback");
+  ok("a single word is a label", asLabel("daemon") === "daemon");
+  ok("trims and lowercases before matching", asLabel("  OAuth-Loopback  ") === "oauth-loopback");
+  ok("four words is the ceiling", asLabel("a1-b2-c3-d4") === "a1-b2-c3-d4");
+  ok("five dashed words are rejected", asLabel("one-two-three-four-five") === null);
+  ok("a clarifying sentence is rejected (the 'hey' case)",
+     asLabel("Hi! What would you like to name this session?") === null);
+  ok("internal spaces are rejected", asLabel("oauth loopback") === null);
+  ok("trailing punctuation is rejected", asLabel("oauth-loopback.") === null);
+  ok("a leading or trailing dash is rejected", asLabel("-oauth") === null && asLabel("oauth-") === null);
+  ok("a double dash is rejected", asLabel("oauth--loopback") === null);
+  ok("empty and nullish are rejected", asLabel("") === null && asLabel(null) === null && asLabel(undefined) === null);
+}
+
+// ---- fetchTopic ----------------------------------------------------------
+// Every case injects opts.fetch, so nothing here reaches the real API. A naming
+// call must never throw to its caller: every failure collapses to null.
+console.log("== fetchTopic (injected fetch, no network) ==");
+
+// A fake fetch that answers with a body and status; the throwing variant proves
+// a rejected fetch never becomes a throw out of fetchTopic.
+const answering = (text, { ok: okStatus = true } = {}) =>
+  async () => ({ ok: okStatus, json: async () => ({ content: [{ text }] }) });
+
+{
+  const t = await fetchTopic("implement the OAuth loopback flow", "sk-test",
+    { fetch: answering("oauth-loopback") });
+  ok("a normal message returns the label", t === "oauth-loopback", t);
+}
+{ // The measured failure mode: a content-free message gets a sentence, guarded out.
+  const t = await fetchTopic("hey", "sk-test",
+    { fetch: answering("Hi! What would you like to work on today?") });
+  ok("a sentence answer returns null", t === null, t);
+}
+{
+  const t = await fetchTopic("x", "sk-test", { fetch: answering("OAuth Loopback.") });
+  ok("spaces/capitals/punctuation in the answer -> null", t === null, t);
+}
+{
+  const t = await fetchTopic("x", "sk-test", { fetch: answering("one-two-three-four-five") });
+  ok("a five-word dashed answer -> null", t === null, t);
+}
+{
+  const t = await fetchTopic("x", "sk-test", { fetch: async () => { throw new Error("ENOTFOUND"); } });
+  ok("a rejecting fetch returns null, not a throw", t === null, t);
+}
+{
+  const t = await fetchTopic("x", "sk-test", { fetch: answering("oauth-loopback", { ok: false }) });
+  ok("a non-2xx response returns null", t === null, t);
+}
+{
+  const badJson = async () => ({ ok: true, json: async () => { throw new SyntaxError("Unexpected end of JSON input"); } });
+  ok("malformed JSON returns null", (await fetchTopic("x", "sk-test", { fetch: badJson })) === null);
+  const emptyBody = async () => ({ ok: true, json: async () => ({}) });
+  ok("an answerless body returns null", (await fetchTopic("x", "sk-test", { fetch: emptyBody })) === null);
+}
+{ // A hung request must be cut at timeoutMs, not left to hold the prompt box.
+  const hanging = (url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+  });
+  const started = Date.now();
+  const t = await fetchTopic("x", "sk-test", { fetch: hanging, timeoutMs: 50 });
+  ok("a never-resolving fetch is aborted at timeoutMs", t === null && Date.now() - started < 1500, `${t} in ${Date.now() - started}ms`);
+}
+{ // No key and no message must never even call fetch -- no hold, no spend.
+  const explode = () => { throw new Error("fetch must not be called"); };
+  ok("no key returns null without calling fetch", (await fetchTopic("x", "", { fetch: explode })) === null);
+  ok("an empty message returns null without calling fetch", (await fetchTopic("   ", "sk-test", { fetch: explode })) === null);
+}
+{ // The request shape: endpoint, method, headers, and the low token cap.
+  let captured = null;
+  const capturing = async (url, init) => {
+    captured = { url, init };
+    return { ok: true, json: async () => ({ content: [{ text: "daemon-panes" }] }) };
+  };
+  const t = await fetchTopic("the daemon keeps losing panes", "sk-abc123",
+    { fetch: capturing, model: "claude-haiku-4-5" });
+  ok("posts to the messages endpoint", captured.url === "https://api.anthropic.com/v1/messages", captured?.url);
+  ok("...as a POST", captured.init.method === "POST");
+  ok("...with the x-api-key header", captured.init.headers["x-api-key"] === "sk-abc123");
+  ok("...and the anthropic-version header", captured.init.headers["anthropic-version"] === "2023-06-01");
+  const body = JSON.parse(captured.init.body);
+  ok("...naming the model", body.model === "claude-haiku-4-5", body.model);
+  ok("...capping tokens low with a non-empty system prompt", body.max_tokens === 16 && typeof body.system === "string" && body.system.length > 0);
+  ok("...passing the first message through", body.messages[0].content.includes("the daemon keeps losing panes"));
+  ok("...and returning the guarded, clipped label", t === "daemon-panes", t);
 }
 
 rmSync(T, { recursive: true, force: true });

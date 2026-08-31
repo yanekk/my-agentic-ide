@@ -101,6 +101,78 @@ export function placeholder(prompt) {
   return t ? clip(t, MAX_RIGHT) : null;
 }
 
+// ---------------------------------------------------------- Haiku topic ---
+
+// The guard. Haiku is asked for a kebab label, but a content-free first message
+// ("hey") makes it answer with a clarifying SENTENCE instead (measured, spike
+// 2026-08-31) -- so the model's output is never trusted, only what survives this.
+// One to four lowercase alphanumeric words joined by single dashes; anything
+// with spaces, capitals it cannot lowercase away, punctuation, or a sentence in
+// it is rejected. A rejected answer is treated exactly like no answer.
+export function asLabel(s) {
+  const t = String(s ?? "").trim().toLowerCase();
+  return /^[a-z0-9]+(?:-[a-z0-9]+){0,3}$/.test(t) ? t : null;
+}
+
+// The system prompt. Authored here from DESIGN 2.5 / T01's spec -- the spike's
+// exact wording was not kept, so its real-message label quality is confirmed
+// live with the capped key in T04, not inherited. Examples are the three from
+// FINDINGS (2026-08-31).
+const LABEL_PROMPT = [
+  "You label a coding-agent session for a compact fleet list.",
+  "Read the developer's first message and reply with the subject of the work as a 1-3 word topic.",
+  "Output ONLY that topic: lowercase, words joined by single hyphens (kebab-case), nothing else.",
+  "It is the noun subject, not an instruction -- no verbs, no filler words, no punctuation, no quotes, no explanation.",
+  "Examples:",
+  '  "implement the OAuth loopback flow" -> oauth-loopback',
+  '  "the daemon keeps losing track of which pane is which" -> daemon-panes',
+  '  "the calendar tests fail at random on CI" -> flaky-tests',
+].join("\n");
+
+// Ask Haiku for a topic, bounded by a hard timeout, and return a validated kebab
+// label or null. A naming call must NEVER throw to its caller and never wedge the
+// prompt box: every network error, non-2xx, malformed body, abort, or non-label
+// answer collapses to null. The web call needs no import -- `fetch` is a node 24
+// global -- which is what keeps the whole file inside node:* (DESIGN 3.1). fetch
+// and the timeout are injectable so the suite drives every path with no network.
+export async function fetchTopic(text, apiKey, opts = {}) {
+  const {
+    fetch = globalThis.fetch,
+    timeoutMs = 2000,
+    model = "claude-haiku-4-5",
+  } = opts;
+  const t = tidy(text);
+  if (!t || !apiKey) return null;   // no message or no key: never spend a call
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16,
+        system: LABEL_PROMPT,
+        messages: [{ role: "user", content: "First message: " + t }],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const label = asLabel(data?.content?.[0]?.text);
+    return label ? clip(label, MAX_RIGHT) : null;
+  } catch {
+    return null;   // network error, abort/timeout, or malformed JSON: no answer
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Claude writes its own summary into the transcript as a {"type":"ai-title"}
 // record, but only AFTER the first reply -- which is why it cannot be used at
 // the moment a session is first named, and why the opening words stand in until
