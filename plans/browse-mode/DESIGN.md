@@ -78,11 +78,13 @@ mode would be to click the other half first. That is a trap, not a mode.
 agent enters browse mode. **There is no `browse` command and nothing is typed** — entering the
 mode is the whole gesture.
 
-- **The split is `--percent 60` in the viewer's favour**, which on a 120-column window gives the
-  browser **47 columns** and the viewer 72 — measured. 47 is the width broot was already
-  validated at during planning (tree, folder structure and `c/` snippets all readable), so the
-  ratio is chosen to land on a number known to work, not picked for looks. Wider windows scale
-  both.
+- **The split is `--percent 80` in the viewer's favour**, so the tree is the width of
+  **revdiff's own file list** — 20% of the slot. *(Was 60; the user judged that too wide in a
+  real cockpit at T07 and asked for it to match revdiff.)* revdiff's `--tree-width` is *"units
+  (1-10, default 2 of 10)"*, a **share** rather than a column count, so ours is a share too and
+  keeps matching at any window size; measured live, revdiff's box was 65 of 319 columns. The
+  browse tree sits exactly where revdiff's tree sits and is read the same way, so matching it
+  beats a width validated on its own.
 - **The browser holds focus on entry.** You enter browse mode to find a file, and a push never
   takes focus away (§2.4), so the whole gesture — arrive, filter, Enter, read, filter again —
   happens without touching the mouse or another key.
@@ -392,7 +394,7 @@ is a decision for the user, not a session.
 | That `⌥[`/`⌥]` actually reach the daemon, **from both halves** | The stub tests the daemon's reaction to a verb, not WezTerm's delivery of the keystroke |
 | That `⌥p`/`⌥o` still work in broot inside WezTerm | macOS and WezTerm both sit between the key and the app — and the cockpit now adds its own file to the same `--conf` chain those keys come from |
 | That the redraw on return from parking is acceptable rather than merely correct | A judgement, not an assertion |
-| That **60/40 is the right split** — 47 columns of browser against 72 of viewer | Legible was measured; comfortable is a judgement |
+| ~~That **60/40 is the right split**~~ **Answered 2026-09-02: it was not.** The user judged the tree too wide and it now matches revdiff at 80/20 | Legible was measured; comfortable is a judgement — and the judgement went against the measured number, which is why the row existed |
 
 Every row belongs to **T07**, and T07 asks all of them.
 
@@ -432,7 +434,8 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
 | 2026-08-29 | ~~broot in a **terminal**, micro in the diff slot~~ | ~~Both in the diff slot was the user's first instinct; it breaks the "park exactly one pane" invariant that keeps agent switching cheap~~ **Reversed at plan review the same day — see the next row.** |
 | 2026-08-29 *(plan review)* | **Both in the diff slot: browser left, viewer right.** Entering browse mode splits the top pane in two; there is no `browse` command and nothing is typed | The user's first instinct, restored. The plan-review session put the two-pane cost to them plainly and they chose it anyway, then it was **measured**: the pair parks and restores at identical geometry (§2.6, §3.1, FINDINGS). The "breaks the invariant" objection had been asserted, never tested; the real cost is one extra `wezterm cli` call per direction. It also deletes the `browse` command, its symlink and its PATH publication — a second place to start a mode that already had a gesture |
 | 2026-08-29 *(plan review)* | `⌥[`/`⌥]` work from **either** half of the slot | Gating on a single diff pane id would trap the user in the browser, which is exactly where focus deliberately starts. §2.1 |
-| 2026-08-29 *(plan review)* | The split is **`--percent 60`** to the viewer — browser 47 columns, viewer 72, on a 120-column window | 47 is the width broot was already measured usable at during planning, so the ratio lands on a known-good number rather than a guess. T07 is where a person says whether it reads well |
+| 2026-08-29 *(plan review)* | ~~The split is **`--percent 60`** to the viewer — browser 47 columns, viewer 72, on a 120-column window~~ | ~~47 is the width broot was already measured usable at during planning~~ **Overturned at T07 — see the next row. The question was asked of T07 deliberately and T07 answered it.** |
+| 2026-09-02 *(T07)* | The split is **`--percent 80`** to the viewer, so the tree matches **revdiff's own file list** | **The user saw 60 in a real cockpit and judged the tree too wide**, asking for it to be as wide as revdiff's browser. revdiff's `--tree-width` is *"units (1-10, default 2 of 10)"* — a **share**, not a column count — so ours is a share too and keeps matching at every window size; measured live, revdiff's box was 65 of 319 columns (20.4%). The old reasoning ("47 is a width broot was validated usable at") missed that this tree sits where revdiff's tree sits and is read the same way: looking like it beats a width measured on its own |
 | 2026-08-29 | **broot + micro** rather than `revdiff --all-files` | revdiff's own browse mode has an identical look and keeps annotations, but: no directory folding (2,251 rows on a real repo), **6–12 s** to open that repo against broot's instant, and its search covers only the currently-open file. broot folds, opens instantly and searches across files |
 | 2026-08-29 | You **cannot comment** on a browsed file | A second broot key opening the file in revdiff would close the loop, and is the better end state. The user chose to leave it: it introduces a fifth diff-slot state that is not a stop in the cycle, and muddies the model just decided. See §8 |
 | 2026-08-29 | The cockpit ships its **own** broot verb file, layered with `--conf` | Editing the user's `~/.config/broot/verbs.hjson` would fight their own settings. Measured: `--conf a;b;c` **layers**, it does not replace |

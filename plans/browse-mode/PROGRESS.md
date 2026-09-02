@@ -38,16 +38,17 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T07 is under way. It found a defect at step 3 (fixed as T08) and prompted a
-feature (T09); both await review.** T06 is reviewed and done.
-The unhappy paths are covered: each half of the browse pair is judged and relaunched **on its
-own**, and a reaped agent takes every pane it owns with it. `spikes/cockpit-test` **353 checks**
-(was 295); browse (55 bash + its node suites), agenda and notes green.
+**Status:** **T07 is under way and has answered most of its questions.** It found **T08** (the
+detection defect) and prompted **T09** (the fence) and the **80/20 split**; all three await
+review. T06 is reviewed and done. `spikes/cockpit-test` **365 checks** (was 295), two clean runs;
+browse (55 bash + its node suites), agenda and notes green.
 
-**Everything in this plan is test-proven and NOTHING is person-proven.** No part of browse mode
-— not the pair, not a heal, not a reap — has ever been seen against a real broot, a real micro or
-a real WezTerm. **T07 is the whole of that evidence**, and it now covers T06 too: steps **10 and
-11** quit each half and watch it come back (the user's decision, 2026-08-30).
+**Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
+usable, the fence helps rather than fights, descending is left alone, focus never leaves the
+tree, the redraw is acceptable, the footer still fits, the heals were seen firing three times,
+and the `--conf` layering does not shadow the user's own keys. **The split was judged wrong and
+changed** — 60 → 80, to match revdiff's own file list. Still unanswered: the mouse-free question,
+tabs across a park and an agent switch, and the `c/` jump landing on the right line.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -61,8 +62,8 @@ title** — T07 found by hand that a shell's `preexec` hook writes the title its
 command's first word, so a live broot's title reads `cd` and every healthy half was read as a
 quit shell (T08). A half is running if its screen is framed, if the title happens to name the
 program, or — the only signal that is always true — if the tty's foreground process is one.
-Below
-the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews
+
+Below the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews
 anything else; `cockpit-open` refuses unless `panes.json` carries all three viewer keys in the
 right shape. Both are hard prerequisites in the installer and the layout script.
 
@@ -96,9 +97,10 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-02
-**Next `pir-work` will:** **review T08**, then **T09**. After that, **resume T07 from step 1** — the cockpit is already pointed at this worktree, so the window only has to be
-re-opened to pick T08 up. T07's script covers T06's heals at steps 10 and 11. **The session
-raises the script with the user and waits**; it ends when the answers are in FINDINGS.
+**Next `pir-work` will:** **review T08**, then **T09** (which includes the 80/20 split). After
+that, **finish T07** — only three questions are left (mouse-free drive, tabs across a park and an
+agent switch, the `c/` line jump); everything else is answered in FINDINGS. The cockpit still
+points at this worktree, so the window only has to be re-opened. **The session asks and waits.**
 
 ## Tasks
 
@@ -114,7 +116,7 @@ done · ⛔ blocked, needs a human.
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. Geometry and broot's filter text stay unverified → T07. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed. The reaper killed a browse agent's browser **twice** (a failed kill drives the mux-socket repair); its per-agent records survived unless it still held a slot pane; and §11c'' passed under a per-agent cooldown, so "same pass" went undefended — retimed. Both new checks proven to fail against the unfixed code. Probed the GONE-half, migration and prompt paths. **353 checks.** |
-| T07 | Verified by hand with the user | T03, T06 | 🟡 | **Started 2026-09-02 and blocked at step 3**: broot was unusable — its own launch command was being typed into its filter box every ~3s. Cause found, fixed as **T08**. Cockpit is pointed at the worktree; re-run from step 1 once T08 is in. Steps 1–2 and the install dance are proven to work. |
+| T07 | Verified by hand with the user | T03, T06 | 🟡 | **Most of it answered 2026-09-02** — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. Still open: mouse-free drive, tabs across a park + agent switch, the `c/` line jump. Cockpit still points at the worktree. |
 | T08 | Judge a half by its foreground process, not its title | T07 | 🔍 | The T07 defect. A shell `preexec` hook owns the pane title and writes the command's first word, so `broot`/`micro` never appeared and every healthy half read as quit. `diffPaneStatus` now falls back to `ps -t` (the check `terminalIsIdle` already used); `foregroundComm` extracted and shared. New **11b'**, proven against title-only detection. **359 checks.** |
 | T09 | Fence the browser to the agent's worktree | T08 | 🔍 | The user asked whether broot can block leaving; **it cannot** — no jail option, and our verb file cannot shadow the built-in `:parent` (measured, it still moved the root). So the daemon asks a `--listen`ing broot where its root is and sends it back when it is outside; a root *below* the worktree is left alone. Both sides realpathed. New **11b''**. **365 checks.** |
 

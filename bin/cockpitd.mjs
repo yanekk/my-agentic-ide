@@ -473,11 +473,20 @@ const reapStrikes = new Map();
 
 const DIFF_MODES = ["uncommitted", "lastcommit", "custom", "browse"];
 const DEFAULT_DIFF_MODE = "uncommitted";
-// How much of the slot the VIEWER takes when it is split off the browser: on a
-// 120-column window that is broot 47 columns and micro 72 (measured). 47 is the
-// width broot was validated usable at, so the ratio lands on a known-good number
-// rather than a guess. DESIGN 2.3.
-const BROWSE_VIEWER_PERCENT = 60;
+// How much of the slot the VIEWER takes when it is split off the browser.
+//
+// **80, to match revdiff's own file list.** The user judged 60 at T07 -- the tree
+// was too wide -- and asked for it to be as wide as revdiff's browser instead.
+// revdiff's `--tree-width` is "in units (1-10, default 2 of 10)", i.e. a SHARE and
+// not a column count, so matching it is a share too and it keeps matching at every
+// window size. Measured on the live cockpit, 2026-09-02: revdiff's file box was 65
+// columns of a 319-column pane, 20.4%.
+//
+// The earlier 60 was reasoned from "47 columns is a width broot was validated
+// usable at" on a 120-column window; what that missed is that the browse tree sits
+// where revdiff's tree sits and is read the same way, so looking like it matters
+// more than a width measured on its own. DESIGN 2.3.
+const BROWSE_VIEWER_PERCENT = 80;
 
 // jobId -> mode. Absent means the default: a new agent is never carried into
 // another agent's mode.
