@@ -190,6 +190,35 @@ export PANECWD="$T/panecwd"; : > "$PANECWD"
 export PSBUSY="$T/psbusy"; : > "$PSBUSY"
 export PSFG="$T/psfg"; : > "$PSFG"
 
+# --- stub broot ------------------------------------------------------------
+# Only the CONTROL side is stubbed: the daemon never runs broot itself (it types
+# a command line into a pane), but it does ask a running one where it is and send
+# it back -- `broot --send <sock> --get-root` / `--cmd ":focus <path>"` (T09).
+#
+# $BROOTROOT holds where the fake broot claims its root is. `:focus` REWRITES it,
+# so a successful fence closes its own loop exactly as the wezterm stub's retitle
+# does: without that the daemon would keep sending, and "it was put back" could not
+# be told from "it was told to go back, forever".
+cat > "$T/bin/broot" <<'BROOT'
+#!/usr/bin/env bash
+printf 'BROOT: %s\n' "$*" >> "$CALLS"        # plain, not %q: these lines are asserted on
+cmd=""; want_root=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --get-root) want_root=1 ;;
+    --cmd)      cmd="${2:-}"; shift ;;
+  esac
+  shift
+done
+case "$cmd" in
+  :focus\ *) printf '%s\n' "${cmd#:focus }" > "$BROOTROOT" ;;
+esac
+[ "$want_root" = 1 ] && cat "$BROOTROOT"
+exit 0
+BROOT
+chmod +x "$T/bin/broot"
+export BROOTROOT="$T/brootroot"; : > "$BROOTROOT"
+
 export PATH="$T/bin:$PATH"
 
 # --- a real git repo to act as the agent's worktree -------------------------
@@ -1100,6 +1129,31 @@ refute "...nor micro over a live one"             "micro -readonly" "$CALLS"
 : > "$T/psfg"                             # back to the stub's default for what follows
 retitle "$BR" broot
 retitle "$VW" micro
+
+echo
+echo "== 11b''. a browser that wanders OUT of the worktree is put back =="
+# broot cannot be confined -- checked, not assumed: v1.59 has no jail option, and a
+# verb of ours named `parent` does not shadow the built-in `:parent` (it still moved
+# the root, with our file loaded cleanly and FIRST in the chain). So the fence
+# checks where broot ENDED UP rather than how it got there, which closes every
+# route at once instead of the ones somebody thought to block.
+mkdir -p "$MOVED4/sub"                    # a real dir: the fence realpaths both sides
+printf '%s\n' "$T" > "$BROOTROOT"         # the parent of the worktree -- one `:parent` away
+: > "$CALLS"
+sleep 3
+check  "the daemon asked broot where it was"     "BROOT: --send cockpit-abc12345 --get-root" "$CALLS"
+check  "...and sent it back to the worktree"     "--cmd :focus $MOVED4" "$CALLS"
+check  "...and said so"                          "wandered to $T; put it back in $MOVED4" "$T/daemon.log"
+same   "broot's root is the worktree again"      "$(cat "$BROOTROOT")" "$MOVED4"
+# Descending is not wandering: a root BELOW the worktree is what browsing a
+# subdirectory looks like, and yanking that back would make the tree unusable in
+# the other direction.
+printf '%s\n' "$MOVED4/sub" > "$BROOTROOT"
+: > "$CALLS"
+sleep 3
+refute "a root INSIDE the worktree is left alone" "--cmd :focus" "$CALLS"
+same   "...and broot was not moved"              "$(cat "$BROOTROOT")" "$MOVED4/sub"
+printf '%s\n' "$MOVED4" > "$BROOTROOT"    # back at the worktree for what follows
 
 echo
 echo "== 11c. a quit VIEWER is healed in its own half, and nothing else is touched =="

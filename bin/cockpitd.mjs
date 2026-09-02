@@ -602,8 +602,70 @@ function diffCommand(reviewFile, mode, ref) {
 // ---------------------------------------------------------------------------
 
 /** broot, carrying the cockpit's verb file FIRST in the --conf chain (T03). */
-function browserCommand(worktree) {
-  return `cd ${JSON.stringify(worktree)} && broot --conf ${JSON.stringify(browseConfChain(os.homedir(), REPO_ROOT))}`;
+function browserCommand(worktree, jobId) {
+  return `cd ${JSON.stringify(worktree)} && broot --conf ${JSON.stringify(browseConfChain(os.homedir(), REPO_ROOT))}`
+       + ` --listen ${browseSocket(jobId)}`;
+}
+
+/**
+ * The control-socket name for an agent's browser. One per agent, because two
+ * agents can both be in browse mode with both pairs alive (one in the slot, one
+ * parked) and a shared name would let the fence question the wrong tree.
+ *
+ * Job ids are hex-ish, but the name reaches a socket path, so anything else is
+ * flattened rather than trusted.
+ */
+const browseSocket = (jobId) => `cockpit-${String(jobId).replace(/[^A-Za-z0-9_-]/g, "-")}`;
+
+/**
+ * Put the browser back inside the agent's worktree if it has wandered out.
+ *
+ * **broot cannot be confined, and this was checked before it was worked around**
+ * (T09, measured 2026-09-02 on broot 1.59): there is no jail/confine option — the
+ * only root-related flags are cosmetic — and a verb of ours named `parent` does
+ * NOT shadow the built-in `:parent`, which still moved the root up with our file
+ * loaded cleanly and first in the chain. Blocking keys would not do it either,
+ * since `:parent` can simply be typed.
+ *
+ * So the fence checks the RESULT rather than the route: `broot --listen` opens a
+ * control socket, `--get-root` asks where it is, and `--cmd :focus` sends it back.
+ * That closes every way out at once — the ones found and the ones not — where
+ * blocking gestures could only close the ones somebody thought of.
+ *
+ * Descending is not wandering: a root inside the worktree is exactly what browsing
+ * a subdirectory looks like, so only a root that is neither the worktree nor below
+ * it is pulled back.
+ *
+ * Both sides are REALPATHED before comparing. broot answers with a resolved path
+ * (`/private/var/…` on macOS) while an agent worktree usually is not resolved
+ * (`/var/…`), and comparing the two raw would read every temp-dir worktree as
+ * "outside" and yank the tree once a second. This is the same symlink trap
+ * `cockpit-open` hit in T02.
+ *
+ * Costs one `broot --send` per second while a pair is in the slot: measured 23–30ms,
+ * and against a broot that is gone it fails immediately ("error on the socket:
+ * Connection refused") rather than hanging.
+ */
+function fenceBrowseRoot(jobId, worktree) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const root = brootSend(jobId, ["--get-root"]);
+  // Not a path: broot is starting, gone, or not listening. Nothing to fence.
+  if (!root || !root.startsWith("/")) return;
+  const inside = real(worktree);
+  const at = real(root);
+  if (at === inside || at.startsWith(`${inside}/`)) return;
+  if (brootSend(jobId, ["--cmd", `:focus ${worktree}`]) === null) return;
+  log(`browser for ${jobId} wandered to ${root}; put it back in ${worktree}`);
+}
+
+/** One `broot --send` at the agent's socket. Returns trimmed stdout, or null. */
+function brootSend(jobId, args) {
+  try {
+    return execFileSync("broot", ["--send", browseSocket(jobId), ...args],
+                        { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
 }
 /**
  * micro, read-only and with NO file argument: the first push replaces its empty
@@ -827,7 +889,7 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   // so the list of what we pushed into the last one has to go with it.
   const freshViewer = viewer !== null && parkedViewer === undefined;
   if (!restored || freshViewer) await sleep(SHELL_SETTLE_MS);   // let the login shells start reading
-  if (!restored) launchInPane(browser, browserCommand(worktree));
+  if (!restored) launchInPane(browser, browserCommand(worktree, jobId));
   if (freshViewer) {
     launchInPane(viewer, viewerCommand(worktree));
     resetViewerTabs(jobId);
@@ -1954,6 +2016,7 @@ function healBrowseHalves(jobId) {
   const table = paneTable();
   if (!table) return;
   const worktree = pair.cwd ?? attached.worktree;
+  let browserRunning = false;
   for (const [half, pane, command] of [
     ["browser", pair.browser, browserCommand],
     ["viewer", pair.viewer, viewerCommand],
@@ -1964,13 +2027,21 @@ function healBrowseHalves(jobId) {
       browseHalfStatus.set(pane, status);
       log(`browse ${half} pane ${pane} for ${jobId}: ${status}`);
     }
-    if (status !== "shell") continue;
+    if (status !== "shell") {
+      // Only a browser that is actually up is worth asking where it is, and only
+      // once it is past the launch grace -- a broot still starting has not opened
+      // its socket, and the query would just spawn a `broot --send` to be refused.
+      if (half === "browser" && Date.now() - (paneLaunchedAt.get(pane) ?? 0) >= DIFF_RELAUNCH_COOLDOWN_MS) {
+        browserRunning = true;
+      }
+      continue;
+    }
     if (Date.now() - (paneLaunchedAt.get(pane) ?? 0) < DIFF_RELAUNCH_COOLDOWN_MS) continue;
 
     reconciling = true;
     try {
       if (diffPaneStatus(pane) !== "shell") continue;   // re-check under the lock
-      launchInPane(pane, command(worktree));
+      launchInPane(pane, command(worktree, jobId));
       armHalves(pane);
       // A fresh micro has no tabs, so what we think it has open has to go with the
       // old process. The browser's heal deliberately does nothing of the kind.
@@ -1980,6 +2051,9 @@ function healBrowseHalves(jobId) {
       reconciling = false;
     }
   }
+  // Last, and only for a browser that is up: the fence is about where a LIVE broot
+  // has got to, and asking one that was just relaunched would only be refused.
+  if (browserRunning) fenceBrowseRoot(jobId, worktree);
 }
 
 // How often, at most, to re-check the attached agent's live cwd for a worktree
