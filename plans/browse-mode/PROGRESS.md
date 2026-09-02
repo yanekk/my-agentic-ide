@@ -39,9 +39,10 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
 **Status:** **T07 is under way and has answered most of its questions.** It found **T08** (the
-detection defect) and prompted **T09** (the fence) and the **80/20 split**; all three await
-review. T06 is reviewed and done. `spikes/cockpit-test` **365 checks** (was 295), two clean runs;
-browse (55 bash + its node suites), agenda and notes green.
+detection defect) and prompted **T09** (the fence) and the **80/20 split**. **T08 is now reviewed
+and done**; T09 and T10 still await review. `spikes/cockpit-test` **365 checks** (was 295), two
+clean runs at load ~2 after the T08 review; browse (55 bash + its node suites), agenda and notes
+green.
 
 **Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
 usable, the fence helps rather than fights, descending is left alone, focus never leaves the
@@ -97,10 +98,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-02
-**Next `pir-work` will:** **review T08**, then **T09**, then **T10**. After
-that, **finish T07** — only three questions are left (mouse-free drive, tabs across a park and an
-agent switch, the `c/` line jump); everything else is answered in FINDINGS. The cockpit still
-points at this worktree, so the window only has to be re-opened. **The session asks and waits.**
+**Next `pir-work` will:** **review T09**, then **T10**. After that, **finish T07** — only three questions are left (mouse-free drive, tabs across a park and an agent switch, the `c/` line jump), plus confirming by hand that browse mode is now usable, which is what T08 fixed and no suite can say. The cockpit still points at this worktree, so the window only has to be re-opened. **The session asks and waits.**
 
 ## Tasks
 
@@ -114,10 +112,10 @@ done · ⛔ blocked, needs a human.
 | T02 | `cockpit-open.mjs` — pane lookup, locked state, sending | T01 | ✅ | Reviewed: **two defects fixed, both in the refusals.** `viewer` was coerced, so `""`, `false` and `[]` all became pane **0** and the push went out; the `\r` guard read the argument, not the realpath. **176 checks**, every new one proven to fail against the unfixed code. |
 | T03 | The broot verb layer + micro/broot as prerequisites | T02 | ✅ | Reviewed, two defects fixed: the `--conf` chain was backwards (the **first** file wins) and `{line}` is `0`, not empty. Enter is pressed for real. **238 checks**. |
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
-| T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. Geometry and broot's filter text stay unverified → T07. |
-| T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed. The reaper killed a browse agent's browser **twice** (a failed kill drives the mux-socket repair); its per-agent records survived unless it still held a slot pane; and §11c'' passed under a per-agent cooldown, so "same pass" went undefended — retimed. Both new checks proven to fail against the unfixed code. Probed the GONE-half, migration and prompt paths. **353 checks.** |
+| T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. |
+| T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed (a double kill of the browser, per-agent records surviving a reap, an undefended §11c''). **353 checks.** |
 | T07 | Verified by hand with the user | T03, T06 | 🟡 | **Most of it answered 2026-09-02** — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. Still open: mouse-free drive, tabs across a park + agent switch, the `c/` line jump. Cockpit still points at the worktree. |
-| T08 | Judge a half by its foreground process, not its title | T07 | 🔍 | The T07 defect. A shell `preexec` hook owns the pane title and writes the command's first word, so `broot`/`micro` never appeared and every healthy half read as quit. `diffPaneStatus` now falls back to `ps -t` (the check `terminalIsIdle` already used); `foregroundComm` extracted and shared. New **11b'**, proven against title-only detection. **359 checks.** |
+| T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction (`/opt/homebrew/bin/broot` → `broot`) was defended by nothing — deleting it left all 365 checks green. 11b' now asserts through a path. Re-proved the six new assertions fail against title-only detection. Probed every `diffPaneStatus` caller and the `terminalIsIdle` extraction. **Live half is T07's.** |
 | T09 | Fence the browser to the agent's worktree | T08 | 🔍 | The user asked whether broot can block leaving; **it cannot** — no jail option, and our verb file cannot shadow the built-in `:parent` (measured, it still moved the root). So the daemon asks a `--listen`ing broot where its root is and sends it back when it is outside; a root *below* the worktree is left alone. Both sides realpathed. New **11b''**. **365 checks.** |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | 🔍 | **Committed inside T07's commit `96c33ce`, which was a mistake** — T07 writes no product code by rule, so this gets its own row rather than riding along unreviewed. `BROWSE_VIEWER_PERCENT` 60 → 80 plus ten moved assertions. revdiff's `--tree-width` is a *share* (2 of 10), measured live at 65 of 319 columns. **365 checks.** |
 
@@ -125,9 +123,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T08**, then **T09**, then **T10**, all implemented 2026-09-02. Then finish
-T07, which is what prompted all three. **T10 lives in commit `96c33ce`** — a T07 commit, which is
-why it needs its own row: T07 is not supposed to carry product code.
+**Review queue:** **T09**, then **T10**. T08 is reviewed and done. Then finish T07, which is what prompted all three. **T10 lives in commit `96c33ce`** — a T07 commit, which is why it needs its own row: T07 is not supposed to carry product code.
 
 ## Blocked on the user
 
