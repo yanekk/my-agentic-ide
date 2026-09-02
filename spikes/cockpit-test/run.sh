@@ -169,13 +169,26 @@ chmod +x "$T/bin/wezterm"
 # foreground process is the login shell) before cd-ing it. $PSBUSY names a
 # foreground command to report instead of the shell, so the busy path can be
 # exercised; empty means idle.
+#
+# $PSFG maps a TTY to the command in its foreground group ("ttys41 broot"), which
+# is how a test says "this pane really is running broot" independently of its
+# TITLE. The two disagree on a real machine -- a shell with a preexec hook titles
+# the pane after the command's first word -- and that disagreement is section 11q.
+# $PSBUSY is the older tty-blind switch; $PSFG wins wherever it names the tty.
 cat > "$T/bin/ps" <<'PS'
 #!/usr/bin/env bash
+tty=""
+while [ $# -gt 0 ]; do [ "$1" = "-t" ] && { tty="${2:-}"; shift; }; shift; done
+if [ -n "$tty" ] && [ -s "${PSFG:-/dev/null}" ]; then
+  fg=$(awk -v t="$tty" '$1 == t { print $2 }' "$PSFG")
+  if [ -n "$fg" ]; then printf 'Ss   /bin/zsh\nS+   %s\n' "$fg"; exit 0; fi
+fi
 if [ -s "$PSBUSY" ]; then printf 'R+ %s\n' "$(cat "$PSBUSY")"; else printf 'Ss+ zsh\n'; fi
 PS
 chmod +x "$T/bin/ps"
 export PANECWD="$T/panecwd"; : > "$PANECWD"
 export PSBUSY="$T/psbusy"; : > "$PSBUSY"
+export PSFG="$T/psfg"; : > "$PSFG"
 
 export PATH="$T/bin:$PATH"
 
@@ -1050,6 +1063,43 @@ check  "the viewer is seen as RUNNING too"        "browse viewer pane $VW for ab
 refute "nothing was typed into the browser"       "send-text --pane-id $BR" "$CALLS"
 refute "nothing was typed into the viewer"        "send-text --pane-id $VW" "$CALLS"
 refute "no revdiff was reinstated over either half" "revdiff --wrap" "$CALLS"
+
+echo
+echo "== 11b'. a healthy pair whose TITLE LIES is still left alone =="
+# The defect T07 found by hand, and the reason detection cannot rest on the title.
+# A pane's title is not a name for what it runs -- it is whatever last wrote it,
+# and a shell with a `preexec` hook (zsh's usual setup) rewrites it to the FIRST
+# WORD of the command line. Both halves are launched as `cd <worktree> && …`, so on
+# a real machine their title is `cd`, never `broot`/`micro`, for the whole of their
+# lives. Measured on the live cockpit: a pane running revdiff reported the title
+# "cd" while `ps` reported `S+ revdiff`.
+#
+# Modelled exactly that way here: the titles say `cd`, `ps` says the truth. Without
+# the foreground-process check the healer reads two live programs as quit shells and
+# types broot's own command line into broot's filter box every three seconds, which
+# is what made the tree unusable.
+# Asserted as COUNTS that did not move, not as "running" appearing: the status log
+# is written once per CHANGE, so a pair that stays healthy writes nothing at all and
+# a `check` for "running" would pass on 11b's line however this section behaved.
+# The converse -- ps says shell, so the half really did die and must heal -- is not
+# re-tested here: 11c, 11c' and 11c'' all heal with $PSFG empty, which is exactly
+# the ps stub answering `zsh`.
+SHELLB="$(countof "browse browser pane $BR for abc12345: shell" "$T/daemon.log")"
+SHELLV="$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")"
+printf 'ttys%s broot\nttys%s micro\n' "$BR" "$VW" > "$T/psfg"
+retitle "$BR" cd
+retitle "$VW" cd
+: > "$CALLS"
+sleep 5
+same   "the browser was never called a shell"     "$(countof "browse browser pane $BR for abc12345: shell" "$T/daemon.log")" "$SHELLB"
+same   "...nor was the viewer"                    "$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")" "$SHELLV"
+refute "nothing was typed into the browser"       "send-text --pane-id $BR" "$CALLS"
+refute "...nor into the viewer"                   "send-text --pane-id $VW" "$CALLS"
+refute "broot was NOT retyped into its own filter box" "broot --conf" "$CALLS"
+refute "...nor micro over a live one"             "micro -readonly" "$CALLS"
+: > "$T/psfg"                             # back to the stub's default for what follows
+retitle "$BR" broot
+retitle "$VW" micro
 
 echo
 echo "== 11c. a quit VIEWER is healed in its own half, and nothing else is touched =="

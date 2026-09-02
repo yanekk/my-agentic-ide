@@ -222,7 +222,30 @@ const SHELL_SETTLE_MS = ms(400);
  * immediately: measured 19 framed lines within half a second of launch, 0 at a
  * shell prompt, 19 again while a transient status message covers the status bar,
  * and back to 0 once revdiff is quit with `q`.
+ *
+ * A THIRD signal, and the only one that is actually true: the foreground process
+ * on the pane's tty. **The title is not a name for what a pane is running.** It is
+ * whatever last wrote it, and on any shell with a `preexec` hook -- zsh's usual
+ * setup, and the user's -- that is the SHELL, which rewrites it to the first word
+ * of the command line while a command runs and back to the cwd when it ends.
+ * Measured on the live cockpit, 2026-09-02:
+ *
+ *     pane 5   running revdiff   title "cd"              (launched `cd <wt> && revdiff …`)
+ *     pane 6   idle shell        title "..e-mode-review" (the cwd)
+ *     ps -t ttys023             ->  Ss  /bin/zsh · S+ revdiff
+ *
+ * So every browse half read as a quit shell for the whole of its life, and the 1s
+ * healer typed broot's own command line into a live broot every three seconds --
+ * into its filter box, where it reset the tree and made it unusable (T07, found by
+ * hand). revdiff never showed it because its frame carries the decision on its own.
+ *
+ * `ps` is consulted only once the cheap signals have failed, so a healthy revdiff
+ * still costs nothing, and it is the same question `terminalIsIdle` already asks of
+ * the terminal slot. Unknown answers stay "shell": a pane nobody can identify is
+ * one the healer may relaunch, which is the recoverable direction.
  */
+const PANE_PROGRAM = /^(?:broot|micro|revdiff)$/;
+
 function diffPaneStatus(paneId, table = paneTable()) {
   const pane = table?.find((p) => p.pane_id === paneId);
   if (!pane) return "absent";
@@ -230,7 +253,35 @@ function diffPaneStatus(paneId, table = paneTable()) {
   if (text.includes(EDITOR_MARKER)) return "editing";
   const framed = (text.match(FRAMED_LINES) ?? []).length >= FRAMED_ENOUGH;
   const title = pane.title ?? "";
-  return framed || /revdiff/.test(title) || BROWSE_TITLE.test(title.trim()) ? "running" : "shell";
+  if (framed || /revdiff/.test(title) || BROWSE_TITLE.test(title.trim())) return "running";
+  return PANE_PROGRAM.test(foregroundComm(paneId, table) ?? "") ? "running" : "shell";
+}
+
+/**
+ * The command in a pane's FOREGROUND process group, as a bare name, or null when
+ * it cannot be told.
+ *
+ * `ps -t <tty>` lists the tty's processes and the foreground group carries `+` in
+ * its state -- the signal the strip already uses to name terminals. A login shell
+ * reports as `-zsh` and an absolute path as `/bin/zsh`, so both are reduced to the
+ * basename. Null means "no idea": no tty, no `ps`, or nothing in the foreground.
+ */
+function foregroundComm(paneId, table) {
+  const tn = table?.find((p) => p.pane_id === paneId)?.tty_name;
+  const tty = tn ? tn.replace(/^\/dev\//, "") : null;
+  if (!tty) return null;
+  try {
+    const out = execFileSync("ps", ["-t", tty, "-o", "stat=,comm="],
+                             { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] });
+    let comm = null;
+    for (const line of out.split("\n")) {
+      const m = line.trim().match(/^(\S+)\s+(.+)$/);
+      if (m && m[1].includes("+")) comm = m[2];       // last foreground-group line wins
+    }
+    return comm ? comm.replace(/^-/, "").split("/").pop() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -960,22 +1011,7 @@ const normCwd = (s) => s.replace(/\/+$/, "") || "/";
  * idle, so an uncertain shell is left untouched rather than typed into.
  */
 function terminalIsIdle(paneId, table) {
-  const tn = table?.find((p) => p.pane_id === paneId)?.tty_name;
-  const tty = tn ? tn.replace(/^\/dev\//, "") : null;
-  if (!tty) return false;
-  try {
-    const out = execFileSync("ps", ["-t", tty, "-o", "stat=,comm="],
-                             { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] });
-    let comm = null;
-    for (const line of out.split("\n")) {
-      const m = line.trim().match(/^(\S+)\s+(.+)$/);
-      if (m && m[1].includes("+")) comm = m[2];       // last foreground-group line wins
-    }
-    if (!comm) return false;
-    return comm.replace(/^-/, "").split("/").pop() === path.basename(LOGIN_SHELL);
-  } catch {
-    return false;
-  }
+  return foregroundComm(paneId, table) === path.basename(LOGIN_SHELL);
 }
 
 /**

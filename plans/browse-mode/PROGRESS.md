@@ -38,7 +38,8 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T06 is reviewed and done. T07 is the last task, and it is the hands-on one.**
+**Status:** **T07 is under way and found its first defect at step 3 — fixed as T08, which now
+awaits review.** T06 is reviewed and done.
 The unhappy paths are covered: each half of the browse pair is judged and relaunched **on its
 own**, and a reaped agent takes every pane it owns with it. `spikes/cockpit-test` **353 checks**
 (was 295); browse (55 bash + its node suites), agenda and notes green.
@@ -55,8 +56,12 @@ whatever is parked out of it, each carrying the worktree it was launched in. Tha
 rebuilds a browser rooted in a directory the agent has left, and relaunches a revdiff whose range
 moved while it sat parked.
 
-**Focus follows the pair, never takes it** (T04's review), and **neither micro nor broot sets a
-terminal title** — probed through `script(1)`, so **T06 can rely on title-only detection**. Below
+**Focus follows the pair, never takes it** (T04's review). **Detection does NOT use the pane
+title** — T07 found by hand that a shell's `preexec` hook writes the title itself, to the
+command's first word, so a live broot's title reads `cd` and every healthy half was read as a
+quit shell (T08). A half is running if its screen is framed, if the title happens to name the
+program, or — the only signal that is always true — if the tty's foreground process is one.
+Below
 the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews
 anything else; `cockpit-open` refuses unless `panes.json` carries all three viewer keys in the
 right shape. Both are hard prerequisites in the installer and the layout script.
@@ -90,11 +95,11 @@ instead of a line per assertion; failures still print in full. `VERBOSE=1` resto
 listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentinels: **a waiter
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
-**Last updated:** 2026-08-30
-**Next `pir-work` will:** **do T07, the hands-on task** — and it starts by fixing which checkout
-the live cockpit runs, see the warning at the top. Nothing is open: T07's script now covers T06's
-heals at steps 10 and 11. **The session raises the whole script with the user and waits**; it
-ends when the answers are in FINDINGS, not before.
+**Last updated:** 2026-09-02
+**Next `pir-work` will:** **review T08**, the detection fix T07 turned up. After that, **resume
+T07 from step 1** — the cockpit is already pointed at this worktree, so the window only has to be
+re-opened to pick T08 up. T07's script covers T06's heals at steps 10 and 11. **The session
+raises the script with the user and waits**; it ends when the answers are in FINDINGS.
 
 ## Tasks
 
@@ -110,13 +115,15 @@ done · ⛔ blocked, needs a human.
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. Geometry and broot's filter text stay unverified → T07. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed. The reaper killed a browse agent's browser **twice** (a failed kill drives the mux-socket repair); its per-agent records survived unless it still held a slot pane; and §11c'' passed under a per-agent cooldown, so "same pass" went undefended — retimed. Both new checks proven to fail against the unfixed code. Probed the GONE-half, migration and prompt paths. **353 checks.** |
-| T07 | Verified by hand with the user | T03, T06 | ⬜ | Cannot be closed by any test. The session waits for the answer. |
+| T07 | Verified by hand with the user | T03, T06 | 🟡 | **Started 2026-09-02 and blocked at step 3**: broot was unusable — its own launch command was being typed into its filter box every ~3s. Cause found, fixed as **T08**. Cockpit is pointed at the worktree; re-run from step 1 once T08 is in. Steps 1–2 and the install dance are proven to work. |
+| T08 | Judge a half by its foreground process, not its title | T07 | 🔍 | The T07 defect. A shell `preexec` hook owns the pane title and writes the command's first word, so `broot`/`micro` never appeared and every healthy half read as quit. `diffPaneStatus` now falls back to `ps -t` (the check `terminalIsIdle` already used); `foregroundComm` extracted and shared. New **11b'**, proven against title-only detection. **359 checks.** |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* T07 writes no code and is not reviewed — it *is* the review.
+**Review queue:** **T08**, implemented 2026-09-02. Review it, then carry on with T07 —
+which is still open, and is what found it.
 
 ## Blocked on the user
 
