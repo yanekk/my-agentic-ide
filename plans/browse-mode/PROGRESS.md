@@ -97,7 +97,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-02
-**Next `pir-work` will:** **review T08**, then **T09** (which includes the 80/20 split). After
+**Next `pir-work` will:** **review T08**, then **T09**, then **T10**. After
 that, **finish T07** — only three questions are left (mouse-free drive, tabs across a park and an
 agent switch, the `c/` line jump); everything else is answered in FINDINGS. The cockpit still
 points at this worktree, so the window only has to be re-opened. **The session asks and waits.**
@@ -119,13 +119,15 @@ done · ⛔ blocked, needs a human.
 | T07 | Verified by hand with the user | T03, T06 | 🟡 | **Most of it answered 2026-09-02** — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. Still open: mouse-free drive, tabs across a park + agent switch, the `c/` line jump. Cockpit still points at the worktree. |
 | T08 | Judge a half by its foreground process, not its title | T07 | 🔍 | The T07 defect. A shell `preexec` hook owns the pane title and writes the command's first word, so `broot`/`micro` never appeared and every healthy half read as quit. `diffPaneStatus` now falls back to `ps -t` (the check `terminalIsIdle` already used); `foregroundComm` extracted and shared. New **11b'**, proven against title-only detection. **359 checks.** |
 | T09 | Fence the browser to the agent's worktree | T08 | 🔍 | The user asked whether broot can block leaving; **it cannot** — no jail option, and our verb file cannot shadow the built-in `:parent` (measured, it still moved the root). So the daemon asks a `--listen`ing broot where its root is and sends it back when it is outside; a root *below* the worktree is left alone. Both sides realpathed. New **11b''**. **365 checks.** |
+| T10 | The tree matches revdiff's width (60 → 80) | T07 | 🔍 | **Committed inside T07's commit `96c33ce`, which was a mistake** — T07 writes no product code by rule, so this gets its own row rather than riding along unreviewed. `BROWSE_VIEWER_PERCENT` 60 → 80 plus ten moved assertions. revdiff's `--tree-width` is a *share* (2 of 10), measured live at 65 of 319 columns. **365 checks.** |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T08**, then **T09**, both implemented 2026-09-02. Then carry on with T07 —
-still open, and what prompted both.
+**Review queue:** **T08**, then **T09**, then **T10**, all implemented 2026-09-02. Then finish
+T07, which is what prompted all three. **T10 lives in commit `96c33ce`** — a T07 commit, which is
+why it needs its own row: T07 is not supposed to carry product code.
 
 ## Blocked on the user
 
