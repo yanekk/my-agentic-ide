@@ -38,18 +38,19 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T07 is under way and has answered most of its questions.** It found **T08** (the
-detection defect) and prompted **T09** (the fence) and the **80/20 split**. **T08 and T09 are now
-reviewed and done**; only **T10** still awaits review. `spikes/cockpit-test` **368 checks** (was
-295), two clean runs at load ~3 after the T09 review; browse (55 bash + its node suites), agenda
+**Status:** **T07 is the only task left open.** It has answered most of its own questions; it
+found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
+(**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **368 checks** (was
+295), three clean runs at load ~2 at the T10 review; browse (55 bash + its node suites), agenda
 and notes green.
 
 **Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
 usable, the fence helps rather than fights, descending is left alone, focus never leaves the
 tree, the redraw is acceptable, the footer still fits, the heals were seen firing three times,
-and the `--conf` layering does not shadow the user's own keys. **The split was judged wrong and
-changed** — 60 → 80, to match revdiff's own file list. Still unanswered: the mouse-free question,
-tabs across a park and an agent switch, and the `c/` jump landing on the right line.
+and the `--conf` layering does not shadow the user's own keys. **The split was judged wrong,
+changed** — 60 → 80, to match revdiff's own file list — **and the new width confirmed right by
+the user at T10's review.** Still unanswered: the mouse-free question, tabs across a park and an
+agent switch, and the `c/` jump landing on the right line.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -98,7 +99,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-02
-**Next `pir-work` will:** **review T10** (the 60 → 80 split, which rode into T07's commit `96c33ce`). After that, **finish T07** — only three questions are left (mouse-free drive, tabs across a park and an agent switch, the `c/` line jump), plus confirming by hand that browse mode is now usable, which is what T08 fixed and no suite can say. The cockpit still points at this worktree, so the window only has to be re-opened. **The session asks and waits.**
+**Next `pir-work` will:** **finish T07**, the last open task — three questions are left, all of them hands-on: whether the whole thing can be driven without the mouse, whether micro's tabs survive a park and an agent switch, and whether the `c/` search jump lands on the right line. The cockpit still points at this worktree, so the window only has to be re-opened. **The session asks and waits.** When T07 closes, the plan is done and folding the branch back into `main` is the user's call, not a session's.
 
 ## Tasks
 
@@ -115,15 +116,15 @@ done · ⛔ blocked, needs a human.
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed (a double kill of the browser, per-agent records surviving a reap, an undefended §11c''). **353 checks.** |
 | T07 | Verified by hand with the user | T03, T06 | 🟡 | **Most of it answered 2026-09-02** — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. Still open: mouse-free drive, tabs across a park + agent switch, the `c/` line jump. Cockpit still points at the worktree. |
-| T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. 11b' now asserts through a path. |
-| T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing — firing it unconditionally left all 365 green. New 11c'''' watches three bounded windows; `!== "shell"` tightened to `=== "running"` (a dead pane reads `absent`). Probed the migration paths and, live, broot's spaced `:focus` and dead-socket exit. **368 checks.** Hands-on half already ✅ under T07. |
-| T10 | The tree matches revdiff's width (60 → 80) | T07 | 🔍 | **Committed inside T07's commit `96c33ce`, which was a mistake** — T07 writes no product code by rule, so this gets its own row rather than riding along unreviewed. `BROWSE_VIEWER_PERCENT` 60 → 80 plus ten moved assertions. revdiff's `--tree-width` is a *share* (2 of 10), measured live at 65 of 319 columns. **365 checks.** |
+| T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
+| T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
+| T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T10**, and nothing else. T08 and T09 are reviewed and done. Then finish T07, which is what prompted all three. **T10 lives in commit `96c33ce`** — a T07 commit, which is why it needs its own row: T07 is not supposed to carry product code.
+**Review queue:** *(empty.)* T08, T09 and T10 are all reviewed and done; **T07 is the only task still open**, and what remains of it is hands-on, not code.
 
 ## Blocked on the user
 
