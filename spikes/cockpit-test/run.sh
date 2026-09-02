@@ -1048,9 +1048,9 @@ parked "...so revdiff is still alive, in a tab of its own" "$DP"
 check  "...and it says so"                        "parked diff pane $DP for abc12345 while it browses" "$T/daemon.log"
 before "...in that order, or the browser comes back at half width" \
        "--top --percent 50 --pane-id $DP" "move-pane-to-new-tab --pane-id $DP" "$CALLS"
-check  "the VIEWER was split off the browser's right at 60%" \
+check  "the VIEWER was split off the browser's right at 80%" \
                                                   "--right --percent 80 --pane-id $BR" "$CALLS"
-before "...only once the browser held the whole slot (60% of half a slot is not 60%)" \
+before "...only once the browser held the whole slot (80% of half a slot is not 80%)" \
        "move-pane-to-new-tab --pane-id $DP" "--right --percent 80 --pane-id $BR" "$CALLS"
 check  "broot launched, with the cockpit's verb file FIRST in the --conf chain" \
                                                   "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
@@ -1307,7 +1307,7 @@ check  "the agent's OWN parked revdiff was split back into the viewer" \
                                                   "--top --percent 50 --pane-id $VW --move-pane-id $DP" "$CALLS"
 before "...after the browser went, not before" \
        "move-pane-to-new-tab --pane-id $BR" "--top --percent 50 --pane-id $VW" "$CALLS"
-check  "and the viewer parked LAST, beside its browser, at the same 60%" \
+check  "and the viewer parked LAST, beside its browser, at the same 80%" \
                                                   "--right --percent 80 --pane-id $BR --move-pane-id $VW" "$CALLS"
 before "...only after the incoming pane was split into it, or the slot is empty" \
        "--top --percent 50 --pane-id $VW" "--right --percent 80 --pane-id $BR --move-pane-id $VW" "$CALLS"
@@ -1361,10 +1361,10 @@ refute "nor micro"                                 "micro -readonly true" "$CALL
 refute "and nothing at all was typed into the browser" "send-text --pane-id $BR2" "$CALLS"
 refute "...nor into the viewer"                    "send-text --pane-id $VW2" "$CALLS"
 check  "the restored browser was moved, not respawned" "--move-pane-id $BR2" "$CALLS"
-check  "...and the viewer split off it at 60% again"   "--right --percent 80 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
+check  "...and the viewer split off it at 80% again"   "--right --percent 80 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
 # The same order the fresh launch is held to, asserted again on the RESTORE path so
 # a later session cannot "tidy" the two calls into the other order: the browser is
-# the half that carries the slot, and 60% taken off half a slot is not 60%.
+# the half that carries the slot, and 80% taken off half a slot is not 80%.
 before "...the browser back in the slot FIRST, never the viewer" \
        "--move-pane-id $BR2" "--right --percent 80 --pane-id $BR2 --move-pane-id $VW2" "$CALLS"
 : > "$CALLS"
@@ -1439,7 +1439,7 @@ check "the browsing agent kept its OWN browse mode" '"diffMode":"browse"' "$T/st
 same  "the same browser came back to the slot"      "$(pane_key diff)" "$BRS"
 same  "...and the same viewer"                      "$(pane_key viewer)" "$VWS"
 check "...moved, not respawned"                     "--move-pane-id $BRS" "$CALLS"
-check "...with the viewer split off it at 60%"      "--right --percent 80 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
+check "...with the viewer split off it at 80%"      "--right --percent 80 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
 refute "neither half was relaunched"                "broot --conf" "$CALLS"
 refute "...nor micro"                               "micro -readonly true" "$CALLS"
 check "panes.json names a viewer again"             '"viewerAgent":"abc12345"' "$T/state/panes.json"

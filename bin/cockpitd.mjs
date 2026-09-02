@@ -740,8 +740,12 @@ const cockpitTabId = (table) => table?.find((p) => p.pane_id === panes.fleet)?.t
  * holding the slot so the incoming occupant inherits it exactly.
  *
  * The divider is re-imposed from BROWSE_VIEWER_PERCENT here as it is everywhere
- * else, never carried: measured, that is why the pair comes back at 47/72 after a
- * park, an agent switch and a resize alike (spikes/browse-mode/RESULTS.md 1).
+ * else, never carried: measured, that is why the pair comes back at the same
+ * widths after a park, an agent switch and a resize alike
+ * (spikes/browse-mode/RESULTS.md 1). Re-measured against a headless mux at the
+ * T10 review, at the current 80: browser 23 cols of a 120-column window and 63
+ * of 319, identical before and after a park -- the old 47/72 in this comment was
+ * the figure for the superseded 60.
  */
 function parkViewerBeside(browser, viewer, cockpitTab) {
   wez(["split-pane", "--right", "--percent", String(BROWSE_VIEWER_PERCENT),
@@ -809,7 +813,7 @@ function resetViewerTabs(jobId, why = "fresh viewer") {
  * The order is measured (spikes/browse-mode/RESULTS.md 1) and the slot is never
  * empty at any point: split the BROWSER into the outgoing occupant, park the
  * outgoing one so the browser inherits the whole slot, and only THEN split the
- * viewer off the browser -- 60% of half a slot is not 60% of a slot.
+ * viewer off the browser -- 80% of half a slot is not 80% of a slot.
  *
  * Both halves are RESTORED where they can be. A pair this agent parked on the way
  * out comes back with every tab micro had open and broot still where it was left
@@ -1764,7 +1768,7 @@ async function showDiff(key, cwd, label) {
 
   // The INCOMING agent may be in browse mode too: its browser has just taken the
   // slot, so its viewer is split back off it -- after the outgoing occupant is
-  // gone, never before (60% of half a slot is not 60% of a slot).
+  // gone, never before (80% of half a slot is not 80% of a slot).
   const incoming = modeOf(key) === "browse" && !spawned ? browsePairs.get(key) : undefined;
   let viewer = null;
   if (incoming !== undefined && incoming.browser === pane && incoming.viewer !== undefined) {
