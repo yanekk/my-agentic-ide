@@ -317,12 +317,13 @@ something was attached, never *which*.
 
 # How we work together
 
-Work on this project is planned once and then executed one task at a time, by sessions that
-alternate between building and reviewing. Two commands drive it:
+Work on this project is planned once, read back once, and then executed one task at a time,
+by sessions that alternate between building and reviewing. Three commands drive it:
 
 | Command | What it does |
 |---|---|
-| `/pir-plan` | Brainstorm, settle the requirements, get the tech right, split the work into tasks, and write it all down under `plans/{slug}/` |
+| `/pir-plan` | Brainstorm, settle the requirements, show a throwaway mock to confirm the direction when the thing has a feel to it, get the tech right, check what the code already does before planning to build it again, split the work into tasks, and write it all down under `plans/{slug}/` |
+| `/pir-review-plan {slug}` | Read that plan back with fresh eyes, before a line of it is built — the gaps, the contradictions, and anything the machine does not actually support. Runs once, and `/pir-work` will not start until it has |
 | `/pir-work {slug}` | Do exactly one unit of work on that plan — implement the next task, or review the last one — then stop |
 
 **Read `plans/{slug}/DESIGN.md` before changing behaviour.** Every rule in it was decided
@@ -411,6 +412,7 @@ you may need me to start it going again. That is cheaper than a task built on a 
 
 ```
 read plans/{slug}/PROGRESS.md
+  ├─ plan not reviewed ?   → STOP — /pir-review-plan runs first
   ├─ any task marked 🔍 ?  → REVIEW the lowest-numbered one
   ├─ else any task 🟡 ?    → FINISH it
   └─ else                  → IMPLEMENT the next ⬜ whose dependencies are ✅
@@ -422,14 +424,42 @@ That is the whole point: the session that reviews a task is never the session th
 it. A reviewer holding the implementation in context is not a reviewer, and the alternation
 is what buys the fresh eyes.
 
-The skills live in `.claude/skills/` and hold the procedures — the dispatch and the
-blocked-task rule in `pir-work`, the step-by-step in `pir-implement` and `pir-review`.
+The skills live in `.claude/skills/` and hold the procedures — the dispatch, the review gate
+and the blocked-task rule in `pir-work`, the step-by-step in `pir-implement` and `pir-review`.
 **Do not invoke `pir-implement` or `pir-review` directly**: `pir-work` chooses the task,
 and that choice is what guarantees the alternation. If you want a specific task built or
 reviewed out of order, say so to me first.
 
 The rest of this file holds the rules that bind **every** session — the ones that arrived
 through `pir-work` and the ones that did not.
+
+### A plan gets read back before it gets built
+
+`/pir-review-plan {slug}` runs once, in a session that did not write the plan, between
+`/pir-plan` and the first `/pir-work`. It reads the whole plan for four things: whether the
+documents agree with each other, whether the requirements are actually complete, whether the
+claims about this machine still hold, and **whether any of it is already built** — a task that
+rebuilds something the code already has, instead of extending it, passes every other check
+here and is still the wrong thing to build.
+
+**Why it is a separate session, and separate from everything else here:** a mistake in a plan
+is copied into every task built from it, and the build-review alternation cannot see it —
+`pir-review` checks a task *against* the plan, so a wrong plan passes review task after task.
+This is the only pass that questions the plan itself.
+
+**What it may change on its own, and what it must ask about.** Anything with exactly one right
+answer — a dependency pointing at a task that does not exist, the same file named two ways, a
+version the machine has just contradicted — it fixes and tells me afterwards. Anything that
+changes what gets built — a requirement nobody decided, two rules that contradict, a task that
+should be split — it brings to me, one at a time, and waits. It reads the whole plan before it
+asks me anything, so I see the size of the problem before I answer any part of it.
+
+It marks the plan reviewed in `PROGRESS.md`, and that line is what lets `/pir-work` start. It
+will not run on a plan already being built: rewriting the ground under finished work is worse
+than the gap it would close, and amending a live plan is my decision.
+
+**The account of that review lives in its commit message and nowhere else** — there is no
+review report file. A session that later wonders why a rule says what it says has `git log`.
 
 ### Scope is strict
 
@@ -483,10 +513,15 @@ session with the question still open.
 ### Commit messages
 
 ```
-T05: policy decision function          ← implementation
-T05 review: fix warning threshold      ← a fix found while reviewing
-T05 review: clean                      ← review found nothing; the PROGRESS update is the commit
+plan(screen-time): daily screen budget with a warning     ← the plan
+plan-review(screen-time): 6 fixes, 3 decisions            ← the plan read back, before any build
+T05: policy decision function                             ← implementation
+T05 review: fix warning threshold                         ← a fix found while reviewing
+T05 review: clean                                         ← review found nothing; the PROGRESS update is the commit
 ```
+
+The `plan-review` message is the *only* account of that session, so it is written long — every
+fix by name and every decision with its reason. All the others stay short.
 
 ### Where sessions run
 
@@ -508,14 +543,18 @@ Each plan is a folder under `plans/`. `ls plans/` lists them.
 
 1. **`plans/{slug}/PROGRESS.md`** — task states and the queue. Always current.
    **Sixty words to a Notes cell**: it is the index, and the account is the commit message.
-2. **`plans/{slug}/FINDINGS.md`** — what the build taught, newest first, about forty words a
-   row. **Where "verified by hand with the user" is written down**, and therefore the only
+2. **`plans/{slug}/FINDINGS.md`** — what the build taught, newest first, **forty words a
+   row**. **Where "verified by hand with the user" is written down**, and therefore the only
    record that anything was ever seen working for real.
 3. **`plans/{slug}/PLAN.md`** — the task list, its phases and dependencies. Written once,
    at plan time; changed only by a decision of mine.
 4. **`plans/{slug}/tasks/`** — one file per task: goal, files, interface, acceptance criteria.
 5. **`plans/{slug}/DESIGN.md`** — why everything is the way it is, plus the environment and
    the verification contract.
+
+A plan whose product has a feel to it also has **`plans/{slug}/prototype/`** — the throwaway
+mock that confirmed the direction before it was designed, kept as a non-binding reference for
+the session that later builds the real UI. It is not present in every plan.
 
 `PROGRESS.md` is the handoff and `FINDINGS.md` is the memory. A stale one of either costs
 the next session more than it saved this one.
@@ -525,6 +564,45 @@ limits above are what stop them growing into a history of the project: when a no
 paragraph, the paragraph goes in the commit message. In the project this method came from
 they were one file, and it reached 175 000 characters — three quarters of it history about
 tasks long closed, re-read in full by every session before it could start.
+
+### Keeping them short is a duty, not an aspiration
+
+That file did not grow because anybody decided to write a history. It grew because every
+session appended and no session ever removed, and a limit nobody enforces is a limit that
+holds for about a week. So:
+
+**Count the words. "About forty" is how forty becomes ninety.** A budget is per *row*, not
+per column: a `FINDINGS.md` row is forty words including whatever the second column holds.
+
+**Whoever appends, compacts.** Before adding to `FINDINGS.md` or `PROGRESS.md`, if the file
+is over its ceiling — 60 rows or 15 KB for findings, 12 KB for progress — spend two minutes
+shrinking it first. That is the only maintenance either file gets. Merge rows that are one
+lesson twice; drop a row whose lesson is now enforced by code, a test or a rule in
+`DESIGN.md`, naming where it went; cut a ✅ task's Notes cell to one line once the following
+task has been reviewed.
+
+**Two things are never dropped**, only shortened: a ✅ hand-verification row and its date,
+because it is the only record that anything was seen working for real; and any term somebody
+would grep for — a flag, an error string, a path.
+
+**And fix the over-budget row you walk past.** Not the whole file, not a tidy-up — the one
+row you were reading anyway. This is the single exception to the scope rule, it needs no
+finding logged, and it is what keeps the ceilings from ever being reached.
+
+### How to write in these files
+
+**Flat prose.** These files are re-read in full by every session, so an ornamental sentence
+is not written once — it is paid for on every run for the life of the project.
+
+- One bold phrase in a row at most, and none is better than one.
+- No em-dash asides, no clause that is there to sound right, no aphorism.
+- Never restate what the row above already said, or what the code and its tests now say for
+  themselves.
+- If a row reads like it is arguing a case, it is too long. State the fact; the argument is
+  in the commit message, which is written for exactly that and costs nothing to skip.
+
+The register is contagious in both directions: a file written in flat prose keeps getting
+flat prose appended to it, and one written in epigrams gets epigrams back for ever.
 
 ---
 
