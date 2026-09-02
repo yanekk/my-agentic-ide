@@ -12,9 +12,11 @@ exposed a bug: the gateway answers in 5.5–8s, not ~2s, so the 2s hold aborted 
 sessions fell back to the placeholder — the "doesn't work" report. Fixed: per-route timeout
 (2s Anthropic, 15s Bedrock, user's call) + hook kill-timeout raised 10s→20s. Tests green
 (115+16), re-verified end-to-end (~9s). settings.json re-installed to timeout:20.
-**Last updated:** 2026-08-31
-**Next `pir-work` will:** nothing pending — plan complete. (The timeout fix was made directly
-at the user's request, outside the pir loop; a fresh-eyes review of that diff is optional.)
+**Last updated:** 2026-09-02
+**Next `pir-work` will:** nothing — plan closed. The out-of-loop timeout fix (ef7824d) got a
+fresh-eyes review 2026-09-02: correct and verified, two minor non-blocking notes in FINDINGS
+(a test-coverage gap on the per-route defaults; settings.json needs an installer re-run per
+machine to pick up the 20s kill-timeout).
 
 ## Tasks
 

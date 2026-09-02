@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-02 | 📌 | Fresh-eyes review of timeout fix ef7824d: correct. Per-route `timeoutMs ?? default` + 20s kill-timeout clears the 15s Bedrock budget. Note: settings.json gets HOOK_TIMEOUT_S only on installer re-run — the main checkout still shows timeout:10, harmless off Bedrock. |
+| 2026-09-02 | 🐞 | Test gap in the fix: candidateTopic's per-route defaults (Bedrock 15s / Anthropic 2s) are unasserted — the timeout test passes `timeoutMs:50` straight to fetchTopic, proving abort not route choice. No fast seam (global setTimeout). Low risk, left. |
 | 2026-08-31 | ✅ | T03 live verify (full hook, real gateway, fresh session): `add a retry to the upload path` → `my-agentic-ide / upload-retry`, the Haiku label. End-to-end ~9s. The route, request and gateway all work as designed. |
 | 2026-08-31 | 🐞 | The 2s hold was too short for the real gateway: it answers in **5.5–8s every time** (measured across 5 prompts; streaming's first byte is also ~7s, so it's pure end-to-end latency, not TTFT). Every Bedrock call aborted at 2s → silent fallback to the opening-words placeholder. |
 | 2026-08-31 | 🔄 | User chose to hold the first prompt up to **15s** on the Bedrock route so the label wins (the ~2s design assumption was wrong for this gateway). Fix: per-route timeout (2s Anthropic, 15s Bedrock) + hook kill-timeout raised 10s→20s so it can't die mid-call. Public-API route unchanged. |
