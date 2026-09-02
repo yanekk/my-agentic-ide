@@ -173,8 +173,15 @@ chmod +x "$T/bin/wezterm"
 # $PSFG maps a TTY to the command in its foreground group ("ttys41 broot"), which
 # is how a test says "this pane really is running broot" independently of its
 # TITLE. The two disagree on a real machine -- a shell with a preexec hook titles
-# the pane after the command's first word -- and that disagreement is section 11q.
+# the pane after the command's first word -- and that disagreement is section 11b'.
 # $PSBUSY is the older tty-blind switch; $PSFG wins wherever it names the tty.
+#
+# A $PSFG value may be a bare name OR an absolute path, because a real `ps -o comm=`
+# gives both: measured 2026-09-02 on this machine, a homebrew binary reports its
+# full path (`ps -p <pid> -o comm=` -> `/opt/homebrew/bin/node`), while the live
+# cockpit's revdiff reported the bare `revdiff`. broot and micro are homebrew
+# binaries, so on the real machine they answer as PATHS -- which is why the daemon
+# reduces the answer to a basename, and why 11b' asserts through a path.
 cat > "$T/bin/ps" <<'PS'
 #!/usr/bin/env bash
 tty=""
@@ -1115,7 +1122,13 @@ echo "== 11b'. a healthy pair whose TITLE LIES is still left alone =="
 # the ps stub answering `zsh`.
 SHELLB="$(countof "browse browser pane $BR for abc12345: shell" "$T/daemon.log")"
 SHELLV="$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")"
-printf 'ttys%s broot\nttys%s micro\n' "$BR" "$VW" > "$T/psfg"
+# The browser answers as an absolute path and the viewer as a bare name: both
+# forms occur on a real machine (see the $PSFG note by the stub), and the path is
+# the one that matters -- it is what a homebrew broot actually reports, and it
+# only matches `broot` because the daemon reduces it to a basename. Asserted
+# through a path so that reduction cannot be dropped without this section going
+# red; with a bare name on both halves the whole suite passes without it.
+printf 'ttys%s /opt/homebrew/bin/broot\nttys%s micro\n' "$BR" "$VW" > "$T/psfg"
 retitle "$BR" cd
 retitle "$VW" cd
 : > "$CALLS"
