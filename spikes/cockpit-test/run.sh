@@ -1269,6 +1269,29 @@ sleep 5                                   # ...and once it expires, the heal hap
 check  "...and it is healed once the cooldown expires" "send-text --pane-id $VW" "$CALLS"
 
 echo
+echo "== 11c''''. the fence only questions a browser that is UP =="
+# fenceBrowseRoot asks a LIVE broot where it is. A half sitting at a shell has
+# nothing listening on its socket, and one still painting has not opened it yet:
+# either way the query is a `broot --send` spawned once a second only to be
+# refused -- and a refused query is INVISIBLE in its effects, so without this
+# section the guard could be deleted and every other check would stay green.
+# Three bounded windows rather than one long refute, because the fence is
+# SUPPOSED to resume the moment the grace expires.
+HEALB="$(countof "reinstated it in pane $BR" "$T/daemon.log")"
+retitle "$BR" sh                          # broot quit: the title and `ps` both say shell
+: > "$CALLS"                              # truncated AFTER the retitle, so a healer tick
+                                          # landing in between cannot leave a stale query
+waitmore "reinstated it in pane $BR" "$T/daemon.log" "$HEALB" 8 \
+  || { echo "  FAIL the browser was never healed, so the window cannot be timed"; fail=1; }
+refute "a browser sitting at a shell is never questioned" "BROOT: --send" "$CALLS"
+# The clock starts HERE, at the moment the daemon says it launched broot.
+: > "$CALLS"
+nap 1.5                                   # well inside the 3s grace that heal just armed
+refute "...nor is one that is still starting" "BROOT: --send" "$CALLS"
+sleep 5                                   # ...and once the grace expires, the fence resumes
+check  "...and one that is up is asked again"     "BROOT: --send cockpit-abc12345 --get-root" "$CALLS"
+
+echo
 echo "== 11d. ⌥] out of browse, from the BROWSER half -- the trap case =="
 # Focus starts in the browser, so if ⌥[/⌥] only answered to the single slot pane
 # there would be no way out of browse mode without clicking the other half first.

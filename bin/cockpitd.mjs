@@ -2040,7 +2040,11 @@ function healBrowseHalves(jobId) {
       // Only a browser that is actually up is worth asking where it is, and only
       // once it is past the launch grace -- a broot still starting has not opened
       // its socket, and the query would just spawn a `broot --send` to be refused.
-      if (half === "browser" && Date.now() - (paneLaunchedAt.get(pane) ?? 0) >= DIFF_RELAUNCH_COOLDOWN_MS) {
+      // RUNNING, not merely "not a shell": a pane that has GONE reads `absent` for
+      // the tick or two before it is pruned, and there is nothing on its socket
+      // either.
+      if (half === "browser" && status === "running" &&
+          Date.now() - (paneLaunchedAt.get(pane) ?? 0) >= DIFF_RELAUNCH_COOLDOWN_MS) {
         browserRunning = true;
       }
       continue;
