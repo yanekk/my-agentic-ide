@@ -38,7 +38,10 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T07 is the only task left open.** It has answered most of its own questions; it
+**Status:** **T07 is the only task left open**, and it is down to one question. Its hands-on half
+produced two more decisions of the user's, both now written as tasks: **T11** (Enter takes focus
+into the reader — a *reversal* of DESIGN §3.1) and **T12** (a dark scheme, because micro's default
+tab bar is light-on-light and three open tabs read as none). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
 (**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **368 checks** (was
 295), three clean runs at load ~2 at the T10 review; browse (55 bash + its node suites), agenda
@@ -49,8 +52,10 @@ usable, the fence helps rather than fights, descending is left alone, focus neve
 tree, the redraw is acceptable, the footer still fits, the heals were seen firing three times,
 and the `--conf` layering does not shadow the user's own keys. **The split was judged wrong,
 changed** — 60 → 80, to match revdiff's own file list — **and the new width confirmed right by
-the user at T10's review.** Still unanswered: the mouse-free question, tabs across a park and an
-agent switch, and the `c/` jump landing on the right line.
+the user at T10's review.** **Answered 2026-09-03:** the reader's **tabs and the tree's position survive both a park and an
+agent switch**, and **`c/` + Enter lands on the matching line** (micro puts it at the top of the
+viewport). **One question is left in the whole plan: the mouse-free one** — T07's flagship check,
+and the only one nothing else stands in for.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -98,8 +103,11 @@ instead of a line per assertion; failures still print in full. `VERBOSE=1` resto
 listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentinels: **a waiter
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
-**Last updated:** 2026-09-02
-**Next `pir-work` will:** **finish T07**, the last open task — three questions are left, all of them hands-on: whether the whole thing can be driven without the mouse, whether micro's tabs survive a park and an agent switch, and whether the `c/` search jump lands on the right line. The cockpit still points at this worktree, so the window only has to be re-opened. **The session asks and waits.** When T07 closes, the plan is done and folding the branch back into `main` is the user's call, not a session's.
+**Last updated:** 2026-09-03
+**Next `pir-work` will:** **finish T07** if the mouse-free answer is in — it is the last question in
+the plan — otherwise ask it again and wait. Once T07 closes, **T11** is next (Enter takes focus to
+the reader), then **T12** (the dark scheme). Both came out of T07's hands-on half and both are the
+user's decisions, not a session's. **Folding this branch into `main` stays the user's call.**
 
 ## Tasks
 
@@ -115,16 +123,18 @@ done · ⛔ blocked, needs a human.
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed (a double kill of the browser, per-agent records surviving a reap, an undefended §11c''). **353 checks.** |
-| T07 | Verified by hand with the user | T03, T06 | 🟡 | **Most of it answered 2026-09-02** — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. Still open: mouse-free drive, tabs across a park + agent switch, the `c/` line jump. Cockpit still points at the worktree. |
+| T07 | Verified by hand with the user | T03, T06 | 🟡 | **All but one question answered.** 2026-09-03 closed the tabs-across-a-park and `c/`-line checks, and produced **T11** and **T12**. **Left: the mouse-free question**, asked and waiting. Cockpit still points at the worktree. Older notes: — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. |
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
+| T11 | Enter takes focus to the reader | T07 | ⬜ | **Reverses DESIGN §3.1's focus row** on the user's decision of 2026-09-03. `cockpit-open` activates the viewer pane after a successful push; a *failed* push stays in the tree (it leaves micro's command bar open). `Alt+Enter` to stack tabs was offered and declined for now. |
+| T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* T08, T09 and T10 are all reviewed and done; **T07 is the only task still open**, and what remains of it is hands-on, not code.
+**Review queue:** *(empty.)* **T07** is open on one hands-on question; **T11** and **T12** are new, unstarted and unblocked once it closes.
 
 ## Blocked on the user
 
