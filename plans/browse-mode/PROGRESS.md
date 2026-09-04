@@ -59,8 +59,8 @@ agent switch**, and **`c/` + Enter lands on the matching line** (micro puts it a
 viewport). And **the mouse-free question is answered too**: *"the cockpit
 can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
 **Browse mode is person-proven end to end. Nothing in this plan is unverified** — but it is not
-defect-free: **T13** was a live one, found by the same hands-on driving that proved the rest, and
-it is now **built, person-proven the same day, and awaiting review**.
+defect-free: **T13** was a live one, found by the same hands-on driving that proved the rest, and it
+is now **built, person-proven the same day, and reviewed ✅**. **T12 is the only task left.**
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -113,13 +113,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **review T13** — it is the only 🔍, and **both its halves are
-already done**: 380 checks twice at low load, and the hands-on half closed by the user the same
-day (a dozen Enters, no filter box). So the review is a code review, with no hands-on debt to
-settle. After T13, **T12** (the dark scheme) is the last task written, and it *does* need the
-cockpit repointed for its own hands-on half. **T13 was taken ahead of T12 on the user's say-so,
-2026-09-04** — a deliberate reordering, not a queue slip. **Folding this branch into `main` is
-the user's call, not a session's.**
+**Next `pir-work` will:** **implement T12** — the dark colour scheme for the reader, and the **last task written**. It is the only task left that is not ✅, and it **needs the cockpit repointed at this worktree for its own hands-on half** (PROGRESS, top): the scheme name must be seen to load, since micro refuses an unknown one at startup and the healer would then retry forever. T13 is closed — reviewed 2026-09-04, both halves. **Folding this branch into `main` is the user's call, not a session's.**
 
 ## Tasks
 
@@ -139,17 +133,15 @@ done · ⛔ blocked, needs a human.
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed, both halves; the user confirms 80 reads right. One defect fixed (six labels still said 60%). |
-| T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed; **both halves done**. Two documentation defects fixed: DESIGN still said `Alt+Enter` was declined *for now* when the hands-on half had closed it outright, and §2.4 read “two things do **not**” over a table with one **yes**. Code clean — probed the empty-payload path, the lock, and that `⌥[`/`⌥]` still route from the reader. 57/137/12 and 368, twice at load ~4. |
+| T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed, both halves; code clean. Two documentation defects fixed — a stale `Alt+Enter` deferral and a table read backwards. 368 checks. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
-| T13 | A half is running if *any* of its foreground group is | T08 | 🔍 | `foregroundComms` (new) lists the whole group; `diffPaneStatus` accepts **any** member, `foregroundComm` is its last element, `terminalIsIdle` untouched. New §11c''''' — placed after 11c'''', **not** beside 11b': its heal controls would have weakened 11c/11c'. **380 checks**, twice at load ~2.3; red under last-wins. **Hands-on half ✅ 2026-09-04** — a dozen Enters, no filter box. |
+| T13 | A half is running if *any* of its foreground group is | T08 | ✅ | Reviewed, both halves. One documentation defect fixed: `CLAUDE.md`'s detection row — written by T08 — still said *the* foreground process and that `terminalIsIdle` asks the same question. Code clean. Re-proven to fail under last-wins (all 12 red, no other section). 380 twice at load ~2, browse 57. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T13** — built 2026-09-04, awaiting review, **both halves evidenced**
-(tests twice green; person-proven the same day). Still to build afterwards: **T12** (the dark
-scheme). Neither existed when the plan was written.
+**Review queue:** *(empty.)* T13 was reviewed 2026-09-04 — the last 🔍. Still to build: **T12** (the dark scheme), which did not exist when the plan was written.
 
 ## Blocked on the user
 
