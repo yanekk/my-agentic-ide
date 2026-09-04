@@ -49,6 +49,11 @@ fs.appendFileSync(process.env.CALLS, JSON.stringify(process.argv.slice(2)) + "\\
 const ms = Number(process.env.STUB_SLEEP || 0);
 if (ms) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 if (process.env.STUB_FAIL) { process.stderr.write("stub wezterm: refusing\\n"); process.exit(1); }
+// T11: fail ONLY the focus move, so a dead viewer pane can be told apart from a
+// dead everything -- the push has to survive the first and not the second.
+if (process.env.STUB_FAIL_ACTIVATE && process.argv.includes("activate-pane")) {
+  process.stderr.write("stub wezterm: no such pane\\n"); process.exit(1);
+}
 `);
 fs.chmodSync(path.join(STUB_BIN, "wezterm"), 0o755);
 
@@ -97,8 +102,20 @@ const env = (extra = {}) => ({
 const calls = () =>
   fs.readFileSync(CALLS, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 
-/** The payload of each send-text call, in order -- the bytes micro would see. */
-const sent = () => calls().map((c) => c[c.length - 1]);
+/**
+ * The payload of each send-text call, in order -- the bytes micro would see.
+ * SEND-TEXT only: since T11 a push ends with an `activate-pane`, whose last
+ * argument is a pane id, and folding that into the byte stream would turn every
+ * payload assertion in this file into an assertion about the focus move as well.
+ */
+const sent = () =>
+  calls().filter((c) => c[1] === "send-text").map((c) => c[c.length - 1]);
+
+/** Just the send-text calls, whole -- for the ones that assert how they were aimed. */
+const textCalls = (list = calls()) => list.filter((c) => c[1] === "send-text");
+
+/** Every `activate-pane`, in order. Empty is a real answer: focus stayed put. */
+const activations = (list = calls()) => list.filter((c) => c[1] === "activate-pane");
 
 const readTabs = () => { try { return JSON.parse(fs.readFileSync(TABS, "utf8")); } catch { return null; } };
 
@@ -194,14 +211,17 @@ section("12. every call is aimed at the viewer, unpasted");
 
 reset();
 const aimed = run([path.join(REAL, "src/a.js"), "7"]);
-ok("six calls, all of them send-text", aimed.calls.length === 6
-   && aimed.calls.every((c) => c[0] === "cli" && c[1] === "send-text"), JSON.stringify(aimed.calls));
-ok("every call carries --no-paste", aimed.calls.every((c) => c.includes("--no-paste")));
+// Six send-text calls and nothing else typed: since T11 the seventh call is the
+// focus move (section 28), which is not a keystroke and is asserted there.
+ok("six send-text calls, and no other kind of typing", textCalls(aimed.calls).length === 6
+   && aimed.calls.every((c) => c[0] === "cli"), JSON.stringify(aimed.calls));
+ok("every send carries --no-paste", textCalls(aimed.calls).every((c) => c.includes("--no-paste")));
 ok("every call names the viewer pane", aimed.calls.every((c) => {
   const i = c.indexOf("--pane-id");
   return i !== -1 && c[i + 1] === String(VIEWER);
 }), JSON.stringify(aimed.calls));
-ok("the payload is the last argument, never stdin", aimed.calls.every((c) => c.length === 6));
+ok("the payload is the last argument, never stdin",
+   textCalls(aimed.calls).every((c) => c.length === 6));
 
 // ---------------------------------------------------------------------------
 section("13. refusals send NOTHING");
@@ -348,7 +368,7 @@ ok("an unwritable tab list still exits 1", unwritable.code === 1, `exit ${unwrit
 ok("...with one line, not a stack trace",
    unwritable.stderr.split("\n").length === 1 && /could not be written/.test(unwritable.stderr),
    JSON.stringify(unwritable.stderr));
-ok("...and the push itself had already gone out", unwritable.calls.length === 3,
+ok("...and the push itself had already gone out", textCalls(unwritable.calls).length === 3,
    JSON.stringify(unwritable.calls));
 fs.rmSync(TABS, { recursive: true, force: true });
 
@@ -470,5 +490,129 @@ reset();
 run([file]);
 ok("viewer-tabs.json is written under COCKPIT_DIR", fs.existsSync(TABS));
 ok("...and nowhere near the checkout", !fs.existsSync(path.join(ROOT, "viewer-tabs.json")));
+
+// ---------------------------------------------------------------------------
+// (Section numbers are unique across the whole browse suite -- 1-7 the model,
+// 8-9 and 22-27 run.sh, 10-19 this file, 20-21 the verbs -- so the next free one
+// is 28, not 20.)
+section("28. Enter takes the cursor to the reader");
+// T11, reversing the original rule that a push never takes focus: the user drove
+// browse mode by hand at T07 and asked for the opposite -- "so I immediately get
+// to the file I opened". What no test here can see is a CURSOR; what it can see is
+// that the activation was asked for, of the right pane, at the right moment, and
+// on exactly the right occasions. The cursor itself is T11's hands-on half.
+
+/** The pane every activation must name -- hard-coded, so a swapped panes.json shows up. */
+const activatesViewer = (list) =>
+  activations(list).length === 1
+  && JSON.stringify(activations(list)[0]) === JSON.stringify(["cli", "activate-pane", "--pane-id", "42"]);
+
+reset();
+const focusFirst = run([path.join(REAL, "src/a.js")]);
+ok("the first file activates the viewer", activatesViewer(focusFirst.calls),
+   JSON.stringify(focusFirst.calls));
+ok("...AFTER the keystrokes, never before -- focus moving first would hand the tree's",
+   focusFirst.calls.length === 4 && focusFirst.calls[3][1] === "activate-pane",
+   JSON.stringify(focusFirst.calls));
+
+const focusSecond = run([path.join(REAL, "src/b.js")]);
+eq("...the second file is still a tab push", focusSecond.sent, ["\x05", "tab src/b.js", "\r"]);
+ok("...and it activates the viewer too", activatesViewer(focusSecond.calls),
+   JSON.stringify(focusSecond.calls));
+
+const focusAgain = run([path.join(REAL, "src/a.js")]);
+eq("...a file already open still switches tab", focusAgain.sent, ["\x05", "tabswitch 1", "\r"]);
+// The row the user's own words settle: you asked for that file, so you want to read
+// it -- a tabswitch that left you in the tree would be the odd one out.
+ok("...and switching to an open tab activates the viewer as well",
+   activatesViewer(focusAgain.calls), JSON.stringify(focusAgain.calls));
+
+// A line jump is six sends and then the move: the goto must be in before the
+// cursor arrives, or the file is on screen at the wrong line while you look at it.
+reset();
+const focusLine = run([path.join(REAL, "src/a.js"), "42"]);
+ok("with a line jump, the activation is still last of all",
+   focusLine.calls.length === 7 && focusLine.calls[6][1] === "activate-pane"
+   && textCalls(focusLine.calls).length === 6, JSON.stringify(focusLine.calls));
+
+// --- the case that must NOT move focus --------------------------------------
+// A half-sent push leaves micro's command bar OPEN with a half-typed command in it
+// (FINDINGS, 2026-08-29). Dropping the cursor in there hands the user a live
+// command bar in a program they may not know, with no file to show for it.
+reset();
+const focusFailed = run([file], { STUB_FAIL: "1" });
+ok("a failed send leaves the cursor in the tree", activations(focusFailed.calls).length === 0,
+   JSON.stringify(focusFailed.calls));
+ok("...and the push still fails", focusFailed.code === 1, `exit ${focusFailed.code}`);
+
+// Every refusal, likewise -- there is no viewer to go to, and pane 0 is a real pane.
+reset({ panes: goodPanes({ viewer: null }) });
+ok("a refusal activates nothing either", activations(run([file]).calls).length === 0);
+
+// --- the case that MUST move focus even though the command fails -------------
+// The opposite call for the opposite reason: the push landed, the file IS on
+// screen, so the cursor follows the file. Exit 1 and one line on stderr stand.
+reset();
+fs.mkdirSync(TABS, { recursive: true });
+const focusUnwritable = run([file]);
+ok("an unwritable tab list still moves the cursor to the file that opened",
+   activatesViewer(focusUnwritable.calls), JSON.stringify(focusUnwritable.calls));
+ok("...and the failure contract is unchanged: exit 1, one line",
+   focusUnwritable.code === 1 && focusUnwritable.stderr.split("\n").length === 1
+   && /could not be written/.test(focusUnwritable.stderr),
+   `exit ${focusUnwritable.code} ${JSON.stringify(focusUnwritable.stderr)}`);
+fs.rmSync(TABS, { recursive: true, force: true });
+
+// --- a failed activation is not a failed push --------------------------------
+reset();
+const deadPane = run([file], { STUB_FAIL_ACTIVATE: "1" });
+ok("a failed activation does not fail the push", deadPane.code === 0,
+   `exit ${deadPane.code} ${deadPane.stderr}`);
+ok("...and says nothing about it", deadPane.stderr === "", JSON.stringify(deadPane.stderr));
+eq("...and the tab list is written all the same", deadPane.tabs, { [AGENT]: ["src/a.js"] });
+ok("...having really tried", activations(deadPane.calls).length === 1,
+   JSON.stringify(deadPane.calls));
+
+// --- the control ------------------------------------------------------------
+// "No activation on a failed send" is also what the code did before T11, so that
+// assertion passes against a build with the feature missing entirely and proves
+// nothing. It is therefore run against a MUTANT that activates unconditionally --
+// the plausible wrong version of this change -- which it must catch.
+const MUTANT = path.join(WORK, "mutant-open.mjs");
+{
+  const src = fs.readFileSync(OPEN, "utf8")
+    // The copy sits outside bin/, so its two relative imports have to be re-aimed.
+    .replace(/"\.\/(cockpit-[a-z-]+\.mjs)"/g, (_m, f) => JSON.stringify(path.join(ROOT, "bin", f)));
+  const mutated = src.replace("if (pushed) activateViewer();", "activateViewer();");
+  ok("the mutant really is mutated -- a rename must not make this control vacuous",
+     mutated !== src && /\n\s*activateViewer\(\);/.test(mutated)
+     && !mutated.includes("if (pushed)"), "the guard was not found to remove");
+  fs.writeFileSync(MUTANT, mutated);
+}
+reset();
+const mutantFailed = spawnSync(process.execPath, [MUTANT, file],
+  { env: env({ STUB_FAIL: "1" }), encoding: "utf8" });
+ok("...and against it the failed-send check FAILS, which is what gives it teeth",
+   activations(calls()).length === 1,
+   `mutant recorded ${JSON.stringify(calls())} (exit ${mutantFailed.status})`);
+
+// The second plausible wrong version, for the same reason: "a failed activation
+// exits 0" also passes against a build that never activates, so it is run against
+// one that lets the failure through -- a delivered file reported as exit 1.
+const MUTANT2 = path.join(WORK, "mutant-open-throws.mjs");
+{
+  const src = fs.readFileSync(MUTANT, "utf8").replace("activateViewer();", "if (pushed) activateViewer();");
+  const mutated = src.replace(
+    "} catch { /* the file is open; only the cursor failed to follow it */ }",
+    "} catch (e) { die(String(e.message).split(\"\\n\")[0]); }",
+  );
+  ok("the throwing mutant really is mutated", mutated !== src, "the catch was not found");
+  fs.writeFileSync(MUTANT2, mutated);
+}
+reset();
+const mutantThrows = spawnSync(process.execPath, [MUTANT2, file],
+  { env: env({ STUB_FAIL_ACTIVATE: "1" }), encoding: "utf8" });
+ok("...and a build that does NOT swallow it turns a delivered file into exit 1",
+   mutantThrows.status === 1, `exit ${mutantThrows.status} ${mutantThrows.stderr}`);
 
 done();

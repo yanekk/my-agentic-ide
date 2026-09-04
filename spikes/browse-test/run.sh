@@ -76,6 +76,13 @@ body="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$MODEL")"
 same "it never reads process.cwd()"    "$(printf '%s' "$body" | grep -c 'process\.cwd')" "0"
 same "it never reads process.env"      "$(printf '%s' "$body" | grep -c 'process\.env')" "0"
 same "it never reads the clock"        "$(printf '%s' "$body" | grep -cE 'Date\.now|new Date')" "0"
+# T11 put a pane ACTIVATION next to the sending, and a pane activation is an
+# effect: deciding to move the cursor is the model's business only if the model
+# starts naming the mux, which is the moment the boundary stops holding. Named
+# rather than covered by the import checks above, because `execFileSync` is not
+# the only way to reach wezterm and the module could as easily just build the argv.
+same "it names no wezterm"             "$(printf '%s' "$body" | grep -ci 'wezterm')" "0"
+same "it names no activate-pane"       "$(printf '%s' "$body" | grep -c 'activate-pane')" "0"
 
 echo
 echo "== 9. nothing leaks into the repo =="

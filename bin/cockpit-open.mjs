@@ -13,7 +13,15 @@
 //     exit 1   refused, one line on stderr saying why
 //
 // It is run by broot's Enter verb (T03), never by hand, and it is deliberately
-// silent on success -- broot stays on screen and focus is never taken.
+// silent on success -- broot stays on screen, drawing exactly as it was.
+//
+// A successful push then ACTIVATES the viewer pane, so Enter lands you on the file
+// you asked for (T11, the user's decision of 2026-09-03 -- it reverses the original
+// "focus is never taken", taken with the cost in front of them: stacking several
+// files into tabs without reading them now costs a `Cmd+Alt+Left` between each
+// Enter). The reversal is scoped to this ONE human gesture. The daemon's rule --
+// focus follows the pair, never takes it -- is untouched, because a pane swap, a
+// heal, a fence and a worktree migration are nobody pressing a key.
 //
 // EVERY check happens before the first send. A half-validated push that has
 // already typed `\x05` leaves micro's command bar open with nothing to submit,
@@ -163,12 +171,34 @@ function sendText(payload) {
   ], { stdio: ["ignore", "ignore", "ignore"] });
 }
 
+/**
+ * Put the cursor on the file that was just opened (T11). Always the VIEWER pane --
+ * the same id every send-text was aimed at, so a push can never land in one pane
+ * and the focus in another.
+ *
+ * A failure here is swallowed on purpose. A dead pane, or no `wezterm` on PATH,
+ * does not un-open the file: the push landed, and turning a delivered file into
+ * exit 1 over the cursor would be the worse trade. This command's whole interface
+ * is exit 0, or exit 1 plus one line on stderr.
+ */
+function activateViewer() {
+  try {
+    execFileSync("wezterm", [
+      "cli", "activate-pane", "--pane-id", String(paneId),
+    ], { stdio: ["ignore", "ignore", "ignore"] });
+  } catch { /* the file is open; only the cursor failed to follow it */ }
+}
+
 // The lock covers the send as well as the read-modify-write, and it has to: two
 // pushes landing together (you and an agent, DESIGN 2.n) that both read an empty
 // list would both decide `open`, and the second would replace the first's buffer
 // instead of adding a tab. Serialising the whole transaction is what makes the
 // second one see the first's entry.
 let failure = null;
+// Whether the KEYSTROKES landed, which is a different question from whether the
+// command succeeded: a tab list that could not be written is exit 1 with the file
+// on screen. Focus follows the file, so it follows this flag and not `failure`.
+let pushed = false;
 withLock(() => {
   const all = readTabs();
   const openTabs = Array.isArray(all[viewerAgent]) ? all[viewerAgent] : [];
@@ -186,6 +216,8 @@ withLock(() => {
     }
   }
 
+  pushed = true;
+
   all[viewerAgent] = plan.openTabs;
   try {
     writeTabs(all);
@@ -196,5 +228,21 @@ withLock(() => {
     failure = `viewer-tabs.json could not be written: ${String(e.message).split("\n")[0]}`;
   }
 }, TABS_LOCK);
+
+// OUTSIDE the lock, deliberately: the lock serialises the read-modify-write against
+// a second pusher, and a pane activation is no part of that transaction -- holding
+// it across another `wezterm` spawn only widens the window the other pusher waits
+// in.
+//
+// A FAILED SEND is the one case that stays in the tree, and it is not a detail: a
+// half-sent push leaves micro's command bar OPEN with a half-typed command in it
+// (FINDINGS, 2026-08-29). Dropping the cursor there hands the user a live command
+// bar they did not ask for, in a program they may not know, with no file to show
+// for it. Staying in the tree keeps the damage to one missing file.
+//
+// An unwritable tab list is the opposite call for the opposite reason: the push
+// landed and the file IS on screen, so the cursor follows the file even though the
+// command still exits 1 with its one line.
+if (pushed) activateViewer();
 
 if (failure) die(failure);

@@ -21,7 +21,9 @@ For the one person who runs this cockpit. Not a general-purpose editor and not a
 - `⌥]` from `custom` lands on `browse`; the top pane becomes **browser | viewer**, with the
   browser holding focus.
 - Pressing Enter on a file in the browser makes it a tab in the viewer beside it, without
-  spawning a second editor and **without taking focus away from the browser**.
+  spawning a second editor, and **the cursor follows it into the viewer** so the file can be
+  read straight away. `⌘⌥←` goes back to the tree. *(Reversed at T11 on the user's decision of
+  2026-09-03; it used to leave the cursor in the browser.)*
 - A `c/` content search in the browser followed by Enter lands on the **matching line**.
 - `⌥[`/`⌥]` leave browse mode from **either** half — you are never trapped in the browser.
 - Cycling to another mode and back returns **both** panes, with every tab still open and the
@@ -85,9 +87,10 @@ mode is the whole gesture.
   keeps matching at any window size; measured live, revdiff's box was 65 of 319 columns. The
   browse tree sits exactly where revdiff's tree sits and is read the same way, so matching it
   beats a width validated on its own.
-- **The browser holds focus on entry.** You enter browse mode to find a file, and a push never
-  takes focus away (§2.4), so the whole gesture — arrive, filter, Enter, read, filter again —
-  happens without touching the mouse or another key.
+- **The browser holds focus on entry.** You enter browse mode to find a file, so the keyboard
+  starts where the finding happens: arrive, filter, Enter. From the Enter onwards the cursor is
+  in the **viewer** (§2.4), and `⌘⌥←` — a cockpit-wide pane move that predates browse mode —
+  brings it back to the tree for the next file. No mouse anywhere in the loop.
 - The browser is **per agent**, like everything else in the slot, and parks with the viewer
   (§2.6).
 
@@ -111,8 +114,26 @@ cockpit substitutes `\n` for `\r` so an injected review arrives *unsent*; here s
 exactly what is wanted, so `\r` is correct and `\n` is the bug. It cost a failed run during
 planning and it fails **silently**.
 
-Focus is never taken: measured, the browser pane stayed active through every push and kept
-its filter text.
+**Focus then follows the file into the viewer** — `wezterm cli activate-pane --pane-id <viewer>`,
+after the last keystroke and outside the tab-list lock. *(T11, the user's decision of 2026-09-03.
+The original rule was the opposite — measured, the browser stayed active through every push and
+kept its filter text — and the user drove it by hand at T07 and asked for the reverse: "Pressing
+Enter on broot changes focus to micro, so I immediately get to the file I opened." The cost was
+put to them first: stacking several files into tabs without reading them now costs a `⌘⌥←`
+between each Enter. An `Alt+Enter` that pushed without taking focus was offered as the way to
+keep both and **declined for now**, since no tab bar had been seen when the question was asked.)*
+
+All three pushes move it — `open`, `tab` and `tabswitch` alike: you asked for that file, so you
+want to read it. Two things do **not**:
+
+| Case | Focus moves? | Why |
+|---|---|---|
+| A `send-text` failed part-way | **no** | The half-sent push leaves micro's command bar **open** with a half-typed command in it. Dropping the cursor there hands the user a live command bar they did not ask for, in a program they may not know, with no file to show for it |
+| Every payload landed but `viewer-tabs.json` could not be written | **yes** | The opposite call for the opposite reason: the file **is** on screen. The command still exits 1 with its one line, but the cursor follows the file that actually opened |
+
+**This is the only focus movement in browse mode that is not the daemon's.** T04's rule — *focus
+follows the pair, never takes it* — governs pane swaps, heals, fences and worktree migrations,
+none of which is a person pressing a key, and it is untouched.
 
 ### 2.5 Already-open files
 
@@ -196,6 +217,8 @@ whether it reads badly.
 | Deciding whether a half is running **from the pane title** | **Never.** Ask the OS for the tty's foreground process (`ps -t`), as `terminalIsIdle` already does. The title may still be *believed* when it says `broot`/`micro`/`revdiff`, but it may never be believed when it does not | A title is not a name for what a pane runs — it is whatever last wrote it. A shell with a `preexec` hook (zsh's usual setup) rewrites it to the **first word of the command line**, and both halves are launched `cd <worktree> && …`, so the title reads `cd` for the whole of their lives. **Measured on the live cockpit 2026-09-02** (T07): a pane running revdiff reported the title `cd` while `ps` reported `S+ revdiff`; an idle shell reported its cwd. The original measurement was taken against a headless mux whose bare shell set no title at all, where WezTerm falls back to the process name — a fallback that never happens on a real machine |
 | The agent is reaped while its pair is parked | Dispose **both** panes and drop its tab list | Otherwise parked panes and stale state accumulate for the life of the window |
 | Two pushes land together (an agent and you) | Take a lock around the read-modify-write of the tab list; break a stale lock at 5s | The agents share these files with you. Uses the agenda store's exported `withLock` (§3.5), not a third copy |
+| A push **fails part-way through its keystrokes** | Send no more, update no tab list, and **leave the cursor in the tree** (§2.4) | Focus follows a file that opened, and here none did. The failure leaves micro's command bar open with a half-typed command in it, so arriving there means a live command bar, in a program the user may not know, with nothing to show for it. Staying in the tree keeps the damage to one missing file. A *refused* push — no viewer, no such file — likewise activates nothing: there is no viewer pane to go to |
+| The **focus move itself** fails — a dead pane, no `wezterm` on PATH | Swallow it. Exit 0, nothing on stderr, the tab list written as normal | The push landed and the file is open; turning a delivered file into exit 1 over the cursor is the worse trade. `cockpit-open`'s whole interface is exit 0, or exit 1 plus one line |
 | A pushed file has since been deleted | Send nothing, report it on stderr | micro would open an empty buffer named after a file that does not exist |
 | The tab list and micro disagree (micro restarted underneath us) | The list is reset whenever the viewer is launched, never merged | A wrong `tabswitch <n>` jumps to the wrong file silently; a duplicate tab is merely untidy |
 
@@ -436,6 +459,7 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
 | 2026-08-29 *(plan review)* | `⌥[`/`⌥]` work from **either** half of the slot | Gating on a single diff pane id would trap the user in the browser, which is exactly where focus deliberately starts. §2.1 |
 | 2026-08-29 *(plan review)* | ~~The split is **`--percent 60`** to the viewer — browser 47 columns, viewer 72, on a 120-column window~~ | ~~47 is the width broot was already measured usable at during planning~~ **Overturned at T07 — see the next row. The question was asked of T07 deliberately and T07 answered it.** |
 | 2026-09-02 *(T07)* | The split is **`--percent 80`** to the viewer, so the tree matches **revdiff's own file list** | **The user saw 60 in a real cockpit and judged the tree too wide**, asking for it to be as wide as revdiff's browser. revdiff's `--tree-width` is *"units (1-10, default 2 of 10)"* — a **share**, not a column count — so ours is a share too and keeps matching at every window size; measured live, revdiff's box was 65 of 319 columns (20.4%). The old reasoning ("47 is a width broot was validated usable at") missed that this tree sits where revdiff's tree sits and is read the same way: looking like it beats a width measured on its own |
+| 2026-09-03 *(T07 → T11)* | **Enter takes the cursor to the reader**, reversing "a push never takes focus" | The old rule was measured working and then **judged wrong by the user driving it**: browse mode is for reading a file, and every Enter needed a second gesture before the file could be read. Option B — `Alt+Enter` to stack a tab without moving — was offered and **declined for now**: no tab bar had been seen when the question was asked, so the want for it could not be judged. The return trip needs nothing new: `⌘⌥←` is a cockpit-wide pane move that predates browse mode, and the footer gains no label (it only just fits four modes as it is) |
 | 2026-08-29 | **broot + micro** rather than `revdiff --all-files` | revdiff's own browse mode has an identical look and keeps annotations, but: no directory folding (2,251 rows on a real repo), **6–12 s** to open that repo against broot's instant, and its search covers only the currently-open file. broot folds, opens instantly and searches across files |
 | 2026-08-29 | You **cannot comment** on a browsed file | A second broot key opening the file in revdiff would close the loop, and is the better end state. The user chose to leave it: it introduces a fifth diff-slot state that is not a stop in the cycle, and muddies the model just decided. See §8 |
 | 2026-08-29 | The cockpit ships its **own** broot verb file, layered with `--conf` | Editing the user's `~/.config/broot/verbs.hjson` would fight their own settings. Measured: `--conf a;b;c` **layers**, it does not replace |

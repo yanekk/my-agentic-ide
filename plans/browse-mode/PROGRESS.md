@@ -40,12 +40,13 @@ architecture. **Read DESIGN §3.1 and §7 before T04.**
 
 **Status:** **T07 is closed and the plan as planned is COMPLETE** — every task ✅, both halves,
 test-proven and person-proven. Its hands-on half produced two more decisions of the user's, both
-written as tasks and both unstarted: **T11** (Enter takes focus
-into the reader — a *reversal* of DESIGN §3.1) and **T12** (a dark scheme, because micro's default
-tab bar is light-on-light and three open tabs read as none). It has answered most of its own questions; it
+written as tasks: **T11** (Enter takes focus into the reader — a *reversal* of the plan's own
+focus rule; **built, awaiting review**, its hands-on half unverified) and **T12** (a dark scheme,
+because micro's default
+tab bar is light-on-light and three open tabs read as none; unstarted). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
 (**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **368 checks** (was
-295), three clean runs at load ~2 at the T10 review; browse (55 bash + its node suites), agenda
+295), three clean runs at load ~2 at the T10 review; browse (**57** bash + its node suites), agenda
 and notes green.
 
 **Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
@@ -66,7 +67,8 @@ whatever is parked out of it, each carrying the worktree it was launched in. Tha
 rebuilds a browser rooted in a directory the agent has left, and relaunches a revdiff whose range
 moved while it sat parked.
 
-**Focus follows the pair, never takes it** (T04's review). **Detection does NOT use the pane
+**Focus follows the pair, never takes it** (T04's review) — that is the *daemon's* rule and it
+still holds; **T11's one exception is `cockpit-open`**, where a person pressed Enter. **Detection does NOT use the pane
 title** — T07 found by hand that a shell's `preexec` hook writes the title itself, to the
 command's first word, so a live broot's title reads `cd` and every healthy half was read as a
 quit shell (T08). A half is running if its screen is framed, if the title happens to name the
@@ -105,13 +107,14 @@ instead of a line per assertion; failures still print in full. `VERBOSE=1` resto
 listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentinels: **a waiter
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
-**Last updated:** 2026-09-03
-**Next `pir-work` will:** **implement T11** — Enter takes focus into the reader, a reversal of
-DESIGN §3.1 on the user's decision. **T12** (the dark scheme) follows. Both need the cockpit
-repointed at this worktree for their hands-on halves; **it is pointed back at the main checkout**
-as of 2026-09-03, so repoint with `bin/install.sh` and put it back afterwards, exactly as T07 did.
+**Last updated:** 2026-09-04
+**Next `pir-work` will:** **review T11** — whose hands-on half is still open, so the review has to
+ask the user to press Enter on a file and say where the cursor went. **T12** (the dark scheme)
+follows. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
+pointed back at the main checkout** as of 2026-09-03, so repoint with `bin/install.sh` and put it
+back afterwards, exactly as T07 did.
 **The plan as planned is finished. Folding this branch into `main` is the user's call, not a
-session's** — and T11 and T12 are still unbuilt on it.
+session's** — and T12 is still unbuilt on it.
 
 ## Tasks
 
@@ -131,14 +134,15 @@ done · ⛔ blocked, needs a human.
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
-| T11 | Enter takes focus to the reader | T07 | ⬜ | **Reverses DESIGN §3.1's focus row** on the user's decision of 2026-09-03. `cockpit-open` activates the viewer pane after a successful push; a *failed* push stays in the tree (it leaves micro's command bar open). `Alt+Enter` to stack tabs was offered and declined for now. |
+| T11 | Enter takes focus to the reader | T07 | 🔍 | `cockpit-open` activates the viewer after a successful push — all three push kinds; a failed send stays in the tree, a failed tab-write still moves, a failed activation is swallowed. **open 117 → 137 checks**, 57 bash, cockpit 368, both green twice at load ~2. Deviations: the focus rule lives in §1/§2.3/§2.4, not §3.1 — all rewritten; a fourth file (`cockpitd.mjs`) held the same stale claim in a comment; the suite's `sent()` now filters send-text. **Hands-on half UNVERIFIED.** |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* **T11** and **T12** are the only open tasks — both ⬜, both unblocked, both the user's decisions out of T07's hands-on half. Neither existed when the plan was written.
+**Review queue:** **T11**, awaiting review — and its **hands-on half is unverified**: no test can
+see a cursor. **T12** is the only other open task. Neither existed when the plan was written.
 
 ## Blocked on the user
 

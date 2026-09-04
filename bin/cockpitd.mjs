@@ -924,8 +924,10 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
     viewerAgent: viewer === null ? null : jobId,
     viewerRoot: viewer === null ? null : worktree,
   });
-  // The browser holds focus: you enter browse mode to find a file, and a push never
-  // takes focus away, so the whole gesture happens without touching another key.
+  // The browser holds focus: you enter browse mode to find a file, so the keyboard
+  // starts where the finding happens. From the first Enter onwards the cursor is in
+  // the VIEWER -- cockpit-open activates it after a successful push (T11) -- and
+  // `Cmd+Alt+Left` brings it back here for the next file. Still no mouse anywhere.
   // Only when the pair was asked for, though -- `focus: false` is for a rebuild the
   // user did not ask for (followWorktreeMigration), where taking the keyboard is
   // the same class of mistake as typing `R` into an open annotation editor.
