@@ -104,6 +104,12 @@ if [ -f "$CLIENT" ]; then
   offbox="$(grep -oiE "(bitbucket_)?origin: *[^,)}]+" "$HERE"/*.test.mjs 2>/dev/null \
     | grep -viE "origin: *(stub\.origin|\`http://127\.0\.0\.1)" | wc -l | tr -d ' ')"
   same "no test points the client anywhere but loopback" "$offbox" "0"
+  # DESIGN 5.2: the client is GET-only, so the dashboard cannot comment, approve or
+  # merge a PR even by mistake. A mutating verb anywhere in the source -- code or
+  # comment -- fails this, which is why those words are kept out of the file. `\b`
+  # word boundaries so "input"/"dispatch"/"requests" do not trip it.
+  mutating="$(grep -oiE '\b(POST|PUT|PATCH|DELETE)\b' "$CLIENT" | wc -l | tr -d ' ')"
+  same "the client has no mutating HTTP method" "$mutating" "0"
 else
   echo "  --   the client does not exist yet (T02 adds it); the origin seam check is skipped"
 fi
