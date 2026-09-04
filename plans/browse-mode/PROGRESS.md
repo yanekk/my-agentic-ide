@@ -60,7 +60,7 @@ viewport). And **the mouse-free question is answered too**: *"the cockpit
 can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
 **Browse mode is person-proven end to end. Nothing in this plan is unverified** — but it is not
 defect-free: **T13** was a live one, found by the same hands-on driving that proved the rest, and
-it is now **built and awaiting review, its own hands-on half still open**.
+it is now **built, person-proven the same day, and awaiting review**.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -113,15 +113,13 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **review T13** — it is the only 🔍, and the review owes it the
-**hands-on half the implementing session could not close**: press Enter on a dozen files in a row
-and watch whether broot's own command line ever reaches its filter box again. That needs the
-cockpit **repointed at this worktree** (`bin/install.sh`, then put it back afterwards, exactly as
-T07 did); **it is pointed at the main checkout** as of 2026-09-03, so a check run without
-repointing would silently test `main`'s code. After T13, **T12** (the dark scheme) is the last
-task written. **T13 was taken ahead of T12 on the user's say-so, 2026-09-04** — a deliberate
-reordering, not a queue slip. **Folding this branch into `main` is the user's call, not a
-session's.**
+**Next `pir-work` will:** **review T13** — it is the only 🔍, and **both its halves are
+already done**: 380 checks twice at low load, and the hands-on half closed by the user the same
+day (a dozen Enters, no filter box). So the review is a code review, with no hands-on debt to
+settle. After T13, **T12** (the dark scheme) is the last task written, and it *does* need the
+cockpit repointed for its own hands-on half. **T13 was taken ahead of T12 on the user's say-so,
+2026-09-04** — a deliberate reordering, not a queue slip. **Folding this branch into `main` is
+the user's call, not a session's.**
 
 ## Tasks
 
@@ -143,15 +141,15 @@ done · ⛔ blocked, needs a human.
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed, both halves; the user confirms 80 reads right. One defect fixed (six labels still said 60%). |
 | T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed; **both halves done**. Two documentation defects fixed: DESIGN still said `Alt+Enter` was declined *for now* when the hands-on half had closed it outright, and §2.4 read “two things do **not**” over a table with one **yes**. Code clean — probed the empty-payload path, the lock, and that `⌥[`/`⌥]` still route from the reader. 57/137/12 and 368, twice at load ~4. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
-| T13 | A half is running if *any* of its foreground group is | T08 | 🔍 | `foregroundComms` (new) lists the whole group; `diffPaneStatus` accepts **any** member, `foregroundComm` is its last element, `terminalIsIdle` untouched. New §11c''''' — placed after 11c'''', **not** beside 11b': its heal controls would have weakened 11c/11c'. **380 checks**, twice at load ~2.3; red under last-wins. **Hands-on half OPEN.** |
+| T13 | A half is running if *any* of its foreground group is | T08 | 🔍 | `foregroundComms` (new) lists the whole group; `diffPaneStatus` accepts **any** member, `foregroundComm` is its last element, `terminalIsIdle` untouched. New §11c''''' — placed after 11c'''', **not** beside 11b': its heal controls would have weakened 11c/11c'. **380 checks**, twice at load ~2.3; red under last-wins. **Hands-on half ✅ 2026-09-04** — a dozen Enters, no filter box. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T13** — built 2026-09-04, awaiting review, and **its hands-on half is
-open**: the reproduction was the user's and the race is timing, so only a person can close it.
-Still to build afterwards: **T12** (the dark scheme). Neither existed when the plan was written.
+**Review queue:** **T13** — built 2026-09-04, awaiting review, **both halves evidenced**
+(tests twice green; person-proven the same day). Still to build afterwards: **T12** (the dark
+scheme). Neither existed when the plan was written.
 
 ## Blocked on the user
 
