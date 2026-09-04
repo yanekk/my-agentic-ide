@@ -38,8 +38,9 @@ there**; when a note wants a paragraph, the paragraph belongs in the commit mess
 **Plan reviewed:** 2026-08-29 — 6 fixed, 5 decided with the user, one of them a reversal of the
 architecture. **Read DESIGN §3.1 and §7 before T04.**
 
-**Status:** **T07 is the only task left open**, and it is down to one question. Its hands-on half
-produced two more decisions of the user's, both now written as tasks: **T11** (Enter takes focus
+**Status:** **T07 is closed and the plan as planned is COMPLETE** — every task ✅, both halves,
+test-proven and person-proven. Its hands-on half produced two more decisions of the user's, both
+written as tasks and both unstarted: **T11** (Enter takes focus
 into the reader — a *reversal* of DESIGN §3.1) and **T12** (a dark scheme, because micro's default
 tab bar is light-on-light and three open tabs read as none). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
@@ -54,8 +55,9 @@ and the `--conf` layering does not shadow the user's own keys. **The split was j
 changed** — 60 → 80, to match revdiff's own file list — **and the new width confirmed right by
 the user at T10's review.** **Answered 2026-09-03:** the reader's **tabs and the tree's position survive both a park and an
 agent switch**, and **`c/` + Enter lands on the matching line** (micro puts it at the top of the
-viewport). **One question is left in the whole plan: the mouse-free one** — T07's flagship check,
-and the only one nothing else stands in for.
+viewport). And **the mouse-free question is answered too**: *"the cockpit
+can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
+**Browse mode is person-proven end to end. Nothing in this plan is unverified.**
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -104,10 +106,12 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-03
-**Next `pir-work` will:** **finish T07** if the mouse-free answer is in — it is the last question in
-the plan — otherwise ask it again and wait. Once T07 closes, **T11** is next (Enter takes focus to
-the reader), then **T12** (the dark scheme). Both came out of T07's hands-on half and both are the
-user's decisions, not a session's. **Folding this branch into `main` stays the user's call.**
+**Next `pir-work` will:** **implement T11** — Enter takes focus into the reader, a reversal of
+DESIGN §3.1 on the user's decision. **T12** (the dark scheme) follows. Both need the cockpit
+repointed at this worktree for their hands-on halves; **it is pointed back at the main checkout**
+as of 2026-09-03, so repoint with `bin/install.sh` and put it back afterwards, exactly as T07 did.
+**The plan as planned is finished. Folding this branch into `main` is the user's call, not a
+session's** — and T11 and T12 are still unbuilt on it.
 
 ## Tasks
 
@@ -123,7 +127,7 @@ done · ⛔ blocked, needs a human.
 | T04 | `browse` as the fourth mode; both halves, focus, strip, footer, detection | — | ✅ | Reviewed, two defects fixed: `enterBrowse` always seized the keyboard, and a failed `leaveBrowse` left `panes.viewer` naming a killed pane. **221 checks**. |
 | T05 | Park/restore the pair instead of killing it | T00, T04 | ✅ | Reviewed; one defect fixed (a handed-back revdiff still recorded as `browse`). 295 checks. |
 | T06 | Heal a quit half; reap a dead agent's pair | T05 | ✅ | Reviewed, three defects fixed (a double kill of the browser, per-agent records surviving a reap, an undefended §11c''). **353 checks.** |
-| T07 | Verified by hand with the user | T03, T06 | 🟡 | **All but one question answered.** 2026-09-03 closed the tabs-across-a-park and `c/`-line checks, and produced **T11** and **T12**. **Left: the mouse-free question**, asked and waiting. Cockpit still points at the worktree. Older notes: — see FINDINGS. It found **T08** (broot unusable) and prompted **T09** (the fence) and the **80/20 split**, all on the user's decisions. |
+| T07 | Verified by hand with the user | T03, T06 | ✅ | **Every question answered** (2026-09-02 and 09-03). Browse mode is drivable **mouse-free**; tabs and tree position survive a park and an agent switch; `c/` lands on the matching line. Produced **T08**, **T09**, the 80/20 split (**T10**), and now **T11** and **T12**. |
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
@@ -134,7 +138,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* **T07** is open on one hands-on question; **T11** and **T12** are new, unstarted and unblocked once it closes.
+**Review queue:** *(empty.)* **T11** and **T12** are the only open tasks — both ⬜, both unblocked, both the user's decisions out of T07's hands-on half. Neither existed when the plan was written.
 
 ## Blocked on the user
 
