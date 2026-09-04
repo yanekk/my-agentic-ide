@@ -58,7 +58,8 @@ the user at T10's review.** **Answered 2026-09-03:** the reader's **tabs and the
 agent switch**, and **`c/` + Enter lands on the matching line** (micro puts it at the top of the
 viewport). And **the mouse-free question is answered too**: *"the cockpit
 can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
-**Browse mode is person-proven end to end. Nothing in this plan is unverified.**
+**Browse mode is person-proven end to end. Nothing in this plan is unverified** — but it is not
+defect-free: **T13** is a live one, found by the same hands-on driving that proved the rest.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -73,6 +74,9 @@ title** — T07 found by hand that a shell's `preexec` hook writes the title its
 command's first word, so a live broot's title reads `cd` and every healthy half was read as a
 quit shell (T08). A half is running if its screen is framed, if the title happens to name the
 program, or — the only signal that is always true — if the tty's foreground process is one.
+**That last one reads only the LAST foreground line, and T13 is the defect it causes:** broot
+keeps the Enter verb's `cockpit-open` in its own process group, so mid-push the answer is `node`
+and the healer relaunches a live broot into its own filter box.
 
 Below the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews
 anything else; `cockpit-open` refuses unless `panes.json` carries all three viewer keys in the
@@ -109,8 +113,9 @@ must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever prin
 
 **Last updated:** 2026-09-04
 **Next `pir-work` will:** **review T11** — **both halves are done**, the hands-on one on
-2026-09-04. **T12** (the dark scheme) follows, and a **T13** if the user says yes to the healer
-defect under *Blocked on the user*. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
+2026-09-04. After that the queue's own rule (lowest number first) takes **T12**, the dark scheme —
+but **T13 is a live bug the user meets while browsing** and is the better next build. That is a
+reordering, so it is the user's to say: ask before taking T12 over T13. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
 pointed back at the main checkout** as of 2026-09-03, so repoint with `bin/install.sh` and put it
 back afterwards, exactly as T07 did.
 **The plan as planned is finished. Folding this branch into `main` is the user's call, not a
@@ -136,25 +141,21 @@ done · ⛔ blocked, needs a human.
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
 | T11 | Enter takes focus to the reader | T07 | 🔍 | `cockpit-open` activates the viewer after a successful push — all three push kinds; a failed send stays in the tree, a failed tab-write still moves, a failed activation is swallowed. **open 117 → 137 checks**, 57 bash, cockpit 368, both green twice at load ~2. Deviations: the focus rule lives in §1/§2.3/§2.4, not §3.1 — all rewritten; a fourth file (`cockpitd.mjs`) held the same stale claim in a comment; the suite's `sent()` now filters send-text. **Hands-on ✅ 2026-09-04** — cursor lands in the reader, `⌘⌥←` returns, `Alt+Enter` confirmed not wanted. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
+| T13 | A half is running if *any* of its foreground group is | T08 | ⬜ | **The user's yes, 2026-09-04.** broot's launch command lands in broot's filter box on Enter: broot keeps the verb's `cockpit-open` in **its own** process group, so `foregroundComm`'s last-wins rule answers `node` and the healer relaunches a live browser. Predicate, not a suppression window. Pre-dates T11. Hands-on half needed — the race is timing. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T11**, awaiting review, **both halves done**. **T12** is the only other open
-task; a **T13** for the healer defect is waiting on the user. Neither existed when the plan was written.
+**Review queue:** **T11**, awaiting review, **both halves done**. Open after it: **T12** (the dark
+scheme) and **T13** (the healer defect, the user's yes of 2026-09-04) — see the `Next` line on
+which of the two should go first. Neither existed when the plan was written.
 
 ## Blocked on the user
 
-**A defect T11's hands-on half found, and a task is the user's to add.** The 1s healer types
-broot's launch command into broot's own **filter box**, intermittently, on Enter. Measured
-2026-09-04 (FINDINGS): while broot runs the Enter verb its child sits on the same tty, and
-`foregroundComm` returns the **last** foreground line — the child — so a live broot reads as a
-quit shell. broot draws no frame and titles itself `cd`, so nothing else can overrule it.
-**Pre-dates T11**; T11's extra `wezterm` spawn only widens the window. The fix is small and
-local: ask whether **any** of the pane's foreground group is `broot`/`micro`/`revdiff`, rather
-than which one is last — a new helper beside `foregroundComm`, whose "last wins" rule
-`terminalIsIdle` still needs. **Awaiting the user's yes to a T13.**
+*(Nothing.)* The defect T11's hands-on half found — broot's launch command landing in broot's
+own **filter box** on Enter — was put to the user on 2026-09-04 and they said fix it: it is
+**T13**, written and unstarted.
 
 The question T06's review raised — T07's script never quit either half, so the
 recovery task would have closed having been seen by nobody, and *nothing has ever confirmed that
