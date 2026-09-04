@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // config — set, read and clear the cockpit's own settings, git-config style.
 //
-// Today it holds one setting: the Anthropic API key the session-namer uses to
-// ask Haiku for a topic label. Setting it by hand-editing a file is error-prone,
-// so this is the front door.
+// It holds two kinds of setting: masked SECRETS (the Anthropic API key the
+// session-namer uses, and the BitBucket credential) and plain SHOWN values (the
+// BitBucket workspace, repo list and team). A secret's read path only ever shows
+// a masked status; a plain value is shown in full so you can see what is set.
+// Setting any of them by hand-editing a file is error-prone, so this is the front
+// door.
 //
 // Reachable ONLY from inside the cockpit, exactly like `note` and `agenda`:
 // bin/cockpit-layout.sh symlinks this to ~/.claude/cockpit/bin/config and puts
@@ -13,13 +16,14 @@
 // file must import nothing outside node:* (run.sh checks it) and because the
 // property is verified as a live-cockpit fact in T04, not asserted here.
 //
-//   config                              list every setting and its masked status
-//   config anthropic-api-key            print "set · …1234" or "not set" -- never the key
-//   config anthropic-api-key <key>      write it (0600, atomic)
-//   config anthropic-api-key --unset    remove it; naming returns to today's behaviour
+//   config                              list every setting and its status
+//   config <setting>                    show it (secrets masked, plain values in full)
+//   config <setting> <value>            write it (0600, atomic)
+//   config <setting> --unset            remove it
 //
-// The read path is masked because the agents inherit the cockpit PATH and so have
-// this command too: it must never become a way to print the secret (DESIGN 2.7).
+// A secret's read path is masked because the agents inherit the cockpit PATH and
+// so have this command too: it must never become a way to print the secret
+// (DESIGN 2.7, and bitbucket-dashboard DESIGN 2.6).
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, chmodSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -30,88 +34,129 @@ import { fileURLToPath } from "node:url";
 // dir; otherwise the shared cockpit state directory.
 const DIR = process.env.COCKPIT_DIR || join(homedir(), ".claude", "cockpit");
 
-// The one setting there is, mapped to its file. Adding a setting is adding a row.
-// The key lives in its OWN file (not session state, not a shared config JSON) so
-// an unrelated corruption or an --unset cannot cost anything else, mirroring the
-// agenda client secret being kept apart (DESIGN 3.5, decision in §7).
+// Every setting there is, mapped to its own file and its mask policy. Adding a
+// setting is adding a row. Each key lives in its OWN file (not session state, not
+// a shared config JSON) so an unrelated corruption or an --unset cannot cost
+// anything else, mirroring the agenda client secret being kept apart (DESIGN 3.5,
+// and bitbucket-dashboard DESIGN 3.5). `secret: true` masks on read; a plain
+// setting shows its value in full.
 const SETTINGS = {
-  "anthropic-api-key": "anthropic-api-key",
+  "anthropic-api-key":   { file: "anthropic-api-key",   secret: true  },
+  "bitbucket-key":       { file: "bitbucket-key",       secret: true  },
+  "bitbucket-workspace": { file: "bitbucket-workspace", secret: false },
+  "bitbucket-repos":     { file: "bitbucket-repos",     secret: false },
+  "bitbucket-team":      { file: "bitbucket-team",      secret: false },
 };
 
 const die = (msg) => { console.error(`config: ${msg}`); process.exit(1); };
 
 // --- the store: read / write / clear / mask --------------------------------
 
-const keyPath = (dir) => join(dir, "anthropic-api-key");
+const settingPath = (dir, name) => join(dir, SETTINGS[name].file);
 
 /**
- * The raw key, or null if the file is absent or holds only whitespace. This is
- * the ONE function that returns the secret; it is for the hook and the tests,
- * never for the command's own read path (which masks). Trimming means a
- * hand-appended newline does not become part of the key -- API keys carry no
- * surrounding whitespace, so this only ever removes noise.
- *
- * DESIGN 3.2: the hook does NOT import this module -- a relative import would
- * trip its "imports nothing outside node:*" boundary check -- so it reads the
- * same file directly. The export here is the tested reference for that read.
+ * A setting's raw value, or null if the file is absent or holds only whitespace.
+ * This is the ONE function that returns a secret in the clear; it is for the
+ * store (T04) and the tests, never for the command's own read path (which masks a
+ * secret). Trimming means a hand-appended newline does not become part of the
+ * value -- keys and slugs carry no surrounding whitespace, so this only ever
+ * removes noise. An unknown name has no value.
  */
-export function readApiKey(dir = DIR) {
+export function readSetting(name, dir = DIR) {
+  if (!(name in SETTINGS)) return null;
   try {
-    const raw = readFileSync(keyPath(dir), "utf8").trim();
+    const raw = readFileSync(settingPath(dir, name), "utf8").trim();
     return raw || null;
   } catch {
-    return null;                        // absent, unreadable: the feature is off
+    return null;                        // absent, unreadable: the setting is off
   }
 }
 
 /**
- * "set · …1234" or "not set". Never the whole key. The revealed tail is the last
- * four characters, but capped at one fewer than the key's length so a key of four
- * characters or fewer cannot be shown in full -- for a 2-char key that is one
- * character, for a 1-char key none at all.
+ * The Anthropic key specifically, kept as a named export because it is the tested
+ * reference the hook mirrors (DESIGN 3.2: the hook reads the same file directly
+ * rather than importing this module, to keep its "imports nothing outside node:*"
+ * boundary). A thin wrapper over readSetting so there is one read path.
+ */
+export function readApiKey(dir = DIR) {
+  return readSetting("anthropic-api-key", dir);
+}
+
+/**
+ * A secret's masked status: "set · …1234" or "not set". Never the whole value.
+ * The revealed tail is the last four characters, but capped at one fewer than the
+ * value's length so a value of four characters or fewer cannot be shown in full --
+ * for a 2-char value that is one character, for a 1-char value none at all.
+ */
+function maskValue(value) {
+  const n = Math.min(4, value.length - 1);
+  return `set · …${n > 0 ? value.slice(-n) : ""}`;
+}
+
+/**
+ * What the read path shows for a setting: a secret is masked, a plain value is
+ * shown in full, and either kind reads "not set" when absent.
+ */
+export function settingStatus(name, dir = DIR) {
+  const value = readSetting(name, dir);
+  if (!value) return "not set";
+  return SETTINGS[name].secret ? maskValue(value) : value;
+}
+
+/**
+ * maskedStatus for the Anthropic key, kept as a named export for its existing
+ * callers and tests. A secret, so this is always masked.
  */
 export function maskedStatus(dir = DIR) {
-  const key = readApiKey(dir);
-  if (!key) return "not set";
-  const n = Math.min(4, key.length - 1);
-  return `set · …${n > 0 ? key.slice(-n) : ""}`;
+  return settingStatus("anthropic-api-key", dir);
 }
 
 /**
  * Write atomically (temp then rename) at mode 0600, creating DIR if missing. The
- * rename is atomic, so a read that races a write sees the whole old key or the
- * whole new one, never a torn file (DESIGN 2.n); a crash mid-write leaves the old
- * key intact. chmod is applied explicitly because writeFileSync's mode is masked
- * by the process umask, so the {mode} alone does not guarantee 0600.
+ * rename is atomic, so a read that races a write sees the whole old value or the
+ * whole new one, never a torn file; a crash mid-write leaves the old value intact.
+ * chmod is applied explicitly because writeFileSync's mode is masked by the
+ * process umask, so the {mode} alone does not guarantee 0600.
  */
-function writeApiKey(dir, key) {
+function writeSetting(dir, name, value) {
   mkdirSync(dir, { recursive: true });
-  const p = keyPath(dir);
+  const p = settingPath(dir, name);
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, key, { mode: 0o600 });
+  writeFileSync(tmp, value, { mode: 0o600 });
   chmodSync(tmp, 0o600);
   renameSync(tmp, p);
 }
 
-function unsetApiKey(dir) {
-  try { unlinkSync(keyPath(dir)); } catch { /* already absent: --unset is idempotent */ }
+function unsetSetting(dir, name) {
+  try { unlinkSync(settingPath(dir, name)); } catch { /* already absent: --unset is idempotent */ }
 }
 
 // --- the command -----------------------------------------------------------
 
+// The settings block is generated from SETTINGS so the help can never drift out
+// of sync with what actually exists.
+const settingsHelp = Object.entries(SETTINGS)
+  .map(([name, spec]) => `  ${name.padEnd(20)}${spec.secret ? "(secret, masked on read)" : "(shown in full)"}`)
+  .join("\n");
+
 const USAGE = `config — the cockpit's own settings.
 
-  config                              list every setting and its masked status
-  config anthropic-api-key            show whether the key is set (masked)
-  config anthropic-api-key <key>      set it
-  config anthropic-api-key --unset    remove it
+  config                       list every setting and its status
+  config <setting>             show a setting (secrets masked, plain values in full)
+  config <setting> <value>     set it
+  config <setting> --unset     remove it
 
-Settings live in ~/.claude/cockpit, owner-only, and never in the repo. The read
-path only ever shows a masked status -- it is never a way to print the key.`;
+Settings:
+${settingsHelp}
+
+Settings live in ~/.claude/cockpit, owner-only, and never in the repo. A secret's
+read path only ever shows a masked status -- it is never a way to print the secret.`;
 
 function listAll() {
+  // Pad the name column so the statuses line up now that there are several.
+  const width = Math.max(...Object.keys(SETTINGS).map((n) => n.length));
   for (const name of Object.keys(SETTINGS)) {
-    console.log(`${name}  ${maskedStatus(DIR)}`);
+    console.log(`${name.padEnd(width)}  ${settingStatus(name, DIR)}`);
   }
 }
 
@@ -127,23 +172,21 @@ function main() {
     die(`unknown setting '${name}'. Known settings: ${Object.keys(SETTINGS).join(", ")}`);
   }
 
-  // Only one setting so far, so the value handling is inline; a second would fan
-  // out on `name` here.
   if (rest.length === 0) {
-    console.log(maskedStatus(DIR));
+    console.log(settingStatus(name, DIR));
   } else if (rest[0] === "--unset") {
-    unsetApiKey(DIR);
+    unsetSetting(DIR, name);
     console.log(`${name} unset`);
   } else {
-    writeApiKey(DIR, rest.join(" "));
-    console.log(`${name} ${maskedStatus(DIR)}`);
+    writeSetting(DIR, name, rest.join(" "));
+    console.log(`${name} ${settingStatus(name, DIR)}`);
   }
 }
 
 // Run the command only when invoked directly -- as the script or through the
 // `config` PATH symlink, which realpath resolves back to this same file -- never
-// when a test imports readApiKey/maskedStatus. Without this, importing the module
-// would run the CLI (and exit) at import time.
+// when a test imports the readers. Without this, importing the module would run
+// the CLI (and exit) at import time.
 function isEntrypoint() {
   try {
     return !!process.argv[1] &&

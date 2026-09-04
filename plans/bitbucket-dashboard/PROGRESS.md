@@ -10,13 +10,12 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Plan reviewed, ready to build. Nothing built. The direction mock is approved and
+**Status:** Building. T01 implemented, awaiting review. The direction mock is approved and
 parked at `prototype/` (note: it word-wraps titles; the review changed titles to single-line
 ellipsis — DESIGN §2.2). The BitBucket API shape is confirmed against the public API (see
 FINDINGS); the two live unknowns are the agent spawn (T00) and the real-token auth (T02).
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** implement T00 or T01 (both have no dependencies; T00 is the spike and
-de-risks the most).
+**Next `pir-work` will:** review T01.
 
 ## Tasks
 
@@ -26,7 +25,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | Spawn spike: running agent in a repo's context | — | ⬜ | Throwaway. Gates T09. Hand-verified in live cockpit. |
-| T01 | `config` settings + `bitbucket-test` suite | — | ⬜ | Four settings: key (masked), workspace, repos, team (shown). |
+| T01 | `config` settings + `bitbucket-test` suite | — | 🔍 | SETTINGS now carries per-setting `secret` flag; generic `readSetting`/`settingStatus`; `readApiKey`/`maskedStatus` kept as wrappers. New suite (54 node + 3 bash checks). Deviations: added `harness.mjs` (agenda shape); run.sh prints `ALL PASS`/`FAILURES` not DESIGN §5's literal `bitbucket-test: N ok` — matches the other four suites' sentinel. |
 | T02 | BitBucket HTTPS client | T01 | ⬜ | getUser + listOpenPRs. Read-only token hand-check with user. |
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ⬜ | Classify rules settled in a brainstorm first — see Blocked on the user. |
 | T04 | Store: config reads, cache + view-state files | T01 | ⬜ | Single-writer files, atomic rename, no lock. |
@@ -37,7 +36,7 @@ done · ⛔ blocked, needs a human.
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 
