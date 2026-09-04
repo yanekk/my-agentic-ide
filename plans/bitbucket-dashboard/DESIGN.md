@@ -23,8 +23,8 @@ exactly as the Anthropic key already is.
 
 - With a key, a workspace and a repo list configured, the dashboard lists open PRs within one
   refresh, sorted most-recently-updated first, across the two tabs.
-- Each row shows the repo, PR number, wrapped title, approval count and comment count; the
-  To-review tab also shows the author.
+- Each row shows the repo, PR number, title (single line, truncated with an ellipsis if it does
+  not fit), approval count and comment count; the To-review tab also shows the author.
 - Clicking **Open** opens that PR in a browser. Clicking **Review** or **Address** starts a new
   cockpit agent already working in that repo, with a directive to review the PR or address its
   comments.
@@ -74,12 +74,19 @@ One tab is shown at a time; a tab strip at the top switches between them by clic
 active tab is remembered for the session (§3.5).
 
 **To review** — PRs opened by other people that concern you. Columns, left to right: repository
-slug, PR number, title (word-wrapped to the column), author, approval count, comment count, and
-two buttons **Review** and **Open**.
+slug, PR number, title, author, approval count, comment count, and two buttons **Review** and
+**Open**.
 
-**Mine** — PRs you opened. Columns: repository slug, PR number, title (word-wrapped), approval
-count, comment count, and two buttons **Address** and **Open**. No author column — it is always
-you.
+**Mine** — PRs you opened. Columns: repository slug, PR number, title, approval count, comment
+count, and two buttons **Address** and **Open**. No author column — it is always you.
+
+**Titles are one line, truncated with an ellipsis** when they do not fit the column — they are
+never word-wrapped. This is a deliberate choice (2026-09-04): a single-line title makes every row
+the same height, which is what lets pagination be a simple fixed count of rows per page (§2.5)
+instead of a height-aware pack, and keeps a click's target row trivially computable from its y.
+The cost is that a long title is cut off on screen; the full title is one click away via **Open**,
+and the PR number plus repo already identify the row. (The direction mock word-wrapped titles;
+this supersedes it.)
 
 Both tables are sorted by `updated_on` descending, most recently touched at the top, because
 the dashboard answers "what moved" and a freshly-updated PR is the one most likely to need you.
@@ -187,6 +194,15 @@ runs with its cwd at the projects root (`start_dir` in `config.lua`, §5), so `@
 new-session box resolves to `{projectsRoot}/{slug}` — the local clone. This is the same thing
 the user would type by hand. T00 proves the exact reference form works and that a real Enter
 into that box spawns a running agent; the primitive is not built until it has.
+
+**A watched repo must be cloned under the projects root, in a folder named for its BitBucket
+slug — this is a known limit, not guarded against** (decided 2026-09-04). The spawn types
+`@{slug}` and relies on `{projectsRoot}/{slug}` existing; if a watched repo is not cloned
+locally, or its local folder is named differently from its BitBucket slug, Review/Address lands
+the agent in the wrong place or nowhere useful. This is the same accepted cost as the stray
+click below — agents are cheap and killable — so it is documented, not prevented with a
+pre-flight check the user did not want. T00 records what a missing clone actually does, so the
+behaviour is known. (Open still works regardless: it uses the PR's own web URL, not the clone.)
 
 **This deliberately inverts the cockpit's central injection rule.** Everywhere else, injected
 text has its Enter (`\r`) swapped for a newline (`\n`) so a review arrives unsent and editable.
@@ -373,8 +389,8 @@ spikes/agenda-test/run.sh && spikes/notes-test/run.sh && spikes/cockpit-test/run
 conventions: each `*.test.mjs` run in a throwaway `COCKPIT_DIR`, plus bash checks for the model
 purity grep, the origin seam (no test may name a non-loopback BitBucket origin), the browser
 seam (no test may name a real opener), and that the real `~/.claude/cockpit` is untouched. It is
-**quiet on pass** (one `bitbucket-test: N ok` line), **no colour** (`FORCE_COLOR=0` set inside
-`run.sh`), and **loud on failure** (full message, file, line; non-zero exit), matching the other
+**quiet on pass** (one `bitbucket-test: N ok` line), **no colour** (the shared harness prints plain
+text, so there is nothing to suppress — like the other suites, none of which force colour off), and **loud on failure** (full message, file, line; non-zero exit), matching the other
 suites — see the agenda suite for how verbose output is turned back on to debug.
 
 **Dependencies.** None may be added. The zero-dependency rule is a project invariant; the

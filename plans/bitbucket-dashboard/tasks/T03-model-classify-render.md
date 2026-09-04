@@ -7,6 +7,14 @@
 > data (drafts, already-approved, staleness). The session that reaches this task stops, raises
 > the brainstorm with the user (using T02's client on real PRs), settles the rules, and only
 > then implements `classify`. See PROGRESS "Blocked on the user".
+>
+> **Two things the brainstorm must also settle, both visible only against real data:**
+> (1) what identifier `bitbucket-team` holds and how `classify` matches it — a nickname is what a
+> human knows but can change; the `uuid` is stable but opaque. Look at what real PRs carry for
+> `author` before deciding. (2) The "you are a requested reviewer" rule needs each PR's reviewer
+> list, which `normalizePR`'s output shape below does **not** carry — so either add a `reviewers`
+> field to the normalized shape or have `classify` read the raw `reviewers`/`participants`. Pick
+> the shape once the agreed rules make clear exactly which fields they need.
 
 ## Goal
 
@@ -43,7 +51,10 @@ export function normalizePR(raw) -> {
 export function classify(prs, { meUuid, team }) -> { toReview: PR[], mine: PR[] }
 
 export function paginate(list, { page, perPage }) -> { rows: PR[], page, pages }
-// page clamps into range; an out-of-range page from a shrunk list falls back to the last page
+// Rows are a fixed height (titles are single-line, ellipsis-truncated — DESIGN §2.2), so perPage
+// is a plain count, not height-aware. An out-of-range page (the list SHRANK since it was
+// remembered) falls back to page 1 (DESIGN §2.5). Clamping a next/prev CLICK to [1, pages] is the
+// daemon's job (T08), so paginate never has to tell "shrank" from "clicked past the end".
 ```
 
 ## Tests
@@ -56,7 +67,7 @@ export function paginate(list, { page, perPage }) -> { rows: PR[], page, pages }
 - [ ] classify: whatever exclusion the brainstorm agreed (e.g. drafts) is applied, with a test per rule
 - [ ] both lists come back sorted updatedOn descending, stably
 - [ ] paginate: exactly-full page, one-over (spills to a second page), empty list, page 1 of 1
-- [ ] paginate: a page number past the end clamps to the last page
+- [ ] paginate: a remembered page past the end of a shrunk list falls back to page 1
 - [ ] the purity grep passes for this file
 
 ## Done when

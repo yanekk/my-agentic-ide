@@ -41,6 +41,9 @@ The open questions the spike must answer, in order:
 - Does a real Enter into the box create a running session, and does the daemon then see it as an
   attachable agent (a header name it can map via `claude agents --json`)?
 - Does the auto-namer name it `{slug} / …` as expected, confirming the repo context took?
+- What happens when `@{slug}` names a repo that is **not cloned** under the projects root (or is
+  cloned under a different folder name)? This is an accepted known limit (DESIGN §2.8), not a bug
+  to fix here — but record the actual behaviour so the limit is documented, not guessed.
 
 ## Tests
 
@@ -55,6 +58,7 @@ creation). The spike's evidence is the hand-verification below. If any pure help
 - [ ] a documented sequence of `wezterm cli` calls spawns a running agent in a chosen repo's
       context from the daemon side, verified live with the user
 - [ ] the exact reference form that achieves repo context is recorded in FINDINGS with the date
+- [ ] the behaviour for a not-cloned / mis-named repo is recorded in FINDINGS (the DESIGN §2.8 limit)
 - [ ] the spike code is deleted and the answer written up for T09
 
 ## Needs a person

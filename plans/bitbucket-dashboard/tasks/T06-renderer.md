@@ -35,14 +35,17 @@ export function renderDashboard({ width, rows, cache, view, now }) -> {
 The renderer decides the states in this order: unconfigured (no key/workspace/repos) → the
 setup greeting; whole-dashboard auth error → the expired line; otherwise the active tab's table,
 with a per-tab empty state, a stale/offline footnote when any repo's `fetchedAt` is old or
-errored, and the pager when the list overflows the row budget. Titles word-wrap within the title
-column; a wrapped row is two lines tall and the buttons sit on the row's first line.
+errored, and the pager when the list overflows the row budget. Titles are truncated to the title
+column's width with an ellipsis, never word-wrapped (DESIGN §2.2), so every PR row is the same
+fixed height and the buttons sit on that one row — this is what makes `perPage` a plain count and
+hit-zone `y` a simple function of the row index.
 
 ## Tests
 
 - [ ] unconfigured (missing any of key/workspace/repos) renders the setup greeting, no table
 - [ ] a whole-dashboard auth error renders `sign-in expired · config bitbucket-key`
-- [ ] a populated To-review tab renders repo, PR#, wrapped title, author, approvals, comments, buttons
+- [ ] a populated To-review tab renders repo, PR#, title, author, approvals, comments, buttons
+- [ ] a title too long for the column is truncated with an ellipsis to a single line, not wrapped
 - [ ] the Mine tab has no author column and an Address button
 - [ ] a zero count renders a dim `·`, a non-zero renders the number
 - [ ] an empty tab renders the "nothing waiting" line, not a bare header

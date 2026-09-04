@@ -8,14 +8,15 @@ tracker costs the next session more than keeping it current ever saves.
 **Sixty words to a Notes cell, counted.** The cell is an index; the account is the commit
 message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan bitbucket-dashboard` before the first `/pir-work`
+**Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Plan written, not yet reviewed. Nothing built. The direction mock is approved and
-parked at `prototype/`. The BitBucket API shape is confirmed against the public API (see
+**Status:** Plan reviewed, ready to build. Nothing built. The direction mock is approved and
+parked at `prototype/` (note: it word-wraps titles; the review changed titles to single-line
+ellipsis — DESIGN §2.2). The BitBucket API shape is confirmed against the public API (see
 FINDINGS); the two live unknowns are the agent spawn (T00) and the real-token auth (T02).
-**Last updated:** 2026-09-03
-**Next `pir-work` will:** nothing yet — `/pir-review-plan` must run first. After that, T00 or
-T01 (both have no dependencies; T00 is the spike and de-risks the most).
+**Last updated:** 2026-09-04
+**Next `pir-work` will:** implement T00 or T01 (both have no dependencies; T00 is the spike and
+de-risks the most).
 
 ## Tasks
 

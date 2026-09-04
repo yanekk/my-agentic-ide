@@ -29,7 +29,10 @@ daemon through `cmd`; verbs carry slug/id), §3.5 (the daemon writes view-state)
 
 // cockpitd.mjs cmd dispatch adds:
 bb-tab:toReview | bb-tab:mine   -> store.writeView({ ...view, tab })
-bb-page:prev | bb-page:next     -> store.writeView with the active tab's page ±1 (clamped by the model)
+bb-page:prev | bb-page:next     -> store.writeView with the active tab's page ±1, clamped to
+                                   [1, pages] (daemon reads `pages` from the model, so a click
+                                   never writes an out-of-range page; the shrink→page-1 reset in
+                                   paginate/T03 is a separate case)
 bb-open:{slug}/{id}             -> look up the PR's htmlUrl in the cache;
                                    spawn(process.env.BITBUCKET_BROWSER || "/usr/bin/open", [url], { detached }).unref()
 bb-review:{slug}/{id}           -> recognised, no-op until T09
@@ -65,4 +68,4 @@ Mouse coordinates are only real in the running mux.
 ```
 
 Expect: tabs switch, the page changes, Open opens the PR in your browser.
-Tell me: does each click hit what you aimed at, including on a wrapped two-line row?
+Tell me: does each click hit what you aimed at, including on the bottom-most row and after paging?

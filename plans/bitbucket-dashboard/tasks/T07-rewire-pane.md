@@ -61,6 +61,6 @@ Rendering is only real in WezTerm at a real width.
 ```
 
 Expect: the dashboard fills the left ~75%, notes and agenda sit legibly in the right ~25%,
-titles wrap, counts and buttons are aligned.
-Tell me: does it look right and stay readable? Anything clipped, misaligned, or too cramped in
-the 25% column?
+long titles are truncated with an ellipsis to a single line, counts and buttons are aligned.
+Tell me: does it look right and stay readable? Are truncated titles still recognisable, or cut
+too short? Anything clipped, misaligned, or too cramped in the 25% column?
