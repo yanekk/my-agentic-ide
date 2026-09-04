@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-04 | 📌 | T01 reviewed clean, no fix. `bitbucket-test/run.sh` prints the `ALL PASS`/`FAILURES` sentinel the other four suites use, not DESIGN §5's `bitbucket-test: N ok` example — reviewed and endorsed, so don't "fix" it back to the example. |
 | 2026-09-04 | ✅ | T00 verified live. Typing `@{slug} {prompt}` into the fleet new-session box then a **real** Enter launches a running agent in `{projectsRoot}/{slug}`; auto-namer names it `{slug} / …`. Plain slug worked — no `cd`, no absolute path. This is T09's `spawnAgent` (DESIGN §2.8). |
 | 2026-09-04 | 📌 | Not-cloned slug (`@not-a-real-repo`): the agent still starts but has no repo and rambles that it can't find the context. Harmless and killable — the accepted DESIGN §2.8 limit, now observed rather than guessed. |
 | 2026-09-03 | 📌 | BitBucket list PR call with `fields=%2Bvalues.participants,%2Bvalues.reviewers` returns approvals (`participants[].approved`), reviewers, `comment_count`, `updated_on`, `author`, branches and `links.html` in one call. Confirmed against the public API. So per-repo = one GET; counts and sort are free. |

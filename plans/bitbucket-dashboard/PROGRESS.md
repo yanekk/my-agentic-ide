@@ -10,13 +10,13 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T00 verified live and done. T01 implemented, awaiting review. The
-direction mock is approved and parked at `prototype/` (note: it word-wraps titles; the review
-changed titles to single-line ellipsis — DESIGN §2.2). The BitBucket API shape is confirmed
-against the public API (see FINDINGS); the one remaining live unknown is the real-token auth
-(T02).
+**Status:** Building. T00 and T01 done; T01 reviewed clean. The direction mock is approved and
+parked at `prototype/` (it word-wraps titles; the review changed titles to single-line ellipsis
+— DESIGN §2.2). The BitBucket API shape is confirmed against the public API (see FINDINGS). Next
+is T02 (the client), whose read-only token auth is the one remaining live unknown and needs a
+hand-check with the user.
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** review T01.
+**Next `pir-work` will:** implement T02.
 
 ## Tasks
 
@@ -25,8 +25,8 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}` + a real Enter into the fleet box launches a running agent in `{projectsRoot}/{slug}`, named `{slug} / …`. Not-cloned slug = harmless contextless agent. See FINDINGS. Spike deleted. Answer feeds T09. |
-| T01 | `config` settings + `bitbucket-test` suite | — | 🔍 | SETTINGS now carries per-setting `secret` flag; generic `readSetting`/`settingStatus`; `readApiKey`/`maskedStatus` kept as wrappers. New suite (54 node + 3 bash checks). Deviations: added `harness.mjs` (agenda shape); run.sh prints `ALL PASS`/`FAILURES` not DESIGN §5's literal `bitbucket-test: N ok` — matches the other four suites' sentinel. |
+| T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}` + Enter in the fleet box spawns a running agent in `{projectsRoot}/{slug}`. Feeds T09's spawnAgent. See FINDINGS. |
+| T01 | `config` settings + `bitbucket-test` suite | — | ✅ | Reviewed clean 2026-09-04, no fix. All 8 checklist items covered; readApiKey/maskedStatus kept as wrappers, still defended by auto-name-test. Probed: unknown name returns null not throw; mask never leaks short values; set-echo masks secrets; throwaway COCKPIT_DIR never touches the real dir. ALL PASS/FAILURES sentinel endorsed over §5's example. |
 | T02 | BitBucket HTTPS client | T01 | ⬜ | getUser + listOpenPRs. Read-only token hand-check with user. |
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ⬜ | Classify rules settled in a brainstorm first — see Blocked on the user. |
 | T04 | Store: config reads, cache + view-state files | T01 | ⬜ | Single-writer files, atomic rename, no lock. |
@@ -37,7 +37,7 @@ done · ⛔ blocked, needs a human.
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
