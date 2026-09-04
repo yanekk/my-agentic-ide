@@ -10,12 +10,13 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T04 (store) built and 🔍, user chose it over the still-blocked T03. Full
-suite green (bitbucket store 42/42, client 24/24, config 54/54; agenda/notes/cockpit unchanged).
-T03's classify brainstorm (§2.3) still stops on the user — needs a workspace with real PRs and
-the test repo is empty.
+**Status:** Building. T04 (store) reviewed clean, ✅. No 🔍 or 🟡 left. Full suite green
+(bitbucket store 42/42, client 24/24, config 54/54; agenda/notes/cockpit unchanged). The next
+unblocked ⬜ by dependency is T03, but T03 stops on the user first — its classify brainstorm
+(§2.3) needs a workspace with real PRs and the test repo is empty.
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** review T04 (lowest 🔍).
+**Next `pir-work` will:** reach T03 and stop — it needs the user's classify brainstorm (§2.3)
+against real PRs before it can be built. Nothing else is unblocked by dependency.
 
 ## Tasks
 
@@ -26,9 +27,9 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}`+Enter in the fleet box spawns a running agent in `{projectsRoot}/{slug}`. Feeds T09 spawnAgent. See FINDINGS. |
 | T01 | `config` settings + `bitbucket-test` suite | — | ✅ | Reviewed clean 2026-09-04 (a570b7b). All 8 items; readApiKey/maskedStatus kept as wrappers; ALL PASS/FAILURES sentinel endorsed over §5's example. |
-| T02 | BitBucket HTTPS client | T01 | ✅ | Reviewed clean 2026-09-04, no fix. All 9 test items + both automated Done-when green; auth hand-check in FINDINGS. Endorsed no-client-split auth (base64 whole key, server splits; test covers colon-in-token). Probed: `%2C` fields accepted live, MAX_PAGES bound, next/values type guards, timeout aborts body-read → transient. |
+| T02 | BitBucket HTTPS client | T01 | ✅ | Reviewed clean 2026-09-04; auth hand-verified with the user (FINDINGS). |
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ⬜ | Classify rules settled in a brainstorm first — see Blocked on the user. |
-| T04 | Store: config reads, cache + view-state files | T01 | 🔍 | Built. readConfig/isConfigured (via readSetting — one read path), readCache/writeCache, readView/writeView. Atomic temp-then-rename, 0600, no lock. Corrupt/absent → empty/default, file left untouched (no quarantine, unlike agenda state). 42 assertions. Deviations: empty-cache meUuid is `null` not `""`; a bad page falls to 1. |
+| T04 | Store: config reads, cache + view-state files | T01 | ✅ | Reviewed clean 2026-09-04, no fix. All criteria tested and green; fully testable, no hands-on half. Deviations (meUuid `null`; bad page→1) sound. Probed: `version` is write-only (never read, harmless); array-as-repos slips the object guard but yields harmless numeric keys and never throws. |
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T03, T04 | ⬜ | Mirrors refreshAgenda. Cache fills; no UI. |
 | T06 | Pure renderer + hit-zones | T03 | ⬜ | All states: populated, empty, unconfigured, offline, expired. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ⬜ | Touches the diff-slot pane; keep the park/swap invariant. Hand-verify look. |
@@ -36,7 +37,7 @@ done · ⛔ blocked, needs a human.
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** T04
+**Review queue:** empty
 
 ## Blocked on the user
 
