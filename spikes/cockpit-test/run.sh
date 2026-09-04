@@ -1188,5 +1188,255 @@ kill $D3PID 2>/dev/null; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""
 
 echo
+echo "== 12. the bitbucket dashboard: the daemon keeps the PR cache current =="
+# bitbucket-dashboard T05. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.9,
+# 3.1), so refreshPRs is cockpitd's and is tested here, refreshAgenda's sibling.
+#
+#   D4  a 400ms tick: everything a tick does (getUser once, per-repo isolation,
+#       auth vs transient, the in-flight guard).
+#   D5  an hour-long tick, so it never fires in-test: proves the START trigger fills
+#       the cache and the ON-RETURN trigger re-fetches, neither confusable for a tick.
+#
+# BitBucket has NO staleness window (unlike the agenda): a pass fetches every watched
+# repo, so a clean "nothing is fetching" edge for the guard test is made by
+# UNCONFIGURING, not by ageing a cache entry.
+D4PID=""; D5PID=""; BBPID=""
+
+# A daemon launched as `envfn node ... > log &` has $! bound to the wrapping
+# SUBSHELL, not to node (the redirection stops bash execing node in place), so a
+# plain `kill $!` leaves cockpitd orphaned and still ticking. The agenda sections
+# above never notice -- their 60s staleness window means a surviving daemon
+# re-fetches nothing inside a test -- but the dashboard has NO staleness window, so
+# a leaked daemon keeps hitting the stub every tick and poisons the shared hit log.
+# So kill the node child too. pgrep -P finds it while the subshell still lives; if a
+# launch DID exec node in place (no wrapper), the -P finds nothing and $1 is node.
+stopbb() { kill $(pgrep -P "$1" 2>/dev/null) "$1" 2>/dev/null; }
+
+# --- a loopback stand-in for BitBucket (DESIGN 5.2) ------------------------
+# The client is pointed at 127.0.0.1, so a call that crept out to the real API
+# fails here instead of burning a real credential on a connected machine. $BBMODE
+# switches what the NEXT request does, walking one daemon through every failure
+# mode. The client is GET-only, so the stub only ever answers GETs.
+BBHITS="$T/bbhits.log"; : > "$BBHITS"
+BBMODE="$T/bbmode"; echo ok > "$BBMODE"
+cat > "$T/bbstub.mjs" <<'BBSTUB'
+import http from "node:http";
+import fs from "node:fs";
+const [, , MODE, HITS] = process.argv;
+const mode = () => { try { return fs.readFileSync(MODE, "utf8").trim(); } catch { return "ok"; } };
+const json = (res, status, body) => {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+};
+// One raw PR in BitBucket's shape. The title is deliberately shouty: the daemon
+// must never write it to a log that gets pasted into conversations.
+const PRS = { values: [{
+  id: 7, title: "SECRET-PR-TITLE", state: "OPEN", comment_count: 2,
+  updated_on: "2026-09-04T10:00:00+00:00", author: { uuid: "{author}" },
+  participants: [], links: { html: { href: "https://bitbucket.org/ws/pr/7" } },
+}] };
+const server = http.createServer((req, res) => {
+  // Logged DECODED so an assertion looks for a plain `+` and `?state=OPEN` rather
+  // than hunting %2B/%3D through a query string.
+  fs.appendFileSync(HITS, `${req.method} ${decodeURIComponent(req.url)}\n`);
+  const m = mode();
+  if (req.url.startsWith("/2.0/user")) {
+    if (m === "user-auth") return json(res, 401, { type: "error" });
+    return json(res, 200, { uuid: "ME-UUID", nickname: "me", account_id: "acc" });
+  }
+  const repo = decodeURIComponent((req.url.match(/\/repositories\/[^/]+\/([^/]+)\/pullrequests/) || [])[1] || "");
+  if (m === "net") return req.socket.destroy();          // dropped socket -> transient
+  if (m === "auth") return json(res, 401, { type: "error" });
+  if (m === "one-bad" && repo === "bad") return json(res, 500, { type: "error" });  // -> transient
+  if (m === "slow") return setTimeout(() => json(res, 200, PRS), 2000);
+  json(res, 200, PRS);
+});
+server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
+BBSTUB
+node "$T/bbstub.mjs" "$BBMODE" "$BBHITS" > "$T/bbstub.out" 2>&1 &
+BBPID=$!
+trap 'kill $DPID $D2PID $D3PID $GPID $D4PID $D5PID $BBPID 2>/dev/null; rm -rf "$T"' EXIT
+for _ in $(seq 1 60); do grep -q '^PORT ' "$T/bbstub.out" 2>/dev/null && break; sleep 0.1; done
+BBPORT="$(sed -n 's/^PORT //p' "$T/bbstub.out" | head -1)"
+BBORIGIN="http://127.0.0.1:$BBPORT"
+same "the fake BitBucket is listening on loopback" "$([ -n "$BBPORT" ] && echo yes || echo no)" "yes"
+
+# Read one value out of a bitbucket-cache.json; `c` is the parsed cache.
+bq() {  # bq <state-dir> <expression over c>
+  node -e 'const fs=require("fs");let c={meUuid:null,repos:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
+}
+# The four config settings are plain files under COCKPIT_DIR (DESIGN 3.5); `config`
+# writes them, and readSetting/readConfig read them, so a test writes them directly.
+bbconf() {  # bbconf <state-dir> <repos-csv>   (workspace/key fixed; team left empty)
+  printf 'me@x:tok' > "$1/bitbucket-key"
+  printf 'testws'   > "$1/bitbucket-workspace"
+  printf '%s' "$2"  > "$1/bitbucket-repos"
+}
+
+# --- D4: the tick ----------------------------------------------------------
+A4="$T/bb4"; S4="$A4/state"
+mkdir -p "$A4" "$S4"
+echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$S4/panes.json"
+: > "$S4/fleet.log"
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$A4/panestate"
+echo 31 > "$A4/nextpane"; echo 1 > "$A4/nexttab"
+echo list > "$A4/fleetstate"
+for f in editing titlelag active panecwd psbusy calls.log; do : > "$A4/$f"; done
+
+d4env() {
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  COCKPIT_DIR="$S4" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  CALLS="$A4/calls.log" FLEETSTATE="$A4/fleetstate" PANESTATE="$A4/panestate" \
+  NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
+  TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
+  PSBUSY="$A4/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  "$@"
+}
+d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
+D4PID=$!
+sleep 2
+
+# Nothing configured: the feature costs nothing until it is used (DESIGN 2.5, 2.n).
+same "no config: nothing was requested"     "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
+same "no config: no cache file was written" "$([ -e "$S4/bitbucket-cache.json" ] && echo yes || echo no)" "no"
+
+# getUser AUTH first, before meUuid is ever cached: the token is bad for EVERYTHING,
+# so the whole dashboard is the "sign-in expired" signal (DESIGN 2.n). refreshPRs
+# records it on every watched repo, keeps meUuid unset (so getUser is retried), and
+# fetches no repo -- a dead token would only repeat the 401.
+echo user-auth > "$BBMODE"
+bbconf "$S4" "bad,alpha"
+sleep 2
+check "a bad token on /user is logged as an auth failure" "bitbucket tick: getUser failed, auth" "$A4/daemon.log"
+same  "...and meUuid is left unset so it is retried"       "$(bq "$S4" 'c.meUuid')" "null"
+same  "...the whole-dashboard auth signal is on every repo" "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
+same  "...and no repo pullrequests call was made"          "$(grep -c '/pullrequests' "$BBHITS")" "0"
+
+# Recover: a good token now identifies the user ONCE and fetches every repo. The raw
+# PRs pass through untouched (DESIGN 3.1); the model normalises them later (T06).
+echo ok > "$BBMODE"
+sleep 2
+same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
+check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
+check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
+same  "a repo's raw PRs land in the cache"        "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
+same  "...untouched -- the raw title, not a normalised row" "$(bq "$S4" 'c.repos.alpha.prs[0].title')" "SECRET-PR-TITLE"
+same  "...with a fresh fetchedAt"                 "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
+same  "...and the auth error cleared entirely"    "$(bq "$S4" 'c.repos.alpha.error')" "null"
+
+# meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
+# repos are re-fetched but /2.0/user is not called again.
+: > "$BBHITS"
+sleep 2
+same "meUuid is not re-fetched every tick" "$(grep -c '/2.0/user' "$BBHITS")" "0"
+same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBHITS")" -gt 0 ] && echo yes || echo no)" "yes"
+
+# One repo failing transiently keeps its previous PRs and records the error; a repo
+# BEFORE it in the pass (bad) failing must not stop the one after it (alpha). Each
+# repo is cached independently (DESIGN 2.n).
+echo one-bad > "$BBMODE"
+sleep 2
+same "a transient repo failure keeps its previous PRs" "$(bq "$S4" 'c.repos.bad.prs.length')" "1"
+same "...and records a transient error"                "$(bq "$S4" 'c.repos.bad.error.kind')" "transient"
+same "...while the repo after it still refreshes"      "$(bq "$S4" 'c.repos.alpha.error')" "null"
+same "...with a fresh fetchedAt of its own"            "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
+
+# A repo-level auth (the token expired mid-life) is the whole-dashboard signal too,
+# recorded per repo, previous PRs kept (DESIGN 2.7/2.n).
+echo auth > "$BBMODE"
+sleep 2
+same "a repo auth failure classifies as auth"     "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
+same "...and still keeps the previous PRs"         "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
+
+echo ok > "$BBMODE"
+sleep 2
+same "a success after a failure clears the error" "$(bq "$S4" 'c.repos.alpha.error')" "null"
+# A later tick ran and wrote after passes that threw nothing but returned errors --
+# the daemon is still alive behind its window.
+same "...which is a later tick running"           "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
+
+# The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
+# nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
+# to age), then `slow` holds the first repo open while ~3 ticks fire behind it.
+echo slow > "$BBMODE"
+printf '' > "$S4/bitbucket-repos"    # unconfigure -> passes no-op; any in-flight one drains
+sleep 5                              # longer than one full slow pass (~4s), so nothing is in flight
+: > "$BBHITS"                        # cleared while nothing is fetching
+printf 'bad,alpha' > "$S4/bitbucket-repos"   # the next tick starts exactly one pass
+sleep 1.5                            # under slow's 2s hold: only the FIRST repo is requested
+same "a pass entered while one is in flight starts nothing" "$(grep -c '/pullrequests' "$BBHITS")" "1"
+echo ok > "$BBMODE"
+sleep 4                             # drain the held request
+
+# daemon.log gets pasted into conversations (DESIGN 2.9).
+refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
+refute "no credential ever reaches the log" "me@x:tok"        "$A4/daemon.log"
+
+stopbb $D4PID; D4PID=""; sleep 0.5   # node child too, or it out-ticks D5 below
+
+echo
+echo "== 12b. the bitbucket dashboard: start fills the cache, return refreshes it =="
+: > "$BBHITS"
+echo ok > "$BBMODE"
+A5="$T/bb5"; S5="$A5/state"
+mkdir -p "$A5" "$S5"
+echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$S5/panes.json"
+: > "$S5/fleet.log"
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$A5/panestate"
+echo 31 > "$A5/nextpane"; echo 1 > "$A5/nexttab"
+echo list > "$A5/fleetstate"
+for f in editing titlelag active panecwd psbusy calls.log; do : > "$A5/$f"; done
+# Configured BEFORE boot, so the one refresh at start-up has work to do and the
+# hour-long tick can never be what filled the cache.
+bbconf "$S5" "bad,alpha"
+
+d5env() {
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  COCKPIT_DIR="$S5" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  CALLS="$A5/calls.log" FLEETSTATE="$A5/fleetstate" PANESTATE="$A5/panestate" \
+  NEXTPANE="$A5/nextpane" NEXTTAB="$A5/nexttab" EDITING="$A5/editing" \
+  TITLELAG="$A5/titlelag" ACTIVE="$A5/active" PANECWD="$A5/panecwd" \
+  PSBUSY="$A5/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=3600000 \
+  "$@"
+}
+d5env node "$ROOT/bin/cockpitd.mjs" > "$A5/daemon.log" 2>&1 &
+D5PID=$!
+sleep 2
+check "the start-up trigger fetched a configured repo" "bitbucket start: alpha ok" "$A5/daemon.log"
+same  "...and filled the cache"                        "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
+same  "...resolving 'me' at start"                     "$(bq "$S5" 'c.meUuid')" "ME-UUID"
+
+# An hour-long tick fetches nothing on its own.
+: > "$BBHITS"
+sleep 2
+same "an hour-long tick has fetched nothing on its own" "$(grep -c '/pullrequests' "$BBHITS")" "0"
+
+# The return to the fleet LIST is the trigger (DESIGN 2.9) -- attach, then step back
+# out, which is what makes reconcile call onExit.
+echo "test agent" > "$A5/fleetstate"; sleep 3
+echo list > "$A5/fleetstate"; sleep 3
+check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
+same  "...and the cache was rewritten"                   "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
+
+stopbb $D5PID; D5PID=""
+kill $BBPID 2>/dev/null; BBPID=""
+
+echo
+echo "== 12c. the new bitbucket seams are fenced =="
+# FINDINGS 2026-08-28 (agenda): every test seam gets a guard, or a later edit points
+# the real daemon at the real BitBucket and the suite still passes on a connected
+# machine. `grep -v grep` drops the guard lines themselves.
+same "every cockpitd in this suite is pointed at loopback (bitbucket)" \
+     "$(grep -F 'BITBUCKET_ORIGIN=' "$HERE/run.sh" | grep -v grep | grep -vcE 'BITBUCKET_ORIGIN="(\$BBORIGIN|http://127\.0\.0\.1)')" "0"
+same "no line in this suite names the real bitbucket host" \
+     "$(grep -E 'api\.bitbucket\.org' "$HERE/run.sh" | grep -vc grep)" "0"
+# The tick seam is test-only. Unset, the daemon must be on the number DESIGN 2.9
+# states -- so the default is asserted in the source, not trusted.
+same "the bitbucket tick defaults to 60s" \
+     "$(grep -c 'COCKPIT_BITBUCKET_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+
+echo
 if [ "$fail" = 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi
 exit $fail

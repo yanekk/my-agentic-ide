@@ -29,6 +29,16 @@ import { fileURLToPath } from "node:url";
 import { dayBounds, normaliseEvent, safeText } from "./cockpit-agenda-model.mjs";
 import { putCacheEntry, readCache, readClient, readState } from "./cockpit-agenda-store.mjs";
 import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google.mjs";
+// The BitBucket dashboard's client (the only thing here that opens a socket to
+// BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
+// aliased because the agenda store already owns those names.
+import { getUser, listOpenPRs } from "./cockpit-bitbucket-client.mjs";
+import {
+  isConfigured,
+  readCache as readBBCache,
+  readConfig as readBBConfig,
+  writeCache as writeBBCache,
+} from "./cockpit-bitbucket-store.mjs";
 
 const execFileAsync = promisify(execFile);
 // The directory this daemon lives in, so it can launch its sibling scripts
@@ -1737,6 +1747,9 @@ async function onExit() {
   // awaiting it would stall the next poll behind the network. refreshAgenda never
   // rejects, so nothing is left floating for the process handler to report.
   refreshAgenda("returned");
+  // The dashboard's on-return trigger (bitbucket-dashboard DESIGN 2.9), same shape:
+  // not awaited, and refreshPRs never rejects.
+  refreshPRs("returned");
 }
 
 // ---------------------------------------------------------------------------
@@ -1904,6 +1917,120 @@ async function refreshAgenda(reason) {
 }
 
 // ---------------------------------------------------------------------------
+// The BitBucket dashboard: keeping the PR cache current
+//
+// bitbucket-dashboard DESIGN 2.9, 2.n, 3.4. This is refreshAgenda's sibling and is
+// here for the same reason (DESIGN 3.1): THE DAEMON FETCHES AND THE PANE ONLY
+// DRAWS. cockpit-welcome.mjs stays pure display, so the daemon owns the network
+// and writes bitbucket-cache.json; the pane watches the directory and redraws.
+//
+// Simpler than the agenda in two ways. There is NO staleness window -- a refresh
+// fetches every watched repo, because DESIGN 2.9's budget is one GET per repo per
+// minute and the pass guard already stops a return-hop from overlapping a tick.
+// And the client (T02) never throws: getUser/listOpenPRs return { error: { kind } }
+// with kind already decided ("auth" you act on, "transient" you wait out), so the
+// try/catch here is only the same unattended-crash backstop the agenda keeps.
+// ---------------------------------------------------------------------------
+
+// Test-only, exactly like the agenda's tick seam: a suite cannot wait a real
+// minute for a tick. Unset or bogus falls through the ||, so a plain run is the
+// documented 60s. The origin seam is read by the client itself; named here too so
+// the daemon passes it explicitly, matching how AGENDA_ORIGIN is threaded through.
+const PR_TICK_MS = Number(process.env.COCKPIT_BITBUCKET_TICK_MS) || 60_000;
+const BITBUCKET_ORIGIN = process.env.BITBUCKET_ORIGIN || "";
+
+// One pass in flight at a time (DESIGN 2.9), guarded exactly as agendaFetching and
+// reconcile are: overlapping passes interleave cache writes and burn calls.
+let prFetching = false;
+
+/**
+ * Fetch every watched repo's open PRs and write the cache (DESIGN 2.9, 3.4).
+ *
+ * `reason` ("tick" | "returned" | "start") is for the log only.
+ *
+ * NEVER THROWS AND NEVER REJECTS -- it runs unattended behind a window, like
+ * refreshAgenda. The uncaughtException handler at the foot of this file is a
+ * backstop, not a licence to leave a rejection floating.
+ *
+ * NOTHING IS LOGGED THAT CANNOT BE PASTED INTO A CONVERSATION. daemon.log routinely
+ * is. Only a repo slug (via safeText), a count and the error KIND go in; a PR title,
+ * an author and the credential never do.
+ *
+ * The cache holds RAW PRs untouched (T04 store): classifying, sorting and rendering
+ * are the pure model's job (T03/T06), not this loop's. That is why T05 does not
+ * depend on T03 (DESIGN 3.1).
+ */
+async function refreshPRs(reason) {
+  if (prFetching) return;
+  prFetching = true;
+  try {
+    const cfg = readBBConfig();
+    // Unconfigured: no call, no cache written. The feature costs nothing until a
+    // key, a workspace and at least one repo are set (DESIGN 2.5, 2.n).
+    if (!isConfigured(cfg)) return;
+
+    const now = Date.now();
+    const cache = readBBCache();   // { meUuid, repos: { <slug>: { fetchedAt, prs, error } } }
+
+    // "Me" is resolved from the token, once, and PERSISTED in the cache (DESIGN
+    // 2.6). So getUser is called only until it succeeds -- across ticks and across
+    // a daemon restart -- rather than every tick. cache.meUuid IS the identity
+    // cache; there is no separate in-memory copy to fall out of step with disk.
+    if (!cache.meUuid) {
+      const me = await getUser({ key: cfg.key, origin: BITBUCKET_ORIGIN });
+      if (me.error) {
+        // An auth failure on /user is the whole-dashboard "sign-in expired" signal
+        // (DESIGN 2.n): the token is bad for EVERYTHING, so fetching repos with it
+        // would only repeat the 401. The cache has no top-level error field (T04
+        // store), so the signal is recorded on every watched repo, previous PRs
+        // kept, and the pass stops. A transient failure writes nothing and heals on
+        // the next tick -- meUuid is still unset, so getUser is retried then.
+        if (me.error.kind === "auth") {
+          for (const slug of cfg.repos) {
+            const prev = cache.repos[slug];
+            cache.repos[slug] = { fetchedAt: prev?.fetchedAt ?? 0, prs: prev?.prs ?? [], error: { kind: "auth" } };
+          }
+          writeBBCache(cache);
+        }
+        log(`bitbucket ${reason}: getUser failed, ${me.error.kind}`);
+        return;
+      }
+      cache.meUuid = me.uuid;
+    }
+
+    // One GET per repo, sequential (DESIGN 2.9). Each repo is cached independently
+    // (DESIGN 2.n): one failing must not stop the next or blank the others.
+    for (const slug of cfg.repos) {
+      const prev = cache.repos[slug];
+      const res = await listOpenPRs({ key: cfg.key, workspace: cfg.workspace, repo: slug, origin: BITBUCKET_ORIGIN });
+      if (res.error) {
+        // KEEP THE PREVIOUS PRs on any failure (DESIGN 2.7/2.n): a wifi blip or an
+        // expired token must not empty a repo's last good list. fetchedAt is kept
+        // too -- it IS the age a staleness line reports. "auth" is the
+        // whole-dashboard signal, "transient" is the dim offline footnote; the
+        // client has already decided which, so this loop never reads a status code.
+        cache.repos[slug] = { fetchedAt: prev?.fetchedAt ?? 0, prs: prev?.prs ?? [], error: { kind: res.error.kind } };
+        log(`bitbucket ${reason}: ${safeText(slug)} failed, ${res.error.kind}`);
+      } else {
+        // A success clears `error` entirely and stamps a fresh fetchedAt. Raw PRs
+        // pass through untouched -- the model normalises them (DESIGN 3.1).
+        cache.repos[slug] = { fetchedAt: now, prs: res.prs, error: null };
+        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs`);
+      }
+    }
+
+    writeBBCache(cache);
+  } catch (e) {
+    // A pass must never take the daemon down or leave a rejection for the
+    // process-level handler to report as an anonymous crash. The constructor name
+    // only -- a message can carry anything.
+    log(`bitbucket ${reason}: pass failed, ${e?.name ?? "Error"}`);
+  } finally {
+    prFetching = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Reconciling against what the fleet pane actually shows
 //
 // The debug log is fast but undocumented, and it only exists if the fleet view
@@ -2058,6 +2185,9 @@ setInterval(healQuitDiff, ms(1000));
 // The agenda's other trigger (DESIGN 2.5). Not scaled by ms(): it has its own env
 // seam, because a suite cannot wait even the scaled half-minute for a tick.
 setInterval(() => refreshAgenda("tick"), AGENDA_TICK_MS);
+// The dashboard's every-minute trigger (bitbucket-dashboard DESIGN 2.9), own env
+// seam for the same reason the agenda's has one.
+setInterval(() => refreshPRs("tick"), PR_TICK_MS);
 reconcile();
 // DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
 // only fires when an agent WAS attached -- at start-up none is, so without this
@@ -2065,6 +2195,9 @@ reconcile();
 // when no calendar is configured: refreshAgenda returns before it reads a client
 // or opens a socket.
 refreshAgenda("start");
+// The dashboard's start-up trigger (bitbucket-dashboard DESIGN 2.9). Costs nothing
+// unconfigured: refreshPRs returns before any call.
+refreshPRs("start");
 
 const shutdown = () => {
   stopWatchers();
