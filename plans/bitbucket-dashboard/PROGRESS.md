@@ -10,10 +10,11 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T01 implemented, awaiting review. The direction mock is approved and
-parked at `prototype/` (note: it word-wraps titles; the review changed titles to single-line
-ellipsis — DESIGN §2.2). The BitBucket API shape is confirmed against the public API (see
-FINDINGS); the two live unknowns are the agent spawn (T00) and the real-token auth (T02).
+**Status:** Building. T00 verified live and done. T01 implemented, awaiting review. The
+direction mock is approved and parked at `prototype/` (note: it word-wraps titles; the review
+changed titles to single-line ellipsis — DESIGN §2.2). The BitBucket API shape is confirmed
+against the public API (see FINDINGS); the one remaining live unknown is the real-token auth
+(T02).
 **Last updated:** 2026-09-04
 **Next `pir-work` will:** review T01.
 
@@ -24,7 +25,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | Spawn spike: running agent in a repo's context | — | ⬜ | Throwaway. Gates T09. Hand-verified in live cockpit. |
+| T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}` + a real Enter into the fleet box launches a running agent in `{projectsRoot}/{slug}`, named `{slug} / …`. Not-cloned slug = harmless contextless agent. See FINDINGS. Spike deleted. Answer feeds T09. |
 | T01 | `config` settings + `bitbucket-test` suite | — | 🔍 | SETTINGS now carries per-setting `secret` flag; generic `readSetting`/`settingStatus`; `readApiKey`/`maskedStatus` kept as wrappers. New suite (54 node + 3 bash checks). Deviations: added `harness.mjs` (agenda shape); run.sh prints `ALL PASS`/`FAILURES` not DESIGN §5's literal `bitbucket-test: N ok` — matches the other four suites' sentinel. |
 | T02 | BitBucket HTTPS client | T01 | ⬜ | getUser + listOpenPRs. Read-only token hand-check with user. |
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ⬜ | Classify rules settled in a brainstorm first — see Blocked on the user. |
@@ -44,5 +45,6 @@ done · ⛔ blocked, needs a human.
   which PRs each tab shows, using real PRs fetched by T02's client. Provisional rules are in
   DESIGN §2.3; the user has ideas to test (drafts, already-approved, staleness). Nothing before
   T03 is blocked by this.
-- Everything else marked "hand-verified" (T00, T02 token check, T07 look, T09 spawn) needs the
+- Everything else marked "hand-verified" (T02 token check, T07 look, T09 spawn) needs the
   user at the live cockpit when that task is reached; each task doc carries the exact command.
+  (T00 done: verified 2026-09-04.)

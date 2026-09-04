@@ -11,6 +11,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-04 | ✅ | T00 verified live. Typing `@{slug} {prompt}` into the fleet new-session box then a **real** Enter launches a running agent in `{projectsRoot}/{slug}`; auto-namer names it `{slug} / …`. Plain slug worked — no `cd`, no absolute path. This is T09's `spawnAgent` (DESIGN §2.8). |
+| 2026-09-04 | 📌 | Not-cloned slug (`@not-a-real-repo`): the agent still starts but has no repo and rambles that it can't find the context. Harmless and killable — the accepted DESIGN §2.8 limit, now observed rather than guessed. |
 | 2026-09-03 | 📌 | BitBucket list PR call with `fields=%2Bvalues.participants,%2Bvalues.reviewers` returns approvals (`participants[].approved`), reviewers, `comment_count`, `updated_on`, `author`, branches and `links.html` in one call. Confirmed against the public API. So per-repo = one GET; counts and sort are free. |
 | 2026-09-03 | 📌 | The default PR list response omits `participants` and `reviewers`; both need the field expansion above. `q=state="OPEN"` filtering works. `pagelen` up to 50, follow `next`. |
 | 2026-09-03 | 📌 | The fleet view runs at the projects root (`start_dir` in `~/.claude/cockpit/config.lua`, passed by `wezterm/cockpit.lua`), so a spawned agent's cwd is that root and `@{slug}` resolves to the local clone. T00 must confirm this reference form in the live box. |
