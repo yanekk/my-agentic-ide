@@ -43,10 +43,11 @@ test-proven and person-proven. Its hands-on half produced two more decisions of 
 written as tasks: **T11** (Enter takes focus into the reader — a *reversal* of the plan's own
 focus rule; **built, person-proven and now reviewed ✅**) and **T12** (a dark scheme,
 because micro's default
-tab bar is light-on-light and three open tabs read as none; unstarted). It has answered most of its own questions; it
+tab bar is light-on-light and three open tabs read as none; **built, person-proven,
+awaiting review**). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
-(**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **380 checks** (was
-368), three clean runs at load ~2 at the T10 review; browse (**57** bash + its node suites), agenda
+(**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **383 checks** (was
+380), two clean runs at load ~2 at T12; browse (**57** bash + its node suites), agenda
 and notes green.
 
 **Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
@@ -60,7 +61,7 @@ viewport). And **the mouse-free question is answered too**: *"the cockpit
 can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
 **Browse mode is person-proven end to end. Nothing in this plan is unverified** — but it is not
 defect-free: **T13** was a live one, found by the same hands-on driving that proved the rest, and it
-is now **built, person-proven the same day, and reviewed ✅**. **T12 is the only task left.**
+is now **built, person-proven the same day, and reviewed ✅**. **T12 is built and person-proven too** — the reader launches in `one-dark`, so its tab bar is a dark strip with the current tab as a light block — and it is the **last task awaiting review**. The user also asked, while judging it, for VSCode-shaped tabs with a small `[x]`; micro's tab bar layout is reachable from no colourscheme, option or plugin, and they **declined a plan for it** the same day (DESIGN §8).
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -113,7 +114,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **implement T12** — the dark colour scheme for the reader, and the **last task written**. It is the only task left that is not ✅, and it **needs the cockpit repointed at this worktree for its own hands-on half** (PROGRESS, top): the scheme name must be seen to load, since micro refuses an unknown one at startup and the healer would then retry forever. T13 is closed — reviewed 2026-09-04, both halves. **Folding this branch into `main` is the user's call, not a session's.**
+**Next `pir-work` will:** **review T12**, the last task in the plan. **It needs no cockpit repoint** — the header's warning does not apply to it: the scheme is judged by running micro on its own, not through the cockpit, so the live cockpit stayed pointed at the main checkout throughout and still is. When that review lands, **every task is ✅ and the plan is finished**. **Folding this branch into `main` is the user's call, not a session's.**
 
 ## Tasks
 
@@ -134,14 +135,14 @@ done · ⛔ blocked, needs a human.
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed, both halves; the user confirms 80 reads right. One defect fixed (six labels still said 60%). |
 | T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed, both halves; code clean. Two documentation defects fixed — a stale `Alt+Enter` deferral and a table read backwards. 368 checks. |
-| T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
+| T12 | A dark colour scheme for the reader | T07 | 🔍 | Built: `one-dark` on the launch line, one constant in `viewerCommand`, so the browse launch, both heals and the worktree rebuild carry it. **383 checks**, green twice at load ~2; 7 red against the unfixed line. Hands-on ✅. Two deviations, see commit: the doc's `set colorscheme` route writes the user's own config, and no cockpit repoint was needed. `[x]` declined — DESIGN §8. |
 | T13 | A half is running if *any* of its foreground group is | T08 | ✅ | Reviewed, both halves. One documentation defect fixed: `CLAUDE.md`'s detection row — written by T08 — still said *the* foreground process and that `terminalIsIdle` asks the same question. Code clean. Re-proven to fail under last-wins (all 12 red, no other section). 380 twice at load ~2, browse 57. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** *(empty.)* T13 was reviewed 2026-09-04 — the last 🔍. Still to build: **T12** (the dark scheme), which did not exist when the plan was written.
+**Review queue:** **T12** — the last task in the plan, and the last 🔍 it will ever have. Its hands-on half is already closed (FINDINGS, 2026-09-04), so the review is the code, the assertions and the two deviations, not another trip to the user.
 
 ## Blocked on the user
 

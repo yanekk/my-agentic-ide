@@ -704,12 +704,29 @@ function brootSend(jobId, args) {
   }
 }
 /**
+ * The reader's colour scheme (DESIGN 7). micro's default draws the tab bar light on
+ * light, so three open tabs read as no tabs at all; `one-dark` gives it near-white
+ * text on a dark strip, and micro reverses that for the current tab.
+ *
+ * On the LAUNCH LINE, never in `~/.config/micro/`: the cockpit does not write into
+ * the user's own config (the same restraint broot's keybindings got), so micro
+ * outside the cockpit keeps whatever they set, and a settings file they write later
+ * is not fought over.
+ *
+ * It must be a scheme micro actually ships: an unknown name is a STARTUP failure
+ * (`<name> is not a valid colorscheme`), and the 1s healer would relaunch it
+ * forever. `one-dark` is one of the 25 in micro 2.0.15's embedded runtime.
+ */
+const VIEWER_COLORSCHEME = "one-dark";
+
+/**
  * micro, read-only and with NO file argument: the first push replaces its empty
  * `No name` buffer with `open`, and every later one adds a tab (DESIGN 2.2). Given
  * a file here, that buffer would be permanent and the first pushed file would land
  * in a second tab.
  */
-const viewerCommand = (worktree) => `cd ${JSON.stringify(worktree)} && micro -readonly true`;
+const viewerCommand = (worktree) =>
+  `cd ${JSON.stringify(worktree)} && micro -readonly true -colorscheme ${VIEWER_COLORSCHEME}`;
 
 /**
  * Split a new pane INTO whatever holds the diff slot, at half of it. The caller

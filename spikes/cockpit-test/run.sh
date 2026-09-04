@@ -20,6 +20,12 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
+# The reader's launch line, in ONE place: the scheme name is asserted in four
+# sections (the browse launch, two heals and the worktree rebuild) and a change of
+# scheme has to stay a single edit here and a single edit in `viewerCommand`.
+MICRO_SCHEME="one-dark"
+MICRO_LAUNCH="micro -readonly true -colorscheme $MICRO_SCHEME"
+
 mkdir -p "$T/bin" "$T/state"
 # --- stub wezterm ----------------------------------------------------------
 # Records every call, and emulates enough of the mux to exercise the per-agent
@@ -1069,7 +1075,14 @@ before "...only once the browser held the whole slot (80% of half a slot is not 
 check  "broot launched, with the cockpit's verb file FIRST in the --conf chain" \
                                                   "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
 check  "micro launched read-only, with NO file argument and no review file" \
-                                                  'micro -readonly true\n' "$CALLS"
+                                                  "$MICRO_LAUNCH"'\n' "$CALLS"
+# DESIGN 7: micro's default draws the tab bar light on light, so three open tabs
+# read as none. The scheme rides on the LAUNCH LINE and never on the user's own
+# micro config -- and it is ADDED to read-only, not swapped for it.
+check  "...in the reader's dark colourscheme, so the tab bar is legible" \
+                                                  "-colorscheme $MICRO_SCHEME" "$CALLS"
+check  "...added to read-only, not swapped for it" \
+                                                  "-readonly true -colorscheme" "$CALLS"
 check  "both halves start in the agent's own worktree" "--cwd $MOVED4 --" "$CALLS"
 # A split inherits NO environment, and broot's Enter verb runs `cockpit-open` by
 # name -- which exists only in the cockpit's own bin directory.
@@ -1199,7 +1212,11 @@ check  "the quit half is reported as a shell"     "browse viewer pane $VW for ab
 check  "...and micro was reinstated in that very pane" \
                                                   "the browse viewer was quit in abc12345; reinstated it in pane $VW" "$T/daemon.log"
 check  "...typed into the viewer's own pane"      "send-text --pane-id $VW" "$CALLS"
-check  "...read-only, in the agent's worktree"    "cd \"$MOVED4\" && micro -readonly true" "$CALLS"
+check  "...read-only, in the agent's worktree"    "cd \"$MOVED4\" && $MICRO_LAUNCH" "$CALLS"
+# A healed half must come back looking like the one it replaced: a reader that
+# changed colour mid-session would read as a different program, not a repair.
+check  "...and in the same scheme it was launched in" \
+                                                  "-colorscheme $MICRO_SCHEME" "$CALLS"
 # The tabs died with the process, so what we believe micro has open has to die too:
 # a leftover list makes the next push a `tabswitch` onto a tab that is not there.
 check  "the agent's tab list was reset with it"   "reset the viewer tab list for abc12345 (healed viewer)" "$T/daemon.log"
@@ -1369,7 +1386,7 @@ printf 'ttys%s /opt/homebrew/bin/broot node\nttys%s !fail\n' "$BR" "$VW" > "$T/p
 waitmore "reinstated it in pane $VW" "$T/daemon.log" "$HEALV" 8 \
   || { echo "  FAIL a viewer whose ps failed was never healed"; fail=1; }
 grew   "an unanswerable pane is a shell, and heals"  "reinstated it in pane $VW" "$T/daemon.log" "$HEALV"
-check  "...micro typed into the viewer's own pane" "cd \"$MOVED4\" && micro -readonly true" "$CALLS"
+check  "...micro typed into the viewer's own pane" "cd \"$MOVED4\" && $MICRO_LAUNCH" "$CALLS"
 refute "...and the healthy browser was not touched" "send-text --pane-id $BR" "$CALLS"
 : > "$T/psfg"                             # back to the stub's default for what follows
 retitle "$BR" broot
@@ -1751,7 +1768,7 @@ JSON
 : > "$CALLS"
 sleep 6
 check  "the pair was rebuilt in the new worktree"  "--cwd $MOVED7 --" "$CALLS"
-check  "...micro started fresh with it"            "micro -readonly true" "$CALLS"
+check  "...micro started fresh with it"            "$MICRO_LAUNCH" "$CALLS"
 check  "...so that agent's tab list was reset"     "reset the viewer tab list for abc12345" "$T/daemon.log"
 refute "...and the stale tabs are gone"            "bin/a.mjs" "$T/state/viewer-tabs.json"
 
