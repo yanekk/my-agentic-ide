@@ -21,8 +21,11 @@
 > reason this file says so is that it is a decision about history.
 >
 > **The trap this creates, and it is not theoretical:** the live cockpit runs whatever
-> `~/.claude/cockpit/config.lua` records, which today is the **main checkout**
-> (`/Users/jan.krolikowski/src/agentic-ide`), and `~/.wezterm.lua` symlinks into it. So a
+> `~/.claude/cockpit/config.lua` records. **That was the main checkout when this was
+> written; since T13's hands-on half (2026-09-04) it is THIS WORKTREE, and nothing put it
+> back** — check `config.lua` rather than trusting either sentence. While it points here, a
+> re-opened window runs the branch, which is what a hands-on check wants; pointed at
+> `main`, `~/.wezterm.lua` symlinks into it instead, and so a
 > re-opened WezTerm window runs `main`'s code, **not this branch's**. Every automated test is
 > unaffected — they run from the checkout you are in — but **T07's hands-on verification would
 > silently check the wrong code.** T07 carries the fix; do not improvise one.
