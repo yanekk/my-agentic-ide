@@ -41,7 +41,7 @@ architecture. **Read DESIGN §3.1 and §7 before T04.**
 **Status:** **T07 is closed and the plan as planned is COMPLETE** — every task ✅, both halves,
 test-proven and person-proven. Its hands-on half produced two more decisions of the user's, both
 written as tasks: **T11** (Enter takes focus into the reader — a *reversal* of the plan's own
-focus rule; **built and person-proven, awaiting review**) and **T12** (a dark scheme,
+focus rule; **built, person-proven and now reviewed ✅**) and **T12** (a dark scheme,
 because micro's default
 tab bar is light-on-light and three open tabs read as none; unstarted). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
@@ -112,12 +112,12 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **review T11** — **both halves are done**, the hands-on one on
-2026-09-04. After that the queue's own rule (lowest number first) takes **T12**, the dark scheme —
-but **T13 is a live bug the user meets while browsing** and is the better next build. That is a
-reordering, so it is the user's to say: ask before taking T12 over T13. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
-pointed back at the main checkout** as of 2026-09-03, so repoint with `bin/install.sh` and put it
-back afterwards, exactly as T07 did.
+**Next `pir-work` will:** **build — but ASK FIRST which of two.** Every task written is now ✅.
+The queue's own rule (lowest number first) takes **T12**, the dark scheme; **T13 is a live bug the
+user meets while browsing** and is the better next build. Taking T13 first is a **reordering**, so
+it is the user's to say — ask before starting either. Both need the cockpit repointed at this
+worktree for their hands-on halves; **it is pointed back at the main checkout** as of 2026-09-03,
+so repoint with `bin/install.sh` and put it back afterwards, exactly as T07 did.
 **The plan as planned is finished. Folding this branch into `main` is the user's call, not a
 session's** — and T12 is still unbuilt on it.
 
@@ -138,8 +138,8 @@ done · ⛔ blocked, needs a human.
 | T07 | Verified by hand with the user | T03, T06 | ✅ | **Every question answered** (2026-09-02 and 09-03). Browse mode is drivable **mouse-free**; tabs and tree position survive a park and an agent switch; `c/` lands on the matching line. Produced **T08**, **T09**, the 80/20 split (**T10**), and now **T11** and **T12**. |
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
-| T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
-| T11 | Enter takes focus to the reader | T07 | 🔍 | `cockpit-open` activates the viewer after a successful push — all three push kinds; a failed send stays in the tree, a failed tab-write still moves, a failed activation is swallowed. **open 117 → 137 checks**, 57 bash, cockpit 368, both green twice at load ~2. Deviations: the focus rule lives in §1/§2.3/§2.4, not §3.1 — all rewritten; a fourth file (`cockpitd.mjs`) held the same stale claim in a comment; the suite's `sent()` now filters send-text. **Hands-on ✅ 2026-09-04** — cursor lands in the reader, `⌘⌥←` returns, `Alt+Enter` confirmed not wanted. |
+| T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed, both halves; the user confirms 80 reads right. One defect fixed (six labels still said 60%). |
+| T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed; **both halves done**. Two documentation defects fixed: DESIGN still said `Alt+Enter` was declined *for now* when the hands-on half had closed it outright, and §2.4 read “two things do **not**” over a table with one **yes**. Code clean — probed the empty-payload path, the lock, and that `⌥[`/`⌥]` still route from the reader. 57/137/12 and 368, twice at load ~4. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
 | T13 | A half is running if *any* of its foreground group is | T08 | ⬜ | **The user's yes, 2026-09-04.** broot's launch command lands in broot's filter box on Enter: broot keeps the verb's `cockpit-open` in **its own** process group, so `foregroundComm`'s last-wins rule answers `node` and the healer relaunches a live browser. Predicate, not a suppression window. Pre-dates T11. Hands-on half needed — the race is timing. |
 
@@ -147,7 +147,7 @@ done · ⛔ blocked, needs a human.
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T11**, awaiting review, **both halves done**. Open after it: **T12** (the dark
+**Review queue:** **empty** — nothing is awaiting review. Open to build: **T12** (the dark
 scheme) and **T13** (the healer defect, the user's yes of 2026-09-04) — see the `Next` line on
 which of the two should go first. Neither existed when the plan was written.
 
