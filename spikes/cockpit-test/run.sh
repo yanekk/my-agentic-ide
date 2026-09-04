@@ -182,13 +182,27 @@ chmod +x "$T/bin/wezterm"
 # cockpit's revdiff reported the bare `revdiff`. broot and micro are homebrew
 # binaries, so on the real machine they answer as PATHS -- which is why the daemon
 # reduces the answer to a basename, and why 11b' asserts through a path.
+#
+# A line may name MORE THAN ONE command ("ttys41 broot node"), and then every one
+# of them is printed as its own `+` line, in order. That is not a contrivance: a
+# program that spawns a child without putting it in a new process group leaves both
+# in the foreground group at once, which is exactly what broot does while it runs
+# the Enter verb (T13, measured under `script(1)`). Section 11c''''' is that case.
+#
+# The value `!fail` makes `ps` exit non-zero: the "no answer at all" branch, which
+# must still read as a shell so a genuinely dead half is still healed.
 cat > "$T/bin/ps" <<'PS'
 #!/usr/bin/env bash
 tty=""
 while [ $# -gt 0 ]; do [ "$1" = "-t" ] && { tty="${2:-}"; shift; }; shift; done
 if [ -n "$tty" ] && [ -s "${PSFG:-/dev/null}" ]; then
-  fg=$(awk -v t="$tty" '$1 == t { print $2 }' "$PSFG")
-  if [ -n "$fg" ]; then printf 'Ss   /bin/zsh\nS+   %s\n' "$fg"; exit 0; fi
+  fg=$(awk -v t="$tty" '$1 == t { $1 = ""; sub(/^[ \t]+/, ""); print }' "$PSFG")
+  [ "$fg" = "!fail" ] && exit 1
+  if [ -n "$fg" ]; then
+    printf 'Ss   /bin/zsh\n'
+    for c in $fg; do printf 'S+   %s\n' "$c"; done
+    exit 0
+  fi
 fi
 if [ -s "$PSBUSY" ]; then printf 'R+ %s\n' "$(cat "$PSBUSY")"; else printf 'Ss+ zsh\n'; fi
 PS
@@ -1290,6 +1304,76 @@ nap 1.5                                   # well inside the 3s grace that heal j
 refute "...nor is one that is still starting" "BROOT: --send" "$CALLS"
 sleep 5                                   # ...and once the grace expires, the fence resumes
 check  "...and one that is up is asked again"     "BROOT: --send cockpit-abc12345 --get-root" "$CALLS"
+
+echo
+echo "== 11c'''''. (five primes) a half is running if ANY of its foreground group is =="
+# The defect the user met while browsing, 2026-09-04: broot's own launch command
+# appearing in broot's FILTER BOX, intermittently, on Enter.
+#
+# broot spawns the Enter verb's `cockpit-open` in ITS OWN process group rather than
+# a new one, so for the length of a push the pane's foreground group holds broot AND
+# a node. Measured under `script(1)`, asking `ps -t` about the verb's own tty:
+#
+#     SNs+ broot . SN+ /bin/sh . RN+ ps        -- all three carry `+`
+#
+# `foregroundComm` takes the LAST of them, so the answer was `node`: a live broot
+# read as a quit shell, and with no frame to overrule it (and a title of `cd`, see
+# 11b') the 1s healer typed `cd <wt> && broot --conf ...` into the running broot.
+#
+# So the question is not WHICH process is in front but WHETHER ANY of them is
+# broot/micro/revdiff. That is the whole of T13, and this section is the only thing
+# that tells the two readings apart: with last-wins restored, the assertions in this
+# first block go red and broot's own command line appears in $CALLS.
+#
+# Asserted as counts that did NOT move, for the same reason as 11b': the status log
+# is written once per change, so a pair that stays healthy writes nothing at all.
+SHELLB="$(countof "browse browser pane $BR for abc12345: shell" "$T/daemon.log")"
+SHELLV="$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")"
+# Both halves mid-push: the program first, its child last -- the order that makes
+# last-wins answer `node`. The browser answers as a PATH, as a homebrew broot really
+# does, so the basename reduction stays defended here too.
+printf 'ttys%s /opt/homebrew/bin/broot node\nttys%s micro node\n' "$BR" "$VW" > "$T/psfg"
+retitle "$BR" cd                          # ...and the title lies, as it always does
+retitle "$VW" cd
+: > "$CALLS"
+sleep 5
+same   "a broot with a child in its group is not a shell" \
+                                                  "$(countof "browse browser pane $BR for abc12345: shell" "$T/daemon.log")" "$SHELLB"
+same   "...nor is a micro with one"               "$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")" "$SHELLV"
+refute "nothing was typed into the browser mid-push" "send-text --pane-id $BR" "$CALLS"
+refute "...nor into the viewer"                   "send-text --pane-id $VW" "$CALLS"
+refute "broot's launch command never reached its own filter box" "broot --conf" "$CALLS"
+refute "...nor micro over a live one"             "micro -readonly" "$CALLS"
+
+# The other direction, which any-of must NOT weaken: a group holding no program
+# name is still a shell, and still heals. A bare `zsh` is already covered by 11c
+# and 11c' (they heal with $PSFG empty); what is new is a group of TWO with no
+# program in it -- the shape that would pass a predicate written as "more than one
+# process means something is running".
+HEALB="$(countof "reinstated it in pane $BR" "$T/daemon.log")"
+printf 'ttys%s zsh node\nttys%s micro node\n' "$BR" "$VW" > "$T/psfg"
+: > "$CALLS"
+waitmore "reinstated it in pane $BR" "$T/daemon.log" "$HEALB" 8 \
+  || { echo "  FAIL a browser whose group holds no program was never healed"; fail=1; }
+grew   "a group of zsh and a child is still a shell, and heals" \
+                                                  "reinstated it in pane $BR" "$T/daemon.log" "$HEALB"
+check  "...broot typed into that very pane"       "send-text --pane-id $BR" "$CALLS"
+refute "...and the live viewer beside it left alone" "send-text --pane-id $VW" "$CALLS"
+
+# And an answer that is no answer -- `ps` itself failing -- is still a shell, which
+# is the recoverable direction: a spurious relaunch of a dead half is invisible,
+# a refusal to heal one is a bare prompt for the life of the window.
+HEALV="$(countof "reinstated it in pane $VW" "$T/daemon.log")"
+printf 'ttys%s /opt/homebrew/bin/broot node\nttys%s !fail\n' "$BR" "$VW" > "$T/psfg"
+: > "$CALLS"
+waitmore "reinstated it in pane $VW" "$T/daemon.log" "$HEALV" 8 \
+  || { echo "  FAIL a viewer whose ps failed was never healed"; fail=1; }
+grew   "an unanswerable pane is a shell, and heals"  "reinstated it in pane $VW" "$T/daemon.log" "$HEALV"
+check  "...micro typed into the viewer's own pane" "cd \"$MOVED4\" && micro -readonly true" "$CALLS"
+refute "...and the healthy browser was not touched" "send-text --pane-id $BR" "$CALLS"
+: > "$T/psfg"                             # back to the stub's default for what follows
+retitle "$BR" broot
+retitle "$VW" micro
 
 echo
 echo "== 11d. ⌥] out of browse, from the BROWSER half -- the trap case =="

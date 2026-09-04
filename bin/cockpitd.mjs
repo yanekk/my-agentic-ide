@@ -224,7 +224,8 @@ const SHELL_SETTLE_MS = ms(400);
  * and back to 0 once revdiff is quit with `q`.
  *
  * A THIRD signal, and the only one that is actually true: the foreground process
- * on the pane's tty. **The title is not a name for what a pane is running.** It is
+ * group on the pane's tty -- **any** member of it, not the last one (T13; see
+ * `foregroundComms`). **The title is not a name for what a pane is running.** It is
  * whatever last wrote it, and on any shell with a `preexec` hook -- zsh's usual
  * setup, and the user's -- that is the SHELL, which rewrites it to the first word
  * of the command line while a command runs and back to the cwd when it ends.
@@ -240,8 +241,7 @@ const SHELL_SETTLE_MS = ms(400);
  * hand). revdiff never showed it because its frame carries the decision on its own.
  *
  * `ps` is consulted only once the cheap signals have failed, so a healthy revdiff
- * still costs nothing, and it is the same question `terminalIsIdle` already asks of
- * the terminal slot. Unknown answers stay "shell": a pane nobody can identify is
+ * still costs nothing. Unknown answers stay "shell": a pane nobody can identify is
  * one the healer may relaunch, which is the recoverable direction.
  */
 const PANE_PROGRAM = /^(?:broot|micro|revdiff)$/;
@@ -254,34 +254,61 @@ function diffPaneStatus(paneId, table = paneTable()) {
   const framed = (text.match(FRAMED_LINES) ?? []).length >= FRAMED_ENOUGH;
   const title = pane.title ?? "";
   if (framed || /revdiff/.test(title) || BROWSE_TITLE.test(title.trim())) return "running";
-  return PANE_PROGRAM.test(foregroundComm(paneId, table) ?? "") ? "running" : "shell";
+  return foregroundComms(paneId, table).some((c) => PANE_PROGRAM.test(c)) ? "running" : "shell";
 }
 
 /**
- * The command in a pane's FOREGROUND process group, as a bare name, or null when
- * it cannot be told.
+ * EVERY command in a pane's foreground process group, as bare names, oldest first.
+ * Empty when it cannot be told: no tty, no `ps`, or nothing in the foreground.
  *
  * `ps -t <tty>` lists the tty's processes and the foreground group carries `+` in
  * its state -- the signal the strip already uses to name terminals. A login shell
  * reports as `-zsh` and an absolute path as `/bin/zsh`, so both are reduced to the
- * basename. Null means "no idea": no tty, no `ps`, or nothing in the foreground.
+ * basename.
+ *
+ * There is usually one such line, and there is more than one exactly when a
+ * program spawns a child WITHOUT putting it in a new process group. broot does
+ * that for its Enter verb, so mid-push the pane answers with broot AND the
+ * `cockpit-open` node process, both `+` (T13, measured under `script(1)`):
+ *
+ *     SNs+ broot
+ *     SN+  /bin/sh
+ *     RN+  ps
+ *
+ * The single parser is deliberate: `foregroundComm` is the last of these, so the
+ * basename reduction and the "nothing in front" answer are written once.
  */
-function foregroundComm(paneId, table) {
+function foregroundComms(paneId, table) {
   const tn = table?.find((p) => p.pane_id === paneId)?.tty_name;
   const tty = tn ? tn.replace(/^\/dev\//, "") : null;
-  if (!tty) return null;
+  if (!tty) return [];
   try {
     const out = execFileSync("ps", ["-t", tty, "-o", "stat=,comm="],
                              { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] });
-    let comm = null;
+    const comms = [];
     for (const line of out.split("\n")) {
       const m = line.trim().match(/^(\S+)\s+(.+)$/);
-      if (m && m[1].includes("+")) comm = m[2];       // last foreground-group line wins
+      if (m && m[1].includes("+")) comms.push(m[2].replace(/^-/, "").split("/").pop());
     }
-    return comm ? comm.replace(/^-/, "").split("/").pop() : null;
+    return comms;
   } catch {
-    return null;
+    return [];
   }
+}
+
+/**
+ * The LAST command in a pane's foreground process group, as a bare name, or null.
+ *
+ * Last-wins is the right reading for `terminalIsIdle`, its only caller: a terminal
+ * running a job puts the job in a NEW process group and drops out of the
+ * foreground itself, so the job is the only `+` line and "is the thing in front
+ * the login shell" is answered by it. Detection of a browse half asks the other
+ * question -- whether ANY of the group is the program -- and calls
+ * `foregroundComms` directly.
+ */
+function foregroundComm(paneId, table) {
+  const comms = foregroundComms(paneId, table);
+  return comms.length ? comms[comms.length - 1] : null;
 }
 
 /**

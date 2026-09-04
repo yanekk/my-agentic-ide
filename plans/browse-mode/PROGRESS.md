@@ -45,8 +45,8 @@ focus rule; **built, person-proven and now reviewed ✅**) and **T12** (a dark s
 because micro's default
 tab bar is light-on-light and three open tabs read as none; unstarted). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
-(**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **368 checks** (was
-295), three clean runs at load ~2 at the T10 review; browse (**57** bash + its node suites), agenda
+(**T10**) — **all three are now reviewed and done**. `spikes/cockpit-test` **380 checks** (was
+368), three clean runs at load ~2 at the T10 review; browse (**57** bash + its node suites), agenda
 and notes green.
 
 **Much of the plan is now PERSON-PROVEN** (T07, 2026-09-02, on the review branch): the tree is
@@ -59,7 +59,8 @@ agent switch**, and **`c/` + Enter lands on the matching line** (micro puts it a
 viewport). And **the mouse-free question is answered too**: *"the cockpit
 can be operated mouse-less."* That was T07's flagship check and the last question in the plan.
 **Browse mode is person-proven end to end. Nothing in this plan is unverified** — but it is not
-defect-free: **T13** is a live one, found by the same hands-on driving that proved the rest.
+defect-free: **T13** was a live one, found by the same hands-on driving that proved the rest, and
+it is now **built and awaiting review, its own hands-on half still open**.
 
 **Each agent now owns up to three panes in the diff slot's world** — its revdiff, its browser and
 its viewer — and only one pair may be on screen. `diffs` still means "the pane holding the slot",
@@ -74,9 +75,9 @@ title** — T07 found by hand that a shell's `preexec` hook writes the title its
 command's first word, so a live broot's title reads `cd` and every healthy half was read as a
 quit shell (T08). A half is running if its screen is framed, if the title happens to name the
 program, or — the only signal that is always true — if the tty's foreground process is one.
-**That last one reads only the LAST foreground line, and T13 is the defect it causes:** broot
-keeps the Enter verb's `cockpit-open` in its own process group, so mid-push the answer is `node`
-and the healer relaunches a live broot into its own filter box.
+**That last one now reads the WHOLE foreground group and accepts any member of it** (T13): broot
+keeps the Enter verb's `cockpit-open` in its own process group, so a last-wins reading answered
+`node` mid-push and the healer relaunched a live broot into its own filter box.
 
 Below the daemon: broot's Enter verb runs `cockpit-open <file> [line]` on a text file and previews
 anything else; `cockpit-open` refuses unless `panes.json` carries all three viewer keys in the
@@ -112,14 +113,15 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **build — but ASK FIRST which of two.** Every task written is now ✅.
-The queue's own rule (lowest number first) takes **T12**, the dark scheme; **T13 is a live bug the
-user meets while browsing** and is the better next build. Taking T13 first is a **reordering**, so
-it is the user's to say — ask before starting either. Both need the cockpit repointed at this
-worktree for their hands-on halves; **it is pointed back at the main checkout** as of 2026-09-03,
-so repoint with `bin/install.sh` and put it back afterwards, exactly as T07 did.
-**The plan as planned is finished. Folding this branch into `main` is the user's call, not a
-session's** — and T12 is still unbuilt on it.
+**Next `pir-work` will:** **review T13** — it is the only 🔍, and the review owes it the
+**hands-on half the implementing session could not close**: press Enter on a dozen files in a row
+and watch whether broot's own command line ever reaches its filter box again. That needs the
+cockpit **repointed at this worktree** (`bin/install.sh`, then put it back afterwards, exactly as
+T07 did); **it is pointed at the main checkout** as of 2026-09-03, so a check run without
+repointing would silently test `main`'s code. After T13, **T12** (the dark scheme) is the last
+task written. **T13 was taken ahead of T12 on the user's say-so, 2026-09-04** — a deliberate
+reordering, not a queue slip. **Folding this branch into `main` is the user's call, not a
+session's.**
 
 ## Tasks
 
@@ -141,21 +143,21 @@ done · ⛔ blocked, needs a human.
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed, both halves; the user confirms 80 reads right. One defect fixed (six labels still said 60%). |
 | T11 | Enter takes focus to the reader | T07 | ✅ | Reviewed; **both halves done**. Two documentation defects fixed: DESIGN still said `Alt+Enter` was declined *for now* when the hands-on half had closed it outright, and §2.4 read “two things do **not**” over a table with one **yes**. Code clean — probed the empty-payload path, the lock, and that `⌥[`/`⌥]` still route from the reader. 57/137/12 and 368, twice at load ~4. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
-| T13 | A half is running if *any* of its foreground group is | T08 | ⬜ | **The user's yes, 2026-09-04.** broot's launch command lands in broot's filter box on Enter: broot keeps the verb's `cockpit-open` in **its own** process group, so `foregroundComm`'s last-wins rule answers `node` and the healer relaunches a live browser. Predicate, not a suppression window. Pre-dates T11. Hands-on half needed — the race is timing. |
+| T13 | A half is running if *any* of its foreground group is | T08 | 🔍 | `foregroundComms` (new) lists the whole group; `diffPaneStatus` accepts **any** member, `foregroundComm` is its last element, `terminalIsIdle` untouched. New §11c''''' — placed after 11c'''', **not** beside 11b': its heal controls would have weakened 11c/11c'. **380 checks**, twice at load ~2.3; red under last-wins. **Hands-on half OPEN.** |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **empty** — nothing is awaiting review. Open to build: **T12** (the dark
-scheme) and **T13** (the healer defect, the user's yes of 2026-09-04) — see the `Next` line on
-which of the two should go first. Neither existed when the plan was written.
+**Review queue:** **T13** — built 2026-09-04, awaiting review, and **its hands-on half is
+open**: the reproduction was the user's and the race is timing, so only a person can close it.
+Still to build afterwards: **T12** (the dark scheme). Neither existed when the plan was written.
 
 ## Blocked on the user
 
 *(Nothing.)* The defect T11's hands-on half found — broot's launch command landing in broot's
 own **filter box** on Enter — was put to the user on 2026-09-04 and they said fix it: it is
-**T13**, written and unstarted.
+**T13**, built 2026-09-04 and awaiting review.
 
 The question T06's review raised — T07's script never quit either half, so the
 recovery task would have closed having been seen by nobody, and *nothing has ever confirmed that
