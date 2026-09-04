@@ -10,13 +10,13 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T02 client built and its 24 stub assertions green (auth header shape,
-colon-in-token, state=OPEN + field expansion, next-pagination, 401/403→auth, 500/drop/bad-json
-→transient). Full suite passes. T02's automated half is done; its **real-token hand-check**
-(DESIGN §5.1) is the one remaining half and is pending with the user — command in the T02 task
-doc "Needs a person". T02 stays 🟡 until that answer lands in FINDINGS, then it goes 🔍 for review.
+**Status:** Building. T02 client built, its 24 stub assertions green, full suite passing, and the
+real-token hand-check verified live with the user (getUser authenticated; listOpenPRs succeeded,
+0 PRs on an empty test repo — see FINDINGS). T02 is now 🔍, awaiting review. Next is the T02
+review. The T03 classify brainstorm (§2.3) is still owed before T03 and needs a workspace with
+real PRs — the user's test workspace is empty, so that brainstorm waits for real data.
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** review T02 once the hand-check is recorded (T02 → 🔍).
+**Next `pir-work` will:** review T02.
 
 ## Tasks
 
@@ -27,7 +27,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}` + Enter in the fleet box spawns a running agent in `{projectsRoot}/{slug}`. Feeds T09's spawnAgent. See FINDINGS. |
 | T01 | `config` settings + `bitbucket-test` suite | — | ✅ | Reviewed clean 2026-09-04, no fix. All 8 checklist items covered; readApiKey/maskedStatus kept as wrappers, still defended by auto-name-test. Probed: unknown name returns null not throw; mask never leaks short values; set-echo masks secrets; throwaway COCKPIT_DIR never touches the real dir. ALL PASS/FAILURES sentinel endorsed over §5's example. |
-| T02 | BitBucket HTTPS client | T01 | 🟡 | getUser + listOpenPRs built, 24 stub assertions green. Read-only token hand-check pending with user before 🔍. |
+| T02 | BitBucket HTTPS client | T01 | 🔍 | getUser + listOpenPRs, 24 stub assertions green. Token hand-check verified live 2026-09-04 (see FINDINGS). |
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ⬜ | Classify rules settled in a brainstorm first — see Blocked on the user. |
 | T04 | Store: config reads, cache + view-state files | T01 | ⬜ | Single-writer files, atomic rename, no lock. |
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T03, T04 | ⬜ | Mirrors refreshAgenda. Cache fills; no UI. |
@@ -37,7 +37,7 @@ done · ⛔ blocked, needs a human.
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty
+**Review queue:** T02
 
 ## Blocked on the user
 
