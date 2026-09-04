@@ -121,10 +121,12 @@ kept its filter text — and the user drove it by hand at T07 and asked for the 
 Enter on broot changes focus to micro, so I immediately get to the file I opened." The cost was
 put to them first: stacking several files into tabs without reading them now costs a `⌘⌥←`
 between each Enter. An `Alt+Enter` that pushed without taking focus was offered as the way to
-keep both and **declined for now**, since no tab bar had been seen when the question was asked.)*
+keep both and declined **twice**: once on 2026-09-03 without the evidence (no tab bar had been
+seen when the question was asked) and again on **2026-09-04**, having driven the tab bar by hand.
+Option B is **closed, not deferred** — do not build it back on the assumption it is still open.)*
 
 All three pushes move it — `open`, `tab` and `tabswitch` alike: you asked for that file, so you
-want to read it. Two things do **not**:
+want to read it. The two failure cases are decided one each way:
 
 | Case | Focus moves? | Why |
 |---|---|---|
@@ -459,7 +461,7 @@ and never do it yourself.** Every pane experiment goes to a headless mux.
 | 2026-08-29 *(plan review)* | `⌥[`/`⌥]` work from **either** half of the slot | Gating on a single diff pane id would trap the user in the browser, which is exactly where focus deliberately starts. §2.1 |
 | 2026-08-29 *(plan review)* | ~~The split is **`--percent 60`** to the viewer — browser 47 columns, viewer 72, on a 120-column window~~ | ~~47 is the width broot was already measured usable at during planning~~ **Overturned at T07 — see the next row. The question was asked of T07 deliberately and T07 answered it.** |
 | 2026-09-02 *(T07)* | The split is **`--percent 80`** to the viewer, so the tree matches **revdiff's own file list** | **The user saw 60 in a real cockpit and judged the tree too wide**, asking for it to be as wide as revdiff's browser. revdiff's `--tree-width` is *"units (1-10, default 2 of 10)"* — a **share**, not a column count — so ours is a share too and keeps matching at every window size; measured live, revdiff's box was 65 of 319 columns (20.4%). The old reasoning ("47 is a width broot was validated usable at") missed that this tree sits where revdiff's tree sits and is read the same way: looking like it beats a width measured on its own |
-| 2026-09-03 *(T07 → T11)* | **Enter takes the cursor to the reader**, reversing "a push never takes focus" | The old rule was measured working and then **judged wrong by the user driving it**: browse mode is for reading a file, and every Enter needed a second gesture before the file could be read. Option B — `Alt+Enter` to stack a tab without moving — was offered and **declined for now**: no tab bar had been seen when the question was asked, so the want for it could not be judged. The return trip needs nothing new: `⌘⌥←` is a cockpit-wide pane move that predates browse mode, and the footer gains no label (it only just fits four modes as it is) |
+| 2026-09-03 *(T07 → T11)* | **Enter takes the cursor to the reader**, reversing "a push never takes focus" | The old rule was measured working and then **judged wrong by the user driving it**: browse mode is for reading a file, and every Enter needed a second gesture before the file could be read. Option B — `Alt+Enter` to stack a tab without moving — was offered and declined **twice**: on 2026-09-03 without the evidence (no tab bar had been seen), and again on **2026-09-04** with one driven by hand, which **closes** it rather than deferring it. The return trip needs nothing new: `⌘⌥←` is a cockpit-wide pane move that predates browse mode, and the footer gains no label (it only just fits four modes as it is) |
 | 2026-08-29 | **broot + micro** rather than `revdiff --all-files` | revdiff's own browse mode has an identical look and keeps annotations, but: no directory folding (2,251 rows on a real repo), **6–12 s** to open that repo against broot's instant, and its search covers only the currently-open file. broot folds, opens instantly and searches across files |
 | 2026-08-29 | You **cannot comment** on a browsed file | A second broot key opening the file in revdiff would close the loop, and is the better end state. The user chose to leave it: it introduces a fifth diff-slot state that is not a stop in the cycle, and muddies the model just decided. See §8 |
 | 2026-08-29 | The cockpit ships its **own** broot verb file, layered with `--conf` | Editing the user's `~/.config/broot/verbs.hjson` would fight their own settings. Measured: `--conf a;b;c` **layers**, it does not replace |
