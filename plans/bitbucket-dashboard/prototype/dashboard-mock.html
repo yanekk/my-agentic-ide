@@ -1,0 +1,261 @@
+<title>PR Dashboard Mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --page:#191c22; --frame:#0f1116; --term:#12141a; --pane:#12141a;
+    --ink:#c9d1d9; --dim:#6e7681; --faint:#484f58; --rule:#242a33;
+    --accent:#2684ff; --accent-soft:#173861;
+    --ok:#3fb950; --warn:#d29922; --hot:#f0883e;
+    --sans:'Inter',system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);
+    padding:28px 20px 60px;display:flex;flex-direction:column;align-items:center;gap:18px}
+
+  /* mock chrome (clearly not part of the product) */
+  .chrome{width:100%;max-width:1180px}
+  .chrome h1{font-size:15px;font-weight:600;margin:0 0 4px;letter-spacing:.2px}
+  .chrome p{margin:0;color:var(--dim);font-size:13px;line-height:1.5;max-width:70ch}
+  .switch{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .switch button{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--dim);
+    background:var(--frame);border:1px solid var(--rule);border-radius:7px;padding:7px 12px;cursor:pointer}
+  .switch button:hover{color:var(--ink);border-color:var(--faint)}
+  .switch button[aria-pressed="true"]{color:#fff;background:var(--accent-soft);border-color:var(--accent)}
+  .switch button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* the terminal window */
+  .win{width:100%;max-width:1180px;background:var(--frame);border:1px solid #23272f;
+    border-radius:11px;overflow:hidden;box-shadow:0 24px 60px -24px #000,0 2px 0 #262b33 inset}
+  .titlebar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#0b0d11;border-bottom:1px solid #21262d}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ec6a5e}.dot.y{background:#f4bf4f}.dot.g{background:#61c554}
+  .titlebar span{margin-left:8px;color:var(--faint);font:500 12px/1 var(--mono)}
+
+  .screen{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--term)}
+
+  /* top pane: dashboard 75 | notes 25 */
+  .top{display:grid;grid-template-columns:3fr 1fr;min-height:360px}
+  .dash{border-right:1px solid var(--rule);padding:12px 14px;display:flex;flex-direction:column}
+  .side{padding:12px 12px;color:var(--dim);overflow:hidden}
+
+  /* dashboard header + tabs */
+  .dhead{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+  .brand{font-weight:700;color:var(--ink);letter-spacing:.5px}
+  .brand b{color:var(--accent)}
+  .tabs{display:flex;gap:6px}
+  .tab{font:500 12.5px/1 var(--mono);color:var(--dim);background:transparent;border:1px solid transparent;
+    padding:5px 11px;border-radius:6px;cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab[aria-selected="true"]{color:#fff;background:var(--accent-soft);border-color:var(--accent)}
+  .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .refresh{margin-left:auto;color:var(--faint);font-size:11.5px}
+
+  /* table */
+  .thead,.row{display:grid;align-items:start;gap:10px;
+    grid-template-columns:74px 42px 1fr 96px 40px 40px 150px}
+  .thead{color:var(--faint);text-transform:uppercase;font-size:10.5px;letter-spacing:.7px;
+    padding:0 0 6px;border-bottom:1px solid var(--rule)}
+  .thead span:nth-child(5),.thead span:nth-child(6),.row .num{text-align:center}
+  .rows{display:flex;flex-direction:column}
+  .row{padding:9px 0;border-bottom:1px solid var(--rule)}
+  .row:hover{background:#161a21}
+  .repo{color:var(--accent);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prn{color:var(--dim)}
+  .title{color:var(--ink);white-space:normal;overflow-wrap:anywhere}
+  .title .age{display:block;color:var(--faint);font-size:11px;margin-top:2px}
+  .author{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .num{font-variant-numeric:tabular-nums;font-weight:500}
+  .num.ap{color:var(--ok)} .num.cm{color:var(--warn)} .num.z{color:var(--faint);font-weight:400}
+  .btns{display:flex;gap:6px;justify-content:flex-end}
+  .btn{font:500 12px/1 var(--mono);cursor:pointer;padding:5px 9px;border-radius:5px;
+    border:1px solid var(--rule);background:#171b22;color:var(--ink);white-space:nowrap}
+  .btn:hover{border-color:var(--accent);color:#fff;background:var(--accent-soft)}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn.prime{border-color:#2b3a52;color:#9dc3ff}
+  .btn.prime:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  /* side column (notes+agenda, squeezed) */
+  .side .lbl{display:flex;justify-content:space-between;color:var(--ink);font-weight:700;font-size:11.5px}
+  .side hr{border:none;border-top:1px solid var(--rule);margin:8px 0}
+  .side .n{font-size:11.5px;margin:5px 0;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .side .n i{color:var(--accent);font-style:normal}
+  .side .ag{font-size:11.5px;margin:4px 0;line-height:1.35}
+  .side .ag.now{color:var(--ink)} .side .ag .u{color:var(--faint)}
+  .side .bar{color:var(--accent)}
+
+  /* empty / unconfigured states inside dashboard */
+  .empty{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px;color:var(--dim);padding:20px 6px}
+  .empty .big{color:var(--ink);font-size:14px}
+  .empty code{color:#9dc3ff;background:#12161d;padding:2px 6px;border-radius:4px;border:1px solid var(--rule)}
+  .empty ul{margin:6px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+
+  /* lower panes (context only) */
+  .bottom{display:grid;grid-template-columns:2fr 2fr 46px;border-top:1px solid var(--rule);min-height:96px}
+  .bp{padding:10px 12px;color:var(--dim);font-size:12px;border-right:1px solid var(--rule)}
+  .bp .h{color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+  .bp b{color:var(--ink);font-weight:500}
+  .strip{padding:8px 0;color:var(--faint);font-size:11px;text-align:center;line-height:1.9}
+  .strip .on{color:var(--accent)}
+  .foot{border-top:1px solid var(--rule);padding:6px 14px;color:var(--faint);font-size:11.5px;background:#0d0f13}
+  .foot kbd{color:var(--dim);font-family:var(--mono)}
+
+  /* toast */
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:#0b0d11;border:1px solid var(--accent);color:var(--ink);font:500 13px/1.4 var(--mono);
+    padding:11px 16px;border-radius:8px;max-width:80ch;opacity:0;pointer-events:none;
+    transition:opacity .18s,transform .18s;box-shadow:0 12px 40px -12px #000;z-index:10}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast b{color:#9dc3ff}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:760px){.top{grid-template-columns:1fr}.side{display:none}
+    .thead,.row{grid-template-columns:64px 34px 1fr 60px}
+    .thead span:nth-child(4),.thead span:nth-child(5),.author,.row .num{display:none}
+    .btns{grid-column:1/-1;justify-content:flex-start;margin-top:6px}}
+</style>
+
+<div class="chrome">
+  <h1>BitBucket PR dashboard — direction mock</h1>
+  <p>Throwaway mock to confirm the shape before it's designed. This renders the cockpit's top screen as it
+     will actually look: a terminal pane, dashboard on the left ~75%, notes + agenda squeezed to the right ~25%.
+     Switch tabs and states below; the buttons show what a click would do.</p>
+  <div class="switch" role="group" aria-label="Mock state">
+    <button data-view="review" aria-pressed="true">Tab: To review</button>
+    <button data-view="mine" aria-pressed="false">Tab: Mine</button>
+    <button data-view="empty" aria-pressed="false">State: configured, no PRs</button>
+    <button data-view="unconfig" aria-pressed="false">State: no key set</button>
+  </div>
+</div>
+
+<div class="win">
+  <div class="titlebar"><i class="dot r"></i><i class="dot y"></i><i class="dot g"></i>
+    <span>agentic-ide cockpit — fleet</span></div>
+  <div class="screen">
+    <div class="top">
+      <div class="dash" id="dash"><!-- filled by JS --></div>
+      <div class="side">
+        <div class="lbl"><span>NOTES</span><span style="color:var(--dim)">3</span></div>
+        <hr>
+        <div class="n"><i>5c4f</i> 2h · rebase before the PR</div>
+        <div class="n"><i>0665</i> Mon · skipped the flaky test</div>
+        <div class="n"><i>a3f9</i> Tue · ping design re: icon</div>
+        <hr>
+        <div class="ag" style="color:var(--faint)">TODAY · Wed 3 Sep</div>
+        <div class="ag now"><span class="bar">▌</span> NOW standup <span class="u">work</span></div>
+        <div class="ag" style="color:var(--dim)">&nbsp;&nbsp;└ until 14:30</div>
+        <div class="ag" style="color:var(--dim)">▌ 15:00 1:1 <span class="u">work</span></div>
+        <div class="ag" style="color:var(--faint)">… +2 more · agenda</div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="bp"><div class="h">claude agents (fleet)</div>
+        <b>› describe a task for a new session</b><br>
+        agentic-ide / oauth-loopback<br>
+        payments-api / fix webhook retry</div>
+      <div class="bp"><div class="h">shell @ repo</div>~/git/agentic-ide $ █</div>
+      <div class="strip"><span class="on">1</span><br>2<br>3<br>＋</div>
+    </div>
+    <div class="foot"><kbd>⌥t</kbd> new · <kbd>⌥[ ⌥]</kbd> switch · <kbd>⌥w</kbd> close ·
+      click a tab or button above</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const REVIEW = [
+    {repo:'payments-api', n:842, title:'Retry webhooks with exponential backoff and a dead-letter queue', author:'m.nowak', age:'updated 20m ago', ap:2, cm:5},
+    {repo:'web-checkout', n:311, title:'Move the address form to the new field validation hook', author:'you (reviewer)', age:'updated 1h ago', ap:1, cm:0},
+    {repo:'payments-api', n:840, title:'Bump stripe-node to v14 and adapt the charge adapter', author:'k.wisniewska', age:'updated 3h ago', ap:0, cm:12},
+    {repo:'infra-terraform', n:57, title:'Split the staging VPC out of the shared module', author:'m.nowak', age:'updated yesterday', ap:3, cm:2},
+  ];
+  const MINE = [
+    {repo:'agentic-ide', n:129, title:'Bedrock gateway route for the session auto-namer', author:null, age:'updated 12m ago', ap:1, cm:3},
+    {repo:'web-checkout', n:309, title:'Skeleton loaders for the cart summary panel', author:null, age:'updated 5h ago', ap:2, cm:0},
+    {repo:'payments-api', n:835, title:'Idempotency keys on the refund endpoint', author:null, age:'updated 2d ago', ap:0, cm:7},
+  ];
+  const num = (v,cls)=> v>0 ? `<span class="num ${cls}">${v}</span>` : `<span class="num z">·</span>`;
+
+  function tableRows(list, kind){
+    const cols = kind==='review'
+      ? `<span>repo</span><span>pr</span><span>title</span><span>author</span><span>✓</span><span>💬</span><span></span>`
+      : `<span>repo</span><span>pr</span><span>title</span><span></span><span>✓</span><span>💬</span><span></span>`;
+    const rows = list.map(p=>{
+      const author = kind==='review' ? `<span class="author">${p.author}</span>` : `<span class="author"></span>`;
+      const primary = kind==='review' ? 'Review' : 'Address';
+      return `<div class="row">
+        <span class="repo">${p.repo}</span>
+        <span class="prn">#${p.n}</span>
+        <span class="title">${p.title}<span class="age">${p.age}</span></span>
+        ${author}
+        ${num(p.ap,'ap')}
+        ${num(p.cm,'cm')}
+        <span class="btns">
+          <button class="btn prime" data-act="${primary}" data-pr="${p.repo} #${p.n}">${primary}</button>
+          <button class="btn" data-act="Open" data-pr="${p.repo} #${p.n}">Open</button>
+        </span></div>`;
+    }).join('');
+    return `<div class="thead">${cols}</div><div class="rows">${rows}</div>`;
+  }
+
+  function header(active){
+    return `<div class="dhead">
+      <span class="brand"><b>bit</b>bucket</span>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-view="review" aria-selected="${active==='review'}">To review</button>
+        <button class="tab" role="tab" data-view="mine" aria-selected="${active==='mine'}">Mine</button>
+      </div>
+      <span class="refresh">updated 20m ago</span>
+    </div>`;
+  }
+
+  const VIEWS = {
+    review: ()=> header('review') + tableRows(REVIEW,'review'),
+    mine:   ()=> header('mine')   + tableRows(MINE,'mine'),
+    empty:  ()=> header('review') + `<div class="empty">
+      <div class="big">Nothing waiting on you.</div>
+      <div>No open PRs assigned to you, and none from your team, across the 3 watched repos.</div>
+      <div style="color:var(--faint)">Refreshes every minute and when you return here.</div></div>`,
+    unconfig: ()=> `<div class="dhead"><span class="brand"><b>bit</b>bucket</span>
+        <span class="refresh" style="margin-left:14px">not configured</span></div>
+      <div class="empty">
+        <div class="big">Connect BitBucket to see your PRs here.</div>
+        <ul>
+          <li>1 · <code>config bitbucket-key email:api-token</code></li>
+          <li>2 · <code>config bitbucket-workspace your-workspace</code></li>
+          <li>3 · <code>config bitbucket-repos payments-api,web-checkout</code></li>
+          <li style="color:var(--faint)">optional · <code>config bitbucket-team m.nowak,k.wisniewska</code></li>
+        </ul>
+        <div style="color:var(--faint);margin-top:4px">Run these in any cockpit terminal.</div>
+      </div>`,
+  };
+
+  const dash = document.getElementById('dash');
+  const toast = document.getElementById('toast');
+  let toastT;
+  function say(html){ toast.innerHTML=html; toast.classList.add('show');
+    clearTimeout(toastT); toastT=setTimeout(()=>toast.classList.remove('show'),3200); }
+
+  function render(view){
+    dash.innerHTML = VIEWS[view]();
+    document.querySelectorAll('.switch button').forEach(b=>
+      b.setAttribute('aria-pressed', b.dataset.view===view));
+  }
+
+  document.querySelector('.switch').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(b) render(b.dataset.view);
+  });
+  dash.addEventListener('click',e=>{
+    const tab=e.target.closest('.tab');
+    if(tab){ render(tab.dataset.view); return; }
+    const btn=e.target.closest('.btn'); if(!btn) return;
+    const {act,pr}=btn.dataset;
+    if(act==='Open') say(`Opens <b>${pr}</b> in your browser.`);
+    else if(act==='Review') say(`New agent prepared for <b>${pr}</b> — review prompt typed into the fleet box, <b>unsent</b>. Press Enter to start.`);
+    else say(`New agent prepared for <b>${pr}</b> — "address the review comments" prompt typed in, <b>unsent</b>. Press Enter to start.`);
+  });
+
+  render('review');
+</script>
