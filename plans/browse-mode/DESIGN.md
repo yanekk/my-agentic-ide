@@ -63,7 +63,8 @@ mode would be to click the other half first. That is a trap, not a mode.
 
 ### 2.2 The viewer
 
-`micro -readonly true`, occupying the **right-hand half of the diff slot**, beside the browser.
+`micro -readonly true -colorscheme one-dark`, occupying the **right-hand half of the diff
+slot**, beside the browser.
 
 - **Read-only is not cosmetic.** Every buffer shows `[ro]`. Without it the viewer is an editor
   pointed at the agent's worktree, and an accidental save becomes a diff the agent must
@@ -73,6 +74,10 @@ mode would be to click the other half first. That is a trap, not a mode.
   `tab` (adding one). Otherwise the tab bar carries a permanent empty first tab.
 - **Tab labels are whatever path is passed**, so paths are made **repo-relative** before
   sending. Absolute paths fill the bar with `/Users/...` and nothing is readable.
+- **The scheme rides on the launch line** (`-colorscheme one-dark`, §7). micro's default draws
+  the tab bar light-on-light, so open tabs read as none; the flag fixes that for the panes the
+  cockpit spawns and writes nothing into `~/.config/micro/`, so micro outside the cockpit is
+  untouched. It must be a scheme micro **ships** — an unknown name is refused at startup.
 
 ### 2.3 The browser
 

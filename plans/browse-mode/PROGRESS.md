@@ -117,7 +117,7 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **review T12**, the last task in the plan. **It needs no cockpit repoint** — the header's warning does not apply to it: the scheme is judged by running micro on its own, not through the cockpit, so the live cockpit stayed pointed at the main checkout throughout and still is. When that review lands, **every task is ✅ and the plan is finished**. **Folding this branch into `main` is the user's call, not a session's.**
+**Next `pir-work` will:** **review T12**, the last task in the plan. **It needs no cockpit repoint** — the header's warning does not apply to it: the scheme is judged by running micro on its own, not through the cockpit, so T12 made no repoint of its own. **The live cockpit points at THIS WORKTREE** (config.lua, since T13) — the header says to check it, and this line used to claim the opposite. When that review lands, **every task is ✅ and the plan is finished**. **Folding this branch into `main` is the user's call, not a session's.**
 
 ## Tasks
 
