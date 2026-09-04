@@ -41,7 +41,7 @@ architecture. **Read DESIGN §3.1 and §7 before T04.**
 **Status:** **T07 is closed and the plan as planned is COMPLETE** — every task ✅, both halves,
 test-proven and person-proven. Its hands-on half produced two more decisions of the user's, both
 written as tasks: **T11** (Enter takes focus into the reader — a *reversal* of the plan's own
-focus rule; **built, awaiting review**, its hands-on half unverified) and **T12** (a dark scheme,
+focus rule; **built and person-proven, awaiting review**) and **T12** (a dark scheme,
 because micro's default
 tab bar is light-on-light and three open tabs read as none; unstarted). It has answered most of its own questions; it
 found **T08** (the detection defect) and prompted **T09** (the fence) and the **80/20 split**
@@ -108,9 +108,9 @@ listing. The counts are unchanged, and so are the `ALL PASS` / `FAILURES` sentin
 must watch for `FAILURES`, never `CHECKS FAILED`**, which no suite has ever printed.
 
 **Last updated:** 2026-09-04
-**Next `pir-work` will:** **review T11** — whose hands-on half is still open, so the review has to
-ask the user to press Enter on a file and say where the cursor went. **T12** (the dark scheme)
-follows. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
+**Next `pir-work` will:** **review T11** — **both halves are done**, the hands-on one on
+2026-09-04. **T12** (the dark scheme) follows, and a **T13** if the user says yes to the healer
+defect under *Blocked on the user*. Both need the cockpit repointed at this worktree for their hands-on halves; **it is
 pointed back at the main checkout** as of 2026-09-03, so repoint with `bin/install.sh` and put it
 back afterwards, exactly as T07 did.
 **The plan as planned is finished. Folding this branch into `main` is the user's call, not a
@@ -134,19 +134,29 @@ done · ⛔ blocked, needs a human.
 | T08 | Judge a half by its foreground process, not its title | T07 | ✅ | Reviewed, one defect fixed: the `ps` stub answered in bare names, so the basename reduction was defended by nothing. |
 | T09 | Fence the browser to the agent's worktree | T08 | ✅ | Reviewed, one defect fixed: the guard keeping the fence off a quit or still-starting browser was defended by nothing. New 11c''''; hands-on half ✅ under T07. |
 | T10 | The tree matches revdiff's width (60 → 80) | T07 | ✅ | Reviewed; **both halves done** — the user confirms 80 reads right (2026-09-02). One defect fixed: six labels and comments still said 60% while asserting 80, so a red run would print the wrong number. Probed the geometry on a real mux, which the stub suite never could: 63 cols of 319 against revdiff's 65, identical across a park. **368 checks**, three clean runs. |
-| T11 | Enter takes focus to the reader | T07 | 🔍 | `cockpit-open` activates the viewer after a successful push — all three push kinds; a failed send stays in the tree, a failed tab-write still moves, a failed activation is swallowed. **open 117 → 137 checks**, 57 bash, cockpit 368, both green twice at load ~2. Deviations: the focus rule lives in §1/§2.3/§2.4, not §3.1 — all rewritten; a fourth file (`cockpitd.mjs`) held the same stale claim in a comment; the suite's `sent()` now filters send-text. **Hands-on half UNVERIFIED.** |
+| T11 | Enter takes focus to the reader | T07 | 🔍 | `cockpit-open` activates the viewer after a successful push — all three push kinds; a failed send stays in the tree, a failed tab-write still moves, a failed activation is swallowed. **open 117 → 137 checks**, 57 bash, cockpit 368, both green twice at load ~2. Deviations: the focus rule lives in §1/§2.3/§2.4, not §3.1 — all rewritten; a fourth file (`cockpitd.mjs`) held the same stale claim in a comment; the suite's `sent()` now filters send-text. **Hands-on ✅ 2026-09-04** — cursor lands in the reader, `⌘⌥←` returns, `Alt+Enter` confirmed not wanted. |
 | T12 | A dark colour scheme for the reader | T07 | ⬜ | `micro -colorscheme <dark>` on the launch line, never in the user's own micro config. Which scheme is theirs to judge; the name must be verified to load, since micro refuses an unknown one at startup and the healer would retry forever. |
 
 **Sixty words to a Notes cell.** What was built or what the review found, the test count, and
 one line per deviation from the task doc. The cell is the index; the account is the commit
 message.
 
-**Review queue:** **T11**, awaiting review — and its **hands-on half is unverified**: no test can
-see a cursor. **T12** is the only other open task. Neither existed when the plan was written.
+**Review queue:** **T11**, awaiting review, **both halves done**. **T12** is the only other open
+task; a **T13** for the healer defect is waiting on the user. Neither existed when the plan was written.
 
 ## Blocked on the user
 
-*(Nothing.)* The question T06's review raised — T07's script never quit either half, so the
+**A defect T11's hands-on half found, and a task is the user's to add.** The 1s healer types
+broot's launch command into broot's own **filter box**, intermittently, on Enter. Measured
+2026-09-04 (FINDINGS): while broot runs the Enter verb its child sits on the same tty, and
+`foregroundComm` returns the **last** foreground line — the child — so a live broot reads as a
+quit shell. broot draws no frame and titles itself `cd`, so nothing else can overrule it.
+**Pre-dates T11**; T11's extra `wezterm` spawn only widens the window. The fix is small and
+local: ask whether **any** of the pane's foreground group is `broot`/`micro`/`revdiff`, rather
+than which one is last — a new helper beside `foregroundComm`, whose "last wins" rule
+`terminalIsIdle` still needs. **Awaiting the user's yes to a T13.**
+
+The question T06's review raised — T07's script never quit either half, so the
 recovery task would have closed having been seen by nobody, and *nothing has ever confirmed that
 a real pane stops reporting `micro` when micro exits*, which is the one signal every heal fires
 on — was answered on 2026-08-30: **add the steps.** T07 now carries **10 and 11** (quit the
