@@ -1,6 +1,6 @@
 # T05 — The daemon fetch loop
 
-**Phase:** 2 · **Depends on:** T02, T03, T04 · **Weight:** medium
+**Phase:** 2 · **Depends on:** T02, T04 · **Weight:** medium
 
 ## Goal
 
@@ -8,6 +8,11 @@ Make the cache fill and stay fresh. Add `refreshPRs` to the daemon, modelled on 
 identify the user once, fetch each watched repo's open PRs, and write the cache — on the same
 three triggers the agenda uses. Nothing is drawn yet; this task ends with a `bitbucket-cache.json`
 that a later pane will read.
+
+The cache holds **raw** PRs untouched (per T04's store); classifying and sorting is T03's model,
+consumed later by the renderer (T06), not by this fetch loop. That is why T05 does not depend on
+T03 — dropped from its deps by the user 2026-09-04, so the cache-fill work need not wait on the
+classify brainstorm that only blocks T03.
 
 ## Design sections this implements
 

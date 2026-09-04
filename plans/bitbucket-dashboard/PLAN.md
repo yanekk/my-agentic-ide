@@ -70,10 +70,14 @@ settled the inclusion rules (§2.3) with real PRs from T02's client in front of 
 
 | # | Task | Depends on |
 |---|---|---|
-| [T05](tasks/T05-daemon-fetch.md) | `refreshPRs` in the daemon: three triggers, write the cache | T02, T03, T04 |
+| [T05](tasks/T05-daemon-fetch.md) | `refreshPRs` in the daemon: three triggers, write the cache | T02, T04 |
 
 At the end, `bitbucket-cache.json` fills and refreshes on the agenda's schedule. Nothing is
 drawn yet.
+
+**T05 does not depend on T03** (user, 2026-09-04): the fetch loop writes raw PRs to the cache;
+classifying and sorting is T03's model, consumed by the renderer (T06), not here. So T05 is
+off the critical path and buildable on T02 + T04 alone, without the classify brainstorm.
 
 ## Phase 3 — The screen
 
@@ -111,11 +115,12 @@ At the end, clicking Review or Address starts an agent working on the PR. Hand-v
 ## Critical path
 
 ```
-T01 → T02 → (classify brainstorm) → T03 → T05 → T06 → T07 → T08 → T09 → T10
+T01 → T02 → (classify brainstorm) → T03 → T06 → T07 → T08 → T09 → T10
 ```
 
 Off the path, slot in wherever convenient: **T00** (parallel to all of Phase 1; must land before
-T09) and **T04** (needs only T01; feeds T05).
+T09), **T04** (needs only T01; feeds T05) and **T05** (needs T02 + T04; feeds T07 alongside T06).
+Only **T03 → T06 → T07** now waits on the classify brainstorm; the fetch chain does not.
 
 ## Rough sizing
 
