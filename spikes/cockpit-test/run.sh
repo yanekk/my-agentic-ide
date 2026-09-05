@@ -2630,11 +2630,41 @@ same "Open on an absent PR id launches nothing"               "$(wc -l < "$OPENL
 check "...and says so rather than crashing"                   "no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
-# --- Review/Address are recognised but inert until T09 (DESIGN 2.8) ---
+# --- Review/Address spawn a running agent in the PR's repo (bitbucket-dashboard T09,
+# DESIGN 2.8). The daemon types `@{slug} {directive+url}` into the fleet new-session box
+# (pane 20 here) and sends a REAL Enter (\r) to submit -- the deliberate inversion of the
+# injectReview rule, which swaps \r for \n to leave a review unsent. The PR url is resolved
+# from the cache by slug/id, exactly as Open is; an absent id is the same safe no-op.
+CR="$(printf '\r')"
+: > "$A6/calls.log"
 echo bb-review:alpha/7 >> "$S6/cmd"; sleep 1
-check "a Review click is recognised but a no-op"   "bb-review:alpha/7: recognised" "$A6/daemon.log"
-same  "...and spawned no agent (no @repo typed to the fleet box)" \
-      "$(grep -c 'send-text --pane-id 20' "$A6/calls.log")" "0"
+check "a Review click types the review directive + url to the fleet box" \
+      "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
+same  "...to the fleet pane (pane 20), twice: the text then the Enter" \
+      "$(grep -c -- 'send-text --pane-id 20 --no-paste' "$A6/calls.log")" "2"
+same  "...the second send IS a real Enter (a carriage return)" \
+      "$(grep -cF -- "STDIN:${CR}" "$A6/calls.log")" "1"
+refute "...NOT the \\n an unsent review uses (spawn inverts injectReview)" \
+      'STDIN:\n' "$A6/calls.log"
+refute "no PR url reaches the log via a spawn (DESIGN 2.9)" \
+      "bitbucket.org/ws/pr/7" "$A6/daemon.log"
+
+: > "$A6/calls.log"
+echo bb-address:alpha/7 >> "$S6/cmd"; sleep 1
+check "an Address click types the address directive + url to the fleet box" \
+      "STDIN:@alpha Address the review comments on Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
+same  "...also submitted with a real Enter (text + Enter = two sends)" \
+      "$(grep -c -- 'send-text --pane-id 20 --no-paste' "$A6/calls.log")" "2"
+
+# A stale click (the id refetched away) resolves no url, so it spawns nothing -- the same
+# safe no-op Open has, never a crash.
+: > "$A6/calls.log"
+echo bb-review:alpha/999 >> "$S6/cmd"; sleep 1
+same  "a Review click on an absent PR id types nothing to the fleet box" \
+      "$(grep -c -- 'send-text --pane-id 20' "$A6/calls.log")" "0"
+check "...and says so rather than crashing"        "no cached PR alpha/999" "$A6/daemon.log"
+same  "...the daemon is still alive after the no-op" \
+      "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
 # --- paging: many PRs overflow one page; next walks to the last and clamps (DESIGN 2.5) ---
 # 20 PRs at the pane's 40x10 geometry is 3 pages. The daemon reads `pages` from the

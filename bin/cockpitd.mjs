@@ -3070,6 +3070,20 @@ function dashboardPages(tab) {
 }
 
 /**
+ * The cached PR's web URL (its links.html.href), or null when the id is not in the
+ * cache -- a stale click after a refetch. Shared by Open (DESIGN 2.7) and the
+ * Review/Address spawn (DESIGN 2.8) so the two resolve a click the same way and a
+ * missing PR is the same safe no-op for both.
+ */
+function bitbucketPrUrl(slug, id) {
+  const cache = readBBCache();
+  const entry = cache.repos && cache.repos[slug];
+  const raw = entry && Array.isArray(entry.prs) ? entry.prs.find((p) => p && p.id === id) : null;
+  const url = raw && raw.links && raw.links.html && raw.links.html.href;
+  return url || null;
+}
+
+/**
  * Open a PR's web page in the browser (DESIGN 2.7). The htmlUrl is the cached raw PR's
  * links.html.href; an id absent from the cache (a stale click after a refetch) is a
  * safe no-op, never a crash. Detached and unref'd so the browser outlives this daemon,
@@ -3077,10 +3091,7 @@ function dashboardPages(tab) {
  * to keep daemon.log pasteable (DESIGN 2.9).
  */
 function bitbucketOpen(slug, id) {
-  const cache = readBBCache();
-  const entry = cache.repos && cache.repos[slug];
-  const raw = entry && Array.isArray(entry.prs) ? entry.prs.find((p) => p && p.id === id) : null;
-  const url = raw && raw.links && raw.links.html && raw.links.html.href;
+  const url = bitbucketPrUrl(slug, id);
   if (!url) { log(`bitbucket open: no cached PR ${safeText(slug)}/${id}`); return; }
   try {
     spawn(BITBUCKET_OPENER, [url], { stdio: "ignore", detached: true }).unref();
@@ -3088,6 +3099,35 @@ function bitbucketOpen(slug, id) {
   } catch (e) {
     log(`bitbucket open failed for ${safeText(slug)}/${id}: ${e?.name ?? "Error"}`);
   }
+}
+
+/**
+ * Start a new cockpit agent already working in a repo, with a directive (DESIGN 2.8).
+ *
+ * GENERAL AND PR-AGNOSTIC ON PURPOSE. The Review/Address buttons are its first caller,
+ * but it is the reusable spawn primitive a future feature will share (DESIGN 2.8, 7): it
+ * knows nothing about BitBucket -- hand it a repo folder and a prompt.
+ *
+ * It lands the agent in the repo by leaning on a fact of the layout: the fleet view's cwd
+ * is the projects root (`start_dir` in config.lua), so `@${repo}` in the new-session box
+ * resolves to `{projectsRoot}/${repo}` -- the local clone -- exactly as the user would
+ * type by hand. A watched repo not cloned there, or cloned under a different folder name,
+ * lands the agent nowhere useful; that is a documented limit (DESIGN 2.8, 8), not guarded.
+ *
+ * THE REAL ENTER (\r) DELIBERATELY INVERTS THE CENTRAL INJECTION RULE. Everywhere else a
+ * `\r` is swapped for `\n` so a review arrives UNSENT and editable (injectReview); here the
+ * whole job is to LAUNCH, so a real Enter submits the box. T00 proved this exact gesture --
+ * `@${slug} ${prompt}` then a real Enter -- spawns a running agent (FINDINGS 2026-09-04).
+ *
+ * The prompt is NOT logged -- it carries the PR URL; only the repo slug is (DESIGN 2.9).
+ */
+function spawnAgent({ repo, prompt }) {
+  // Focus the fleet pane first: at the list it holds the new-session box, and unattached
+  // the daemon otherwise never types there. Activate, then type, as a person would.
+  wez(["activate-pane", "--pane-id", String(panes.fleet)]);
+  sendRaw(panes.fleet, `@${repo} ${prompt}`);   // `@slug` gives the repo context (cwd)
+  sendRaw(panes.fleet, "\r");                    // a REAL Enter -- submit, not draft
+  log(`spawned agent in ${safeText(repo)}`);
 }
 
 /** Dispatch one bb-* click verb from the cmd channel. */
@@ -3122,11 +3162,20 @@ function bitbucketVerb(verb) {
   // Open (DESIGN 2.7): launch the PR's web page. The verb carries slug/id.
   const open = /^bb-open:(.+)\/(\d+)$/.exec(verb);
   if (open) { bitbucketOpen(open[1], Number(open[2])); return; }
-  // Review / Address (DESIGN 2.8): recognised, but the spawn primitive is T09. No-op
-  // for now -- and NOT falling through to the terminal verbs -- so a click is inert,
-  // not an accidental terminal gesture, until T09 wires spawnAgent.
-  if (/^bb-(review|address):.+\/\d+$/.test(verb)) {
-    log(`bitbucket ${verb}: recognised; spawn is T09 (no-op)`);
+  // Review / Address (DESIGN 2.8): spawn a running agent already working on the PR, in
+  // its repo. The verb carries slug/id; the PR's web URL is resolved from the cache the
+  // same way Open resolves it, so an id absent from the cache (a stale click after a
+  // refetch) is the same safe no-op. The prompt is deliberately minimal (DESIGN 2.8): the
+  // agent's own MCP fetches the PR: the cockpit gives only the URL, repo context and verb.
+  const sp = /^bb-(review|address):(.+)\/(\d+)$/.exec(verb);
+  if (sp) {
+    const [, kind, slug, idStr] = sp;
+    const url = bitbucketPrUrl(slug, Number(idStr));
+    if (!url) { log(`bitbucket ${kind}: no cached PR ${safeText(slug)}/${idStr}`); return; }
+    const prompt = kind === "review"
+      ? `Review Bitbucket PR ${url}`
+      : `Address the review comments on Bitbucket PR ${url}`;
+    spawnAgent({ repo: slug, prompt });
     return;
   }
   log(`bitbucket: unknown verb ${verb}`);

@@ -10,15 +10,14 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T08 done ✅** 2026-09-05. Code review clean; hand-check with the user
-found and fixed two things, both now confirmed live: (1) a mouse-wheel scroll fired a stray click
-(bit 64 leaked through the left-click filter) — fixed in both mouse readers (welcome + strip), no
-stray click on scroll now; (2) switching tabs resets to page 1 (DESIGN 2.5 rule changed at the
-user's request; §14d test). Core clicks (tabs, bottom-row Open) also hand-verified. Suites green
-(agenda, notes 106, cockpit 502, bitbucket). **T09 is next.** Still open, user's call: the folded
-T02/T04/T05 reopen never took the pir-review alternation.
+**Status:** Building. **T09 implemented 🔍** 2026-09-05, awaiting review. Review/Address now
+spawn a running agent via the new `spawnAgent({repo,prompt})` primitive: activate fleet box,
+type `@{slug} {directive+url}`, send a REAL Enter (`\r`) — the deliberate inversion of the
+injectReview `\r`→`\n` rule. Suites green (cockpit 510). **Hands-on half UNVERIFIED** — a live
+click starting a real agent can't be stubbed; command handed to the user. Still open, user's
+call: the folded T02/T04/T05 reopen never took the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T09 (Review/Address auto-spawn) — deps T00 ✅ and T08 ✅ are met.
+**Next `pir-work` will:** review T09 (the lowest 🔍), and run the live spawn hand-check with the user.
 
 ## Tasks
 
@@ -36,10 +35,10 @@ done · ⛔ blocked, needs a human.
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
 | T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ✅ | Code review clean. Hand-verified live: tabs switch, bottom-row Open lands right. Two review-fixes, both confirmed live: wheel bit excluded (no stray click on scroll; welcome + strip), tab switch resets to page 1 (DESIGN 2.5 changed, §14d test). Suites green (cockpit 502). |
-| T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
+| T09 | Review/Address auto-spawn | T00, T08 | 🔍 | New `spawnAgent` primitive (PR-agnostic, reusable); `bb-review/address` resolve the PR url from cache (absent id = safe no-op, shared with Open via new `bitbucketPrUrl`), spawn with a real Enter. 10 §14d checks. **Live spawn hand-check pending** (needs user; see task doc). |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty. Next work implements T09.
+**Review queue:** T09. Next work reviews it and runs the live spawn hand-check.
 
 ## Plan decisions (2026-09-05)
 
