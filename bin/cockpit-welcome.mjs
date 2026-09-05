@@ -38,7 +38,7 @@ import fs from "node:fs";
 import { DIR, cockpitRepo, readNotes, relTime } from "./cockpit-notes.mjs";
 import { agendaHeight, clip, pad, renderAgenda, visibleLen } from "./cockpit-agenda-model.mjs";
 import { readCache, readState } from "./cockpit-agenda-store.mjs";
-import { renderDashboard } from "./cockpit-bitbucket-model.mjs";
+import { renderDashboard, verbAt } from "./cockpit-bitbucket-model.mjs";
 import {
   readCache as readBBCache,
   readConfig as readBBConfig,
@@ -46,6 +46,14 @@ import {
 } from "./cockpit-bitbucket-store.mjs";
 
 const ESC = "\x1b[";
+// The command channel the daemon tails -- the same file the strip and footer append
+// their click verbs to (see cockpit-strip.mjs). A click in the dashboard appends the
+// verb of the hit-zone it landed on, and the daemon owns every consequence (a tab
+// switch, a page change, an Open); this pane never moves a pane or opens a socket, so
+// it stays the pure-display diff slot (DESIGN 3.1, 3.4). Built from DIR by
+// concatenation rather than node:path so this pane keeps its tight import allowlist
+// (only the models, the stores and the notes -- see spikes/notes-test).
+const CMD_FILE = `${DIR}/cmd`;
 
 // visibleLen/pad/clip come from the model now, where T03 put them, rather than
 // being kept in a second copy here: both sections of the right column must
@@ -193,9 +201,11 @@ function rightColumn(width, rows, now) {
 // arguments the model may not read for itself. The model already returns EXACTLY
 // `rows` lines, each clipped to `width`, so there is no budgeting to do here.
 //
-// It also returns the click hit-zones, computed for T08 (the daemon maps a
-// click's coordinates to a zone's verb). This task does not act on them -- the
-// pane is still pure display -- so they are discarded for now; T08 wires them.
+// It also returns the click hit-zones (T08): each is { verb, x0, x1, y }, 1-indexed
+// and local to this dashboard column, which starts at pane column 1 (the dashboard is
+// always the LEFT region, so a pane column equals a dashboard column and no offset is
+// needed -- when split, the notes/agenda column to the right simply has no zones and a
+// click there matches none). render() stashes them so a click can be mapped to a verb.
 //
 // Nothing in here may throw: this is the resting screen of the whole cockpit
 // (DESIGN 2.n). The store's reads already return the empty/default shape on a
@@ -206,16 +216,21 @@ function dashboardColumn(width, rows, now) {
     const config = readBBConfig();
     const cache = readBBCache();
     const view = readBBView();
-    const { lines } = renderDashboard({ width, rows, cache, view, now, config });
-    return lines;
+    const { lines, hitZones } = renderDashboard({ width, rows, cache, view, now, config });
+    return { lines, hitZones };
   } catch {
-    return Array.from({ length: rows }, () => "");
+    return { lines: Array.from({ length: rows }, () => ""), hitZones: [] };
   }
 }
 
 // --- the frame -------------------------------------------------------------
 // Recomputed on every render so it tracks resizes -- the pane is resized to the
 // full tab and back on every agent switch, so it takes two SIGWINCHes per swap.
+
+// The dashboard's click hit-zones as last drawn (T08). render() overwrites this on
+// every paint, so a click is always mapped against exactly what is on screen -- the
+// same reason the strip rebuilds its zones each render. Empty until the first paint.
+let lastHitZones = [];
 
 function render() {
   const cols = process.stdout.columns || 80;
@@ -238,12 +253,14 @@ function render() {
   const lines = [];
   if (!split) {
     const dash = dashboardColumn(cols, rows, now);
-    for (let r = 0; r < rows; r++) lines.push(clip(dash[r] ?? "", cols));
+    lastHitZones = dash.hitZones;
+    for (let r = 0; r < rows; r++) lines.push(clip(dash.lines[r] ?? "", cols));
   } else {
     const dash = dashboardColumn(leftW, rows, now);
+    lastHitZones = dash.hitZones;
     const right = rightColumn(rightW, rows, now);
     for (let r = 0; r < rows; r++) {
-      const l = pad(clip(dash[r] ?? "", leftW), leftW);
+      const l = pad(clip(dash.lines[r] ?? "", leftW), leftW);
       lines.push(`${l} ${ESC}2m│${ESC}0m ${clip(right[r] ?? "", rightW)}`);
     }
   }
@@ -252,8 +269,55 @@ function render() {
   process.stdout.write(`${ESC}2J${ESC}H` + lines.map((l) => l + `${ESC}K`).join("\r\n"));
 }
 
+// --- clicks ----------------------------------------------------------------
+// The dashboard is the one region of this pane that reacts. A left-click is mapped to
+// the hit-zone it landed on and that zone's verb is appended to the cmd channel; the
+// daemon owns the actual consequence (DESIGN 3.4). This mirrors cockpit-strip.mjs
+// exactly -- the SGR parse, the left-press filter, the directory-not-file reasoning --
+// and, like the strip, appends a fixed verb rather than moving a pane or opening a
+// socket, so this file stays pure display and starts no process.
+
+// A left-click at pane-local (x, y): look up the verb of the zone it hit (null if
+// none) and hand it to the daemon. A click that lands on no zone -- the header, a
+// blank row, the notes/agenda column -- emits nothing.
+function onDashClick(x, y) {
+  const verb = verbAt(lastHitZones, x, y);
+  if (!verb) return;
+  try { fs.appendFileSync(CMD_FILE, `${verb}\n`); } catch { /* daemon re-reads on the next click */ }
+}
+
+// Turn on mouse reporting and forward left-button presses to onDashClick(x, y), both
+// 1-indexed and pane-local. 1000h reports press/release; 1006h is SGR extended
+// coordinates (unambiguous, not capped at column 223). Scoped to this pane's own
+// terminal -- it never reaches the Claude pane, whose mouse handling is left to claude
+// (this pane is parked, not on screen, whenever an agent is attached). WezTerm
+// delivers mouse events to the pane under the pointer once it has enabled reporting,
+// so the dashboard is clickable without being focused. When stdin is not a TTY
+// (headless, e.g. the notes-test render harness) the escape is written but no reader
+// is attached, so the pane still starts and draws -- it simply cannot be clicked.
+let mouseOn = false;
+function enableMouse() {
+  process.stdout.write(`${ESC}?1000h${ESC}?1006h`);
+  mouseOn = true;
+  if (!process.stdin.isTTY) return;
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on("data", (buf) => {
+    const s = buf.toString("latin1");
+    // SGR mouse: ESC [ < b ; x ; y  (M = press, m = release). Act on a left-button
+    // press only: low two bits 0 = left; bit 32 set = motion, which we ignore.
+    const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const b = Number(m[1]);
+      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onDashClick(Number(m[2]), Number(m[3]));
+    }
+  });
+}
+
 process.stdout.write(`${ESC}?25l`);                // hide the cursor
 render();
+enableMouse();
 process.stdout.on("resize", render);
 setInterval(render, 2000);                          // repaint if a resize is missed
 // Watch the state DIRECTORY, not the files: `note` and the agenda's store both
@@ -277,6 +341,10 @@ try {
   });
 } catch { /* the 2s repaint covers it */ }
 
-const bye = () => { process.stdout.write(`${ESC}?25h`); process.exit(0); };
+const bye = () => {
+  if (mouseOn) process.stdout.write(`${ESC}?1000l${ESC}?1006l`);   // stop mouse reporting
+  process.stdout.write(`${ESC}?25h`);
+  process.exit(0);
+};
 process.on("SIGINT", bye);
 process.on("SIGTERM", bye);

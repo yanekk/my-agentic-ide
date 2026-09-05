@@ -17,7 +17,7 @@
 //
 // Started for you by bin/cockpit-layout.sh.
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -33,12 +33,14 @@ import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google
 // BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
 // aliased because the agenda store already owns those names.
 import { getUser, listOpenPRs, listPRComments } from "./cockpit-bitbucket-client.mjs";
-import { normalizePR, concernsMe } from "./cockpit-bitbucket-model.mjs";
+import { normalizePR, concernsMe, renderDashboard } from "./cockpit-bitbucket-model.mjs";
 import {
   isConfigured,
   readCache as readBBCache,
   readConfig as readBBConfig,
   writeCache as writeBBCache,
+  readView as readBBView,
+  writeView as writeBBView,
 } from "./cockpit-bitbucket-store.mjs";
 
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
@@ -2872,6 +2874,10 @@ async function refreshAgenda(reason) {
 // the daemon passes it explicitly, matching how AGENDA_ORIGIN is threaded through.
 const PR_TICK_MS = Number(process.env.COCKPIT_BITBUCKET_TICK_MS) || 60_000;
 const BITBUCKET_ORIGIN = process.env.BITBUCKET_ORIGIN || "";
+// The Open button's browser opener (DESIGN 2.7, 5.2). A test points this at a fake
+// recorder so no real browser launches; unset, it is macOS's `open`, exactly as the
+// agenda opens its OAuth page.
+const BITBUCKET_OPENER = process.env.BITBUCKET_BROWSER || "/usr/bin/open";
 
 // One pass in flight at a time (DESIGN 2.9), guarded exactly as agendaFetching and
 // reconcile are: overlapping passes interleave cache writes and burn calls.
@@ -3004,6 +3010,122 @@ async function refreshPRs(reason) {
   } finally {
     prFetching = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The dashboard's click verbs (bitbucket-dashboard T08, DESIGN 2.5/2.7/2.8/3.4)
+//
+// A click in the welcome pane's dashboard is turned into a fixed verb by
+// cockpit-welcome.mjs and appended to the cmd channel; the daemon owns every
+// consequence, exactly as it does for the strip's click verbs. A verb carries the
+// repo slug and PR id (bb-open:{slug}/{id}) so the daemon finds the PR in the cache
+// without the pane and the daemon having to agree on row order (DESIGN 3.4).
+// ---------------------------------------------------------------------------
+
+/**
+ * The live size of the welcome pane -- the REPO_KEY diff slot, which is the resting
+ * screen at the fleet list and the only place the dashboard is on screen and
+ * clickable. Read from wezterm because the daemon does not otherwise track pane
+ * geometry. Returns null when it cannot be read; the one caller treats that as a
+ * single page, so a page click then cannot write a page past the end.
+ */
+function welcomePaneSize() {
+  const id = diffs.get(REPO_KEY);
+  if (id === undefined) return null;
+  const out = wez(["list", "--format", "json"]);
+  if (!out) return null;
+  let table;
+  try { table = JSON.parse(out); } catch { return null; }
+  const me = table.find((p) => p.pane_id === id);
+  if (!me || !me.size) return null;
+  const cols = Number(me.size.cols) || 0;
+  const rows = Number(me.size.rows) || 0;
+  return cols > 0 && rows > 0 ? { cols, rows } : null;
+}
+
+/**
+ * How many pages the given tab currently has, read from the pure model at the live
+ * pane geometry (DESIGN 2.5). Pagination is decided in ONE place -- the model -- and
+ * reused here so the daemon's paging clamp and the pane's pager can never disagree
+ * about how many pages there are. The 75/25 split mirrors cockpit-welcome.mjs (DESIGN
+ * 2.1): below the notes-column floor the dashboard takes the whole pane, else the left
+ * ~75%. An unreadable pane, or any throw, is one page -- a safe no-op for the click.
+ */
+function dashboardPages(tab) {
+  const size = welcomePaneSize();
+  if (!size) return 1;
+  const leftW = Math.floor((size.cols - 3) * 0.75);
+  const rightW = size.cols - leftW - 3;
+  const width = rightW >= 24 ? leftW : size.cols;
+  try {
+    const { pages } = renderDashboard({
+      width, rows: size.rows,
+      cache: readBBCache(), view: { ...readBBView(), tab },
+      now: Date.now(), config: readBBConfig(),
+    });
+    return Number.isInteger(pages) && pages >= 1 ? pages : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Open a PR's web page in the browser (DESIGN 2.7). The htmlUrl is the cached raw PR's
+ * links.html.href; an id absent from the cache (a stale click after a refetch) is a
+ * safe no-op, never a crash. Detached and unref'd so the browser outlives this daemon,
+ * exactly as the agenda opens its OAuth page. The URL is not logged -- only slug/id --
+ * to keep daemon.log pasteable (DESIGN 2.9).
+ */
+function bitbucketOpen(slug, id) {
+  const cache = readBBCache();
+  const entry = cache.repos && cache.repos[slug];
+  const raw = entry && Array.isArray(entry.prs) ? entry.prs.find((p) => p && p.id === id) : null;
+  const url = raw && raw.links && raw.links.html && raw.links.html.href;
+  if (!url) { log(`bitbucket open: no cached PR ${safeText(slug)}/${id}`); return; }
+  try {
+    spawn(BITBUCKET_OPENER, [url], { stdio: "ignore", detached: true }).unref();
+    log(`bitbucket open: ${safeText(slug)}/${id}`);
+  } catch (e) {
+    log(`bitbucket open failed for ${safeText(slug)}/${id}: ${e?.name ?? "Error"}`);
+  }
+}
+
+/** Dispatch one bb-* click verb from the cmd channel. */
+function bitbucketVerb(verb) {
+  // Tabs (DESIGN 2.8): switch the active tab. The pane watches bitbucket-view.json and
+  // redraws, so writing the view IS the whole action.
+  if (verb === "bb-tab:toReview" || verb === "bb-tab:mine") {
+    const tab = verb === "bb-tab:mine" ? "mine" : "toReview";
+    writeBBView({ ...readBBView(), tab });
+    return;
+  }
+  // Paging (DESIGN 2.5): move the ACTIVE tab's page by one, clamped to [1, pages]. The
+  // pager always draws both a prev and a next zone (dim when unavailable), so a click
+  // on a dim arrow must be a no-op, not a jump: pages is read from the model for the
+  // live geometry, so the daemon never writes a page past the end. (The model's own
+  // shrink->page-1 reset in paginate is a separate case, T03.)
+  if (verb === "bb-page:prev" || verb === "bb-page:next") {
+    const view = readBBView();
+    const tab = view.tab;
+    const pages = dashboardPages(tab);
+    const cur = view.page[tab] || 1;
+    const next = verb === "bb-page:next" ? cur + 1 : cur - 1;
+    const clamped = Math.min(pages, Math.max(1, next));
+    if (clamped === cur) return;                 // a dim arrow / already at the end
+    writeBBView({ ...view, page: { ...view.page, [tab]: clamped } });
+    return;
+  }
+  // Open (DESIGN 2.7): launch the PR's web page. The verb carries slug/id.
+  const open = /^bb-open:(.+)\/(\d+)$/.exec(verb);
+  if (open) { bitbucketOpen(open[1], Number(open[2])); return; }
+  // Review / Address (DESIGN 2.8): recognised, but the spawn primitive is T09. No-op
+  // for now -- and NOT falling through to the terminal verbs -- so a click is inert,
+  // not an accidental terminal gesture, until T09 wires spawnAgent.
+  if (/^bb-(review|address):.+\/\d+$/.test(verb)) {
+    log(`bitbucket ${verb}: recognised; spawn is T09 (no-op)`);
+    return;
+  }
+  log(`bitbucket: unknown verb ${verb}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -3145,6 +3267,10 @@ tail(CMD_FILE, (line) => {
   // Clicking a terminal's label area in the strip appends this; like close-<n> it
   // names the terminal outright, so it can jump straight to any one, not just cycle.
   if (/^select-\d+$/.test(verb)) { terminalCommand(verb); return; }
+  // Clicking in the welcome pane's dashboard appends one of these (bitbucket-dashboard
+  // T08, see cockpit-welcome.mjs). The daemon owns the tab switch, the page change and
+  // the Open; Review/Address are recognised but inert until T09.
+  if (verb.startsWith("bb-")) { bitbucketVerb(verb); return; }
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused
   // and terminals otherwise. ⌥t/⌥w (new/close) are always terminals.

@@ -471,5 +471,36 @@ same "...and the pane did not move the corrupt cache aside" \
   "$(cat "$BB/bitbucket-cache.json")" "{ this is not json"
 
 echo
+echo "== 13. the dashboard captures clicks without losing its pure-display role (T08) =="
+# The pane now enables mouse reporting and turns a click into a cmd verb (the daemon
+# owns the consequence -- spikes/cockpit-test 14d). Two things must still hold under
+# the headless render harness, which drives the pane with no TTY -- exactly the case
+# where mouse reporting cannot be enabled: it still paints, and a paint on its own
+# fabricates no click. A real click needs mouse coordinates only the live mux has, so
+# that half is a hand-check (DESIGN 5.1, T08 "Needs a person").
+C="$T/clicks"; mkdir -p "$C"
+printf 'tok'   > "$C/bitbucket-key"
+printf 'ws'    > "$C/bitbucket-workspace"
+printf 'alpha' > "$C/bitbucket-repos"
+cat > "$C/bitbucket-cache.json" <<'CACHE'
+{"version":1,"meUuid":"me","repos":{"alpha":{"fetchedAt":1000,"error":null,"prs":[
+ {"id":7,"title":"add the widget flow","author":{"uuid":"alice-uuid","nickname":"alice"},
+  "updated_on":"2026-09-01T10:00:00Z","participants":[],"reviewers":[],"draft":false,
+  "comment_count":2,"links":{"html":{"href":"https://bitbucket.org/ws/alpha/pr/7"}},
+  "source":{"branch":{"name":"feat"}},
+  "destination":{"branch":{"name":"main"},"repository":{"name":"alpha"}},"comments":[]}
+]}}}
+CACHE
+printf 'alice' > "$C/bitbucket-team"
+COCKPIT_DIR="$C" render 140 24 > "$T/frame"
+same "the pane still paints headless (mouse reporting off)" \
+  "$(wc -l < "$T/frame" | tr -d ' ')" "24"
+check "...drawing the dashboard's tab strip"     "To review" "$T/frame"
+# A paint is not a click: with no stdin the pane must append no verb to the channel
+# the daemon tails, or every repaint would fire a phantom tab/page/Open.
+same "a headless paint fabricates no click verb" \
+  "$([ -e "$C/cmd" ] && echo yes || echo no)" "no"
+
+echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; fi
 exit "$fail"

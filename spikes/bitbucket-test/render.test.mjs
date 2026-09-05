@@ -4,7 +4,7 @@
 // person can confirm in a live WezTerm pane; run.sh separately greps the module for
 // anything impure and asserts the coordinate/width contracts hold at several widths.
 
-import { renderDashboard } from "../../bin/cockpit-bitbucket-model.mjs";
+import { renderDashboard, verbAt } from "../../bin/cockpit-bitbucket-model.mjs";
 import { visibleLen } from "../../bin/cockpit-agenda-model.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
@@ -337,6 +337,55 @@ function main() {
     });
     ok("watched repo's PR shows", !!rowWith(out.lines, "#1"));
     ok("de-watched repo's PR is absent", !rowWith(out.lines, "#999"));
+  }
+
+  section("renderDashboard reports the active tab's page count for the daemon's clamp (T08)");
+  {
+    // One page when the list fits, so a next/prev click is a no-op the daemon can
+    // detect; more than one when it overflows -- the same number the pager draws.
+    const one = renderDashboard({ width: 90, rows: 10, cache: cacheOf([
+      raw({ id: 1, reviewers: [{ uuid: ME }], authorUuid: "{o}" }),
+    ]), view: view(), now: NOW, config: cfg() });
+    eq("a tab that fits one page reports pages=1", one.pages, 1);
+
+    const prs = [];
+    for (let i = 1; i <= 8; i++) prs.push(raw({ id: i, reviewers: [{ uuid: ME }], authorUuid: "{o}" }));
+    const many = renderDashboard({ width: 90, rows: 7, cache: cacheOf(prs), view: view(), now: NOW, config: cfg() });
+    ok("an overflowing tab reports pages>1", many.pages > 1);
+    ok("...matching the pager it drew", rowWith(many.lines, `1/${many.pages}`) !== undefined);
+
+    // The count is for the ACTIVE tab: with an empty Mine tab it is 1, whatever the
+    // To-review tab holds -- the daemon renders the tab it is paging.
+    const mine = renderDashboard({ width: 90, rows: 7, cache: cacheOf(prs), view: view({ tab: "mine" }), now: NOW, config: cfg() });
+    eq("the empty active tab reports pages=1", mine.pages, 1);
+
+    // The unconfigured and empty frames are one page (no table to page).
+    const off = renderDashboard({ width: 90, rows: 8, cache: cacheOf([]), view: view(), now: NOW, config: cfg({ key: null }) });
+    eq("unconfigured -> pages=1", off.pages, 1);
+  }
+
+  section("verbAt maps a pane-local click to the hit-zone's verb, or null outside (T08)");
+  {
+    const prs = [
+      raw({ id: 10, reviewers: [{ uuid: ME }], authorUuid: "{o}", authorNick: "otto" }),
+      raw({ id: 11, reviewers: [{ uuid: ME }], authorUuid: "{p}", authorNick: "pia" }),
+    ];
+    const out = renderDashboard({ width: 100, rows: 10, cache: cacheOf(prs), view: view(), now: NOW, config: cfg() });
+
+    // A click anywhere inside a zone returns that zone's verb; the pane appends it.
+    const tr = zoneFor(out.hitZones, "bb-tab:toReview");
+    eq("click on the To-review tab -> its verb", verbAt(out.hitZones, tr.x0, tr.y), "bb-tab:toReview");
+    eq("...anywhere along the label works too", verbAt(out.hitZones, tr.x1, tr.y), "bb-tab:toReview");
+    const open = zoneFor(out.hitZones, "bb-open:web/10");
+    eq("click on an Open button -> its verb", verbAt(out.hitZones, open.x0, open.y), "bb-open:web/10");
+
+    // A click that hits no zone emits nothing: one column left of a zone, and the
+    // right row but a column past its end, and the right column but a different row.
+    eq("one column left of a zone -> null", verbAt(out.hitZones, tr.x0 - 1, tr.y), null);
+    eq("one column past a zone -> null", verbAt(out.hitZones, open.x1 + 1, open.y), null);
+    eq("the right columns but the wrong row -> null", verbAt(out.hitZones, tr.x0, tr.y + 1), null);
+    eq("no zones at all -> null", verbAt([], 1, 1), null);
+    eq("a non-array is tolerated -> null", verbAt(undefined, 1, 1), null);
   }
 
   done();

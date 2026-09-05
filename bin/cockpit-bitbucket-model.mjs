@@ -506,6 +506,12 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
 
   const lines = [];
   const hitZones = [];
+  // The active tab's page count, for the daemon's paging clamp (T08). It is decided
+  // HERE, where perPage is (below), so the pane's pager and the daemon's clamp read
+  // the same number and cannot disagree about how many pages there are. Default 1: no
+  // table, an empty tab, or a single page is one page, so a next/prev click there is a
+  // no-op rather than a jump past the end.
+  let pageCount = 1;
   const push = (line) => lines.push(clip(line, w));
   // Stamp the x-only zones a builder returned with the line's final y, now known.
   const zonesAt = (zs) => { const y = lines.length; for (const z of zs) hitZones.push({ ...z, y }); };
@@ -516,10 +522,11 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
       // Drop zones off the visible area: a button clipped away is not "in the
       // output", so it needs no zone (and a click there would hit nothing).
       hitZones: hitZones.filter((z) => z.y <= n && z.x0 >= 1 && z.x1 <= w && z.x1 >= z.x0),
+      pages: pageCount,
     };
   };
 
-  if (n === 0) return { lines: [], hitZones: [] };
+  if (n === 0) return { lines: [], hitZones: [], pages: 1 };
 
   // 1. Unconfigured -> the setup greeting, no table.
   if (!configured(config)) {
@@ -578,6 +585,7 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
       paged = paginate(list, { page, perPage });
     }
     const pager = paged.pages > 1;
+    pageCount = paged.pages;   // what the daemon clamps a page click against (T08)
 
     const L = computeLayout(w, tab, paged.rows);
     push(buildHeader(L));
@@ -595,4 +603,19 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
 
   for (const t of trailer) push(t);
   return finish();
+}
+
+/**
+ * The verb a click at pane-local (x, y) lands on, or null if it hit no zone (T08,
+ * DESIGN 3.4). Both coordinates are 1-indexed, matching a zone's { x0, x1, y } and
+ * WezTerm's SGR mouse report. Kept here beside renderDashboard so the pane that
+ * captures the click and the test that checks the mapping read the SAME lookup --
+ * the pane stays a thin "parse the click, look up the verb, append it" and every
+ * hit/miss is a millisecond test rather than something only a live mouse can prove.
+ */
+export function verbAt(hitZones, x, y) {
+  const z = (Array.isArray(hitZones) ? hitZones : []).find(
+    (z) => z.y === y && x >= z.x0 && x <= z.x1,
+  );
+  return z ? z.verb : null;
 }

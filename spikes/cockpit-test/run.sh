@@ -2319,7 +2319,7 @@ echo "== 14. the bitbucket dashboard: the daemon keeps the PR cache current =="
 # BitBucket has NO staleness window (unlike the agenda): a pass fetches every watched
 # repo, so a clean "nothing is fetching" edge for the guard test is made by
 # UNCONFIGURING, not by ageing a cache entry.
-D4PID=""; D5PID=""; BBPID=""
+D4PID=""; D5PID=""; D6PID=""; BBPID=""
 
 # A daemon launched as `envfn node ... > log &` has $! bound to the wrapping
 # SUBSHELL, not to node (the redirection stops bash execing node in place), so a
@@ -2367,6 +2367,15 @@ const NOTMINE = {
 };
 const PRS = { values: [MINE] };
 const PRS2 = { values: [MINE, NOTMINE] };
+// A batch of PRs that all concern me (I review each), for the paging clamp (T08,
+// section 14d): enough open PRs that the dashboard overflows one page in the test
+// pane's 40x10 geometry, so `bb-page:next` can be walked to the last page and clamped.
+const MANY = { values: Array.from({ length: 20 }, (_, i) => ({
+  id: 200 + i, title: "PAGED-PR", state: "OPEN", comment_count: 0,
+  updated_on: "2026-09-01T10:00:00+00:00", author: { uuid: "{other}" },
+  participants: [], reviewers: [{ uuid: "ME-UUID" }],
+  links: { html: { href: `https://bitbucket.org/ws/pr/${200 + i}` } },
+})) };
 // One PR's comments: a single unresolved inline thread the sort would count
 // (DESIGN 2.3). The daemon fetches this per open PR (decision A, DESIGN 2.9) and
 // attaches it to the raw PR as `.comments`.
@@ -2395,13 +2404,14 @@ const server = http.createServer((req, res) => {
   if (m === "one-bad" && repo === "bad") return json(res, 500, { type: "error" });  // -> transient
   if (m === "slow") return setTimeout(() => json(res, 200, PRS), 2000);
   if (m === "two-prs") return json(res, 200, PRS2);
+  if (m === "many") return json(res, 200, MANY);
   json(res, 200, PRS);
 });
 server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
 BBSTUB
 node "$T/bbstub.mjs" "$BBMODE" "$BBHITS" > "$T/bbstub.out" 2>&1 &
 BBPID=$!
-trap 'kill $DPID $D2PID $D3PID $GPID $D4PID $D5PID $BBPID 2>/dev/null; rm -rf "$T"' EXIT
+trap 'kill $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID 2>/dev/null; rm -rf "$T"' EXIT
 for _ in $(seq 1 60); do grep -q '^PORT ' "$T/bbstub.out" 2>/dev/null && break; sleep 0.1; done
 BBPORT="$(sed -n 's/^PORT //p' "$T/bbstub.out" | head -1)"
 BBORIGIN="http://127.0.0.1:$BBPORT"
@@ -2553,6 +2563,99 @@ refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
 refute "no credential ever reaches the log" "me@x:tok"        "$A4/daemon.log"
 
 stopbb $D4PID; D4PID=""; sleep 0.5   # node child too, or it out-ticks D5 below
+
+echo
+echo "== 14d. the dashboard reacts to clicks (tabs, paging, Open) =="
+# bitbucket-dashboard T08. A click in the welcome pane becomes a fixed verb on the cmd
+# channel (cockpit-welcome maps the click to a hit-zone; only the verb reaches here,
+# so the mouse coordinates themselves stay a hand-check, DESIGN 5.1). The DAEMON owns
+# every consequence: a tab switch and a page change rewrite bitbucket-view.json; Open
+# spawns the browser via the BITBUCKET_BROWSER seam (DESIGN 2.7, 5.2). Review/Address
+# are recognised but inert until T09. Reuses the still-running BB stub above.
+echo ok > "$BBMODE"; : > "$BBHITS"
+A6="$T/bb6"; S6="$A6/state"
+mkdir -p "$A6" "$S6"
+echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$S6/panes.json"
+: > "$S6/fleet.log"; : > "$S6/cmd"
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$A6/panestate"
+echo 31 > "$A6/nextpane"; echo 1 > "$A6/nexttab"
+echo list > "$A6/fleetstate"
+for f in editing titlelag active panecwd psbusy calls.log; do : > "$A6/$f"; done
+bbconf "$S6" "alpha"
+
+# The Open button's opener, pointed at a recorder so no real browser launches. It
+# records the URL it was handed, which is what the daemon must pull from the cache.
+OPENLOG="$A6/opened.log"; : > "$OPENLOG"
+cat > "$A6/opener.sh" <<OPENER
+#!/bin/sh
+printf '%s\n' "\$1" >> "$OPENLOG"
+OPENER
+chmod +x "$A6/opener.sh"
+
+# Read one value out of bitbucket-view.json; `v` is the parsed view.
+vq() {  # vq <state-dir> <expression over v>
+  node -e 'const fs=require("fs");let v={};try{v=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-view.json","utf8"));}catch{}let r;try{r=eval(process.argv[2]);}catch(e){r="<error>";}process.stdout.write(String(r===undefined?"undefined":r));' "$1" "$2"
+}
+
+d6env() {
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  COCKPIT_DIR="$S6" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  CALLS="$A6/calls.log" FLEETSTATE="$A6/fleetstate" PANESTATE="$A6/panestate" \
+  NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
+  TITLELAG="$A6/titlelag" ACTIVE="$A6/active" PANECWD="$A6/panecwd" \
+  PSBUSY="$A6/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_BROWSER="$A6/opener.sh" \
+  "$@"
+}
+d6env node "$ROOT/bin/cockpitd.mjs" > "$A6/daemon.log" 2>&1 &
+D6PID=$!
+sleep 2
+# The one PR (id 7) concerns me as a reviewer, so it is on the To-review tab.
+same "the dashboard's PR is cached before any click" "$(bq "$S6" 'c.repos.alpha.prs.length')" "1"
+
+# --- tabs: a bb-tab verb rewrites the active tab in the view file (DESIGN 2.8) ---
+echo bb-tab:mine >> "$S6/cmd"; sleep 1
+same "clicking the Mine tab rewrites the view's active tab" "$(vq "$S6" 'v.tab')" "mine"
+echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+same "clicking To-review switches the active tab back"      "$(vq "$S6" 'v.tab')" "toReview"
+
+# --- Open: the daemon hands the cached PR's htmlUrl to the fake opener (DESIGN 2.7) ---
+echo bb-open:alpha/7 >> "$S6/cmd"; sleep 1
+check "clicking Open launches the browser at the PR's htmlUrl" "https://bitbucket.org/ws/pr/7" "$OPENLOG"
+# An id not in the cache (a stale click after a refetch) is a safe no-op, not a crash.
+CNT_BEFORE="$(wc -l < "$OPENLOG" | tr -d ' ')"
+echo bb-open:alpha/999 >> "$S6/cmd"; sleep 1
+same "Open on an absent PR id launches nothing"               "$(wc -l < "$OPENLOG" | tr -d ' ')" "$CNT_BEFORE"
+check "...and says so rather than crashing"                   "no cached PR alpha/999" "$A6/daemon.log"
+same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
+
+# --- Review/Address are recognised but inert until T09 (DESIGN 2.8) ---
+echo bb-review:alpha/7 >> "$S6/cmd"; sleep 1
+check "a Review click is recognised but a no-op"   "bb-review:alpha/7: recognised" "$A6/daemon.log"
+same  "...and spawned no agent (no @repo typed to the fleet box)" \
+      "$(grep -c 'send-text --pane-id 20' "$A6/calls.log")" "0"
+
+# --- paging: many PRs overflow one page; next walks to the last and clamps (DESIGN 2.5) ---
+# 20 PRs at the pane's 40x10 geometry is 3 pages. The daemon reads `pages` from the
+# model at the live geometry and clamps a click to [1, pages], so a next past the end
+# never writes an out-of-range page (the model's own shrink->page-1 reset is separate).
+echo many > "$BBMODE"; sleep 2
+same "the overflowing tab is cached (20 PRs)" "$(bq "$S6" 'c.repos.alpha.prs.length')" "20"
+echo bb-page:next >> "$S6/cmd"; sleep 1
+same "bb-page:next advances to page 2"        "$(vq "$S6" 'v.page.toReview')" "2"
+echo bb-page:next >> "$S6/cmd"; sleep 1
+same "bb-page:next advances to page 3"        "$(vq "$S6" 'v.page.toReview')" "3"
+echo bb-page:next >> "$S6/cmd"; sleep 1
+same "bb-page:next past the last page is clamped (stays 3)" "$(vq "$S6" 'v.page.toReview')" "3"
+echo bb-page:prev >> "$S6/cmd"; sleep 1
+same "bb-page:prev steps back to page 2"      "$(vq "$S6" 'v.page.toReview')" "2"
+
+# daemon.log gets pasted into conversations (DESIGN 2.9): a click path logs no title.
+refute "no PR title reaches the log via a click" "PAGED-PR" "$A6/daemon.log"
+
+echo ok > "$BBMODE"
+stopbb $D6PID; D6PID=""; sleep 0.5
 
 echo
 echo "== 14b. the bitbucket dashboard: start fills the cache, return refreshes it =="

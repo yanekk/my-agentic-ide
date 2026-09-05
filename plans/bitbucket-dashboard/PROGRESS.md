@@ -10,14 +10,13 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T07 done (✅)** 2026-09-05: welcome pane on the 75/25 split — dashboard
-left via `renderDashboard`, notes/agenda right; full-width dashboard below the split floor.
-Reviewed clean (no code fix) and hand-verified live with the user against real cribl (9 "To
-review", 9 "Mine"; aligned, titles readable). All four suites green (notes 103, cockpit 486 —
-park/swap unchanged). Still open, user's call: the folded T02/T04/T05 reopen never took the
-pir-review alternation — whether to give it a fresh-eyes pass.
+**Status:** Building. **T08 implemented (🔍)** 2026-09-05: clicks. Welcome pane enables SGR
+mouse, maps a click to a hit-zone verb, appends it to `cmd`; daemon dispatches bb-tab/bb-page/
+bb-open, recognises bb-review/address as inert (T09). All four suites green (render 136, notes
+106, cockpit 501). Live click hand-check (right row, after paging) awaits the user. Still open,
+user's call: the folded T02/T04/T05 reopen never took the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T08 (clicks: mouse, verbs, dispatch).
+**Next `pir-work` will:** review T08.
 
 ## Tasks
 
@@ -34,11 +33,11 @@ done · ⛔ blocked, needs a human.
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. All 3 triggers wired; orphan cache entries never pruned → T06 iterates config.repos. |
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
-| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⬜ | Open uses BITBUCKET_BROWSER seam. |
+| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | 🔍 | Pane→verb via pure `verbAt`; daemon does bb-tab/page/open, bb-review/address inert (T09). Deviation: also touched the model — `verbAt` + `pages` on renderDashboard, so daemon clamps paging via `wezterm cli list` geometry (task listed only welcome+daemon). Tests: render 136, notes 106, cockpit 501. Live click hand-check pending. |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty — T08 is next to implement.
+**Review queue:** T08 — review it next.
 
 ## Plan decisions (2026-09-05)
 
