@@ -10,15 +10,14 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T09 code review clean** 2026-09-05 — spawnAgent + bb-review/address
-read adversarially against DESIGN §2.8; two stale "inert until T09" comments fixed
-(cockpitd.mjs, run.sh §14d). §14d tests genuine (the `\r`-vs-`\n` submit really distinguished:
-CR count + a `STDIN:\n` refute). Full test command green (cockpit 510). **Hands-on half
-UNVERIFIED and blocking ✅** — a live click starting a real agent can't be stubbed; T09 stays
-🔍 until the user runs it. Still open, user's call: the folded T02/T04/T05 reopen never took
-the pir-review alternation.
+**Status:** Building. **T09 done ✅** 2026-09-05. Code review clean (spawnAgent + bb-review/address
+read against DESIGN §2.8; §14d tests genuine — the `\r`-vs-`\n` submit really distinguished); two
+stale "inert until T09" comments fixed. Live spawn hand-verified with the user: Review and Address
+each start a real agent. Full test command green (cockpit 510). **T10 (install.sh, docs, CLAUDE.md)
+is next and last.** Still open, user's call: the folded T02/T04/T05 reopen never took the
+pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** close T09 to ✅ once the user reports the live spawn hand-check.
+**Next `pir-work` will:** implement T10 — deps T09 ✅ met. New settings, new suite in the test command, docs.
 
 ## Tasks
 
@@ -36,10 +35,10 @@ done · ⛔ blocked, needs a human.
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
 | T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ✅ | Reviewed clean; two fixes (wheel-click excluded, tab switch resets to page 1) both hand-verified live 2026-09-05. See FINDINGS. |
-| T09 | Review/Address auto-spawn | T00, T08 | 🔍 | Code review clean 2026-09-05; 2 stale-comment fixes (see commit). spawnAgent activates fleet then types (welcome pane ≠ fleet, so the activate is needed and correct); absent id = safe no-op shared with Open; prompt not logged. Probed the queued-verb-then-attach race — narrow, and DESIGN §2.8 accepts stray launches. **Live spawn hand-check still blocks ✅** (needs user). |
+| T09 | Review/Address auto-spawn | T00, T08 | ✅ | Reviewed clean 2026-09-05; 2 stale-comment fixes. spawnAgent activates fleet then types (welcome pane ≠ fleet, so activate is needed); absent id = safe no-op shared with Open; prompt not logged; §14d tests genuine. Live spawn hand-verified with the user: Review and Address each start a real agent (FINDINGS). |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty (T09 code review done). T09 → ✅ once the user reports the live spawn hand-check.
+**Review queue:** empty. Next work implements T10 (the last task).
 
 ## Plan decisions (2026-09-05)
 
@@ -72,12 +71,9 @@ done · ⛔ blocked, needs a human.
   `listOpenPRs` 739, `listPRComments` #47424 → 11. Auth, listing and the comment fetch all work
   live. Nothing outstanding here.
 
-- **T09 live spawn hand-check — OPEN, blocks ✅.** In a live cockpit at the fleet list, on the
-  To-review tab, click **Review** on a real PR (and, on the Mine tab, **Address** on one of yours).
-  Expect: a new agent starts (not just text filling the box), is named after that repo, and is
-  working in that repo on that PR — its shell/edits in the clone, the PR URL and directive intact.
-  Tell me: did it spawn and start? Right repo? Directive + URL arrived whole? (Only a live click
-  can do this — the stub can't model claude creating a session, DESIGN 5.1.)
+- **T09 live spawn hand-check — DONE 2026-09-05** (FINDINGS ✅). Clicking Review and clicking
+  Address each start a real agent. Nothing outstanding on T09.
 
-- Earlier hand-verifications done: T00 spawn 2026-09-04, T02 auth 2026-09-04, T03 field shapes
-  2026-09-05, T07 look 2026-09-05, Bearer reopen 2026-09-05 (all in FINDINGS).
+- Hand-verifications done: T00 spawn 2026-09-04, T02 auth 2026-09-04, T03 field shapes 2026-09-05,
+  T07 look 2026-09-05, Bearer reopen 2026-09-05, T08 clicks 2026-09-05, T09 spawn 2026-09-05
+  (all in FINDINGS). No hands-on check is now outstanding before T10.
