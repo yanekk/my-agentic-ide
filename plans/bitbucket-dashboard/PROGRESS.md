@@ -10,13 +10,15 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T08 implemented (🔍)** 2026-09-05: clicks. Welcome pane enables SGR
-mouse, maps a click to a hit-zone verb, appends it to `cmd`; daemon dispatches bb-tab/bb-page/
-bb-open, recognises bb-review/address as inert (T09). All four suites green (render 136, notes
-106, cockpit 501). Live click hand-check (right row, after paging) awaits the user. Still open,
-user's call: the folded T02/T04/T05 reopen never took the pir-review alternation.
+**Status:** Building. **T08 code-reviewed clean (no fix)** 2026-09-05: tests genuine and cover
+the doc; purity + testability boundary held; deviations (verbAt, model `pages`) sound. All four
+suites green (agenda, notes 106, cockpit 501, bitbucket). **T08 is ⛔, not ✅** — its "Done when"
+requires a live click hand-check only the user can run, and T09 builds on clicks, so the queue
+must hold until that is seen. Still open, user's call: the folded T02/T04/T05 reopen never took
+the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** review T08.
+**Next `pir-work` will:** nothing until the user runs the T08 live hand-check (see Blocked). Then
+T08 → ✅ and T09 implements.
 
 ## Tasks
 
@@ -33,11 +35,12 @@ done · ⛔ blocked, needs a human.
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. All 3 triggers wired; orphan cache entries never pruned → T06 iterates config.repos. |
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
-| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | 🔍 | Pane→verb via pure `verbAt`; daemon does bb-tab/page/open, bb-review/address inert (T09). Deviation: also touched the model — `verbAt` + `pages` on renderDashboard, so daemon clamps paging via `wezterm cli list` geometry (task listed only welcome+daemon). Tests: render 136, notes 106, cockpit 501. Live click hand-check pending. |
+| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⛔ | Code review clean, no fix. Tests genuine: verbAt hit/miss, `pages` per state, §14d walks bb-tab/open/absent-id/inert and next→3→clamp via the daemon's real geometry read. Purity + boundary held; deviations (verbAt, model `pages`) sound. ⛔ on the live click hand-check — T09 must not build on unconfirmed clicks. Wheel-bit filter edge logged (FINDINGS, shared with the strip). |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** T08 — review it next.
+**Review queue:** empty. T08's code is reviewed clean; it is ⛔ awaiting the user's live click
+hand-check, not a re-review.
 
 ## Plan decisions (2026-09-05)
 
@@ -57,6 +60,16 @@ done · ⛔ blocked, needs a human.
   through. Automated tests are green; the live hand-check below is what remains.
 
 ## Blocked on the user
+
+- **T08 live click hand-check — OUTSTANDING.** The code review is clean; this is the only thing
+  between T08 and ✅, and T09 must not be built until it is seen. In a live cockpit at the fleet
+  list with PRs shown: click the two tabs, the pager arrows, and an Open button. Expect: tabs
+  switch, the page changes, Open opens the PR in the browser. Confirm each click hits what you
+  aimed at, including the bottom-most row and after paging. Also probe: does **scrolling the mouse
+  wheel** over the dashboard (a tab / Open / pager) fire a phantom click? (Wheel events set bit 64;
+  the filter does not exclude them — FINDINGS 2026-09-05. If it fires, that is a real fix for both
+  cockpit-welcome.mjs and cockpit-strip.mjs.) `BITBUCKET_BROWSER` is unset live, so Open uses
+  `/usr/bin/open` — the seatbelt is that it only ever opens a PR page, nothing destructive.
 
 - **Reopen hand-check — DONE 2026-09-05** (FINDINGS ✅). Against the real cribl Bearer access
   token: `getUser` returned a uuid (identity resolves — the DESIGN §2.6 risk is closed),
