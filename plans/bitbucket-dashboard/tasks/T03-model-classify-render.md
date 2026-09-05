@@ -2,19 +2,19 @@
 
 **Phase:** 1 · **Depends on:** T02 · **Weight:** medium
 
-> **Do not start until the classify brainstorm has happened.** DESIGN §2.3 records only
-> *provisional* rules for which PRs each tab shows. The user has ideas to test against real
-> data (drafts, already-approved, staleness). The session that reaches this task stops, raises
-> the brainstorm with the user (using T02's client on real PRs), settles the rules, and only
-> then implements `classify`. See PROGRESS "Blocked on the user".
+> **Rules settled in the brainstorm (2026-09-05).** DESIGN §2.3 now records the agreed classify
+> rules — build to those. Two things still need real PRs, which the user provides next round,
+> before the comment-counting code is written:
+> (1) the exact BitBucket comment-object fields the unresolved sort reads — is a thread resolved
+> via a `resolution` object, is an inline thread marked by an `inline` field, is the author under
+> `user.uuid`? Verify against a real PR, then map them in `normalizePR`.
+> (2) the pick-list matches on **username** — confirm which field carries it on a real `author`.
 >
-> **Two things the brainstorm must also settle, both visible only against real data:**
-> (1) what identifier `bitbucket-team` holds and how `classify` matches it — a nickname is what a
-> human knows but can change; the `uuid` is stable but opaque. Look at what real PRs carry for
-> `author` before deciding. (2) The "you are a requested reviewer" rule needs each PR's reviewer
-> list, which `normalizePR`'s output shape below does **not** carry — so either add a `reviewers`
-> field to the normalized shape or have `classify` read the raw `reviewers`/`participants`. Pick
-> the shape once the agreed rules make clear exactly which fields they need.
+> **The precise sort (DESIGN §2.3, decision A) reopens finished tasks.** "Unresolved" and "mine"
+> are not in the cheap list call, so the client (T02), the cache (T04) and the daemon fetch (T05)
+> must be extended to fetch and carry each PR's comments through to the pure model. How that is
+> slotted is a plan decision the user settles before this task is implemented (see PROGRESS "Plan
+> decision needed"). The pure model here only *consumes* comments once they arrive; it never fetches.
 
 ## Goal
 
@@ -37,17 +37,27 @@ comment counts), §2.5 (pagination), §3.1 (the boundary), §3.3 (the decision f
 ## Interface
 
 ```
-export function normalizePR(raw) -> {
-  repo, id, title, author,                    // author: { uuid, nickname }
-  updatedOn,                                  // ISO string, used for the sort key
+export function normalizePR(raw, { meUuid }) -> {
+  repo, id, title, author,                    // author: { uuid, username }
+  updatedOn,                                  // ISO string, the tiebreaker sort key
   approvals,                                  // count of participants with approved === true
-  comments,                                   // raw.comment_count
+  approvedByMe,                               // participants has meUuid with approved === true
+  comments,                                   // raw.comment_count — the displayed total
+  unresolved,                                 // count of unresolved inline threads (all authors)
+  myUnresolved,                               // count of unresolved inline threads authored by meUuid
+  reviewers,                                  // requested reviewers (username), for the assigned-to-me rule
   draft,                                      // raw.draft
   htmlUrl,                                    // raw.links.html.href, for the Open button
   sourceBranch, destBranch,
 }
+// unresolved/myUnresolved are computed from the PR's comments, which the fetch layer attaches to
+// raw (decision A, DESIGN §2.9). Exact comment-field names verified against real PRs before this
+// is written. A PR with no comments attached yields zero, never throws.
 
-// The one function the brainstorm shapes. Deduped; each list sorted updatedOn desc.
+// The one function the brainstorm shaped (DESIGN §2.3). Deduped.
+// toReview = (I am a reviewer) + (author.username in team), minus drafts, minus approvedByMe;
+//   sorted myUnresolved asc, then updatedOn desc.
+// mine = authored by meUuid (drafts included); sorted unresolved desc, then updatedOn desc.
 export function classify(prs, { meUuid, team }) -> { toReview: PR[], mine: PR[] }
 
 export function paginate(list, { page, perPage }) -> { rows: PR[], page, pages }
@@ -59,19 +69,21 @@ export function paginate(list, { page, perPage }) -> { rows: PR[], page, pages }
 
 ## Tests
 
-- [ ] `normalizePR` maps every field, including approvals = count of `approved === true`
-- [ ] `normalizePR` tolerates a missing `participants`/`reviewers` (treats as zero) without throwing
-- [ ] classify: a PR where I review lands in toReview; a PR I authored lands in mine
-- [ ] classify: a teammate-authored PR lands in toReview (per the agreed rule)
-- [ ] classify dedup: a teammate PR I also review appears once
-- [ ] classify: whatever exclusion the brainstorm agreed (e.g. drafts) is applied, with a test per rule
-- [ ] both lists come back sorted updatedOn descending, stably
+- [ ] `normalizePR` maps every field, including approvals = count of `approved === true` and `approvedByMe`
+- [ ] `normalizePR` computes `unresolved`/`myUnresolved` from attached comments (inline, unresolved; `myUnresolved` filtered to meUuid); no comments attached yields zero, never throws
+- [ ] `normalizePR` tolerates a missing `participants`/`reviewers` (treats as zero/empty) without throwing
+- [ ] classify: a PR where I am a reviewer lands in toReview; a PR I authored lands in mine
+- [ ] classify: a pick-list author's PR I do not review lands in toReview; a non-pick-list author's PR I do not review appears nowhere
+- [ ] classify dedup: a pick-list author's PR I also review appears once
+- [ ] classify excludes drafts from toReview, but includes my own drafts in mine
+- [ ] classify excludes a PR I have already approved from toReview
+- [ ] toReview sorts by `myUnresolved` ascending, mine by `unresolved` descending, `updatedOn` desc breaking ties, stably
 - [ ] paginate: exactly-full page, one-over (spills to a second page), empty list, page 1 of 1
 - [ ] paginate: a remembered page past the end of a shrunk list falls back to page 1
 - [ ] the purity grep passes for this file
 
 ## Done when
 
-- [ ] `classify` implements the rules agreed in the brainstorm, one test per rule
+- [ ] `classify` implements the DESIGN §2.3 rules (2026-09-05), one test per rule
 - [ ] `normalizePR` and `paginate` pass the cases above
 - [ ] `cockpit-bitbucket-model.mjs` passes the purity grep

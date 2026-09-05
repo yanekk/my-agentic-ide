@@ -88,30 +88,55 @@ The cost is that a long title is cut off on screen; the full title is one click 
 and the PR number plus repo already identify the row. (The direction mock word-wrapped titles;
 this supersedes it.)
 
-Both tables are sorted by `updated_on` descending, most recently touched at the top, because
-the dashboard answers "what moved" and a freshly-updated PR is the one most likely to need you.
+Row order is set by §2.3's classify rules — by unresolved inline-comment count, with
+most-recently-updated (`updated_on` desc) as the tiebreaker — not by recency alone. (An earlier
+draft sorted both tabs purely by `updated_on`; the T03 brainstorm superseded it, 2026-09-05.)
 
-### 2.3 Which PRs show — provisional, and an open decision
+### 2.3 Which PRs show — the classify rules
 
-This is deliberately not finalised in the plan. The exact inclusion rules for each tab are to
-be settled with the user in a brainstorm during T02/T03, with real PRs in front of them, once
-the client can fetch. See PLAN.md "Decisions still open" and the T03 task doc.
+Settled with the user in the T03 brainstorm (2026-09-05), against a three-person model: me; a
+colleague who assigns me as a reviewer; a colleague who never assigns me but whose PRs I still
+want to watch. Real PRs were not yet available — the exact BitBucket comment-object field names
+the sort depends on are verified against a real workspace before the counting code is written
+(§2.9, FINDINGS, and the T03 task doc).
 
-The **provisional** starting point, which the direction mock was built and approved against, is:
+**To review** — open PRs that concern me as a reviewer:
 
-- **To review** = open PRs where you are a requested reviewer, plus open PRs authored by a
-  configured teammate (`bitbucket-team`, §2.6). Deduplicated: a teammate's PR you also review
-  appears once.
-- **Mine** = open PRs you authored.
+- **Included:** PRs where I am a requested reviewer (an assignment), plus PRs authored by
+  someone on my pick-list (`bitbucket-team`, §2.6, matched by **username**). The pick-list is
+  how a colleague who never assigns me still surfaces.
+- **Excluded:** drafts; and any PR I have already approved (my uuid in `participants` with
+  `approved: true`) — once I have approved, it is off my plate.
+- Deduplicated: a PR that is both assigned to me and authored by a pick-list member appears once.
 
-*Why provisional:* the user has ideas to test — for example filtering out PRs that already have
-enough approvals, or drafts, or ones with no activity in N days. Which of those earn a row is a
-product judgement best made against real data, not guessed at plan time. T03's classify
-function is therefore written as one swappable pure function (§3.3) so trying an idea is cheap.
+**Mine** — open PRs I authored, **including my own drafts** (a draft is a to-finish reminder to
+its author, unlike someone else's draft sitting in my review queue).
 
-*Why author, not reviewer, for teammates:* "keep an eye on my teammates' PRs" means the ones
-they wrote, so you can review them proactively even when unassigned. This is the reading the
-user confirmed over "PRs where a teammate is a reviewer".
+**The sort is by unresolved inline-comment threads, not by recency** (this supersedes §2.2's
+earlier "both tabs by `updated_on`"):
+
+- **To review:** ascending by the count of unresolved inline threads **I** authored — fewer at
+  the top. A PR where I have left many open comments has already had my attention and is waiting
+  on its author, so it sinks; a PR I have barely touched rises, because it is the one still
+  needing my review.
+- **Mine:** descending by the count of **all** unresolved inline threads — more at the top,
+  because those are the PRs with the most feedback for me to address.
+- **Both:** most-recently-updated (`updated_on` desc) breaks ties, which are common because most
+  PRs have zero relevant threads.
+- Only **inline** comment threads count (they carry a resolution state); general PR comments are
+  ignored (they have none).
+
+*Why author, not reviewer, for the pick-list:* "keep an eye on a colleague's PRs" means the
+ones they wrote, so I can review them proactively even when unassigned.
+
+**Cost of the precise sort (decision A over B).** "Unresolved" and "authored by me" are not in
+the cheap per-repo list call — that call carries only a total `comment_count`. Computing them
+needs one extra GET per open PR for its comments (§2.9), which reopens the client (T02), the
+cache shape (T04) and the daemon fetch (T05) to carry that data through to the pure model. The
+cheaper alternative — sort by the free total `comment_count` — was declined (2026-09-05): it
+would rank a PR with many *resolved* threads as if it were still busy, the exact signal the sort
+exists to avoid. `classify` stays one swappable pure function (§3.3) so the metric can still be
+changed in one place with its tests.
 
 ### 2.4 Approval and comment counts
 
@@ -222,11 +247,16 @@ fresh the instant you look at it), and once at startup.
 A refresh is **one GET per watched repo, plus one `GET /2.0/user`** the first time (the uuid is
 then cached). Each repo call is
 `GET /2.0/repositories/{workspace}/{repo}/pullrequests?state=OPEN&fields=%2Bvalues.participants,%2Bvalues.reviewers&pagelen=50`,
-following `next` if a repo has more than 50 open PRs (rare). The three lists (§2.3) are then
-sorted out client-side from that one response per repo, which is why no per-role query and no
-per-PR call is needed. For a handful of repos this is a few calls a minute, far inside
-BitBucket Cloud's authenticated rate limit, so no backoff logic is designed in; if a real
-workspace ever makes this tight, that is a finding, not a guess to pre-build against.
+following `next` if a repo has more than 50 open PRs (rare). Tab membership, approvals and the
+displayed comment total all come out of that one response per repo, so no per-role query is
+needed. **The one exception is the sort.** The unresolved-thread sort (§2.3) needs each PR's
+comments, which the list call does not carry, so a refresh also makes **one GET per open PR** for
+its comments — bounded by the number of open PRs, not a fixed cost. This is the accepted price of
+the precise sort (§2.3, decision A); the cheaper total-`comment_count` sort would have kept the
+one-call-per-repo budget. For a handful of repos with a handful of open PRs each this is still a
+few dozen calls a minute, inside BitBucket Cloud's authenticated rate limit, so no backoff logic
+is designed in; if a real workspace ever makes this tight, that is a finding, not a guess to
+pre-build against.
 
 ### 2.n The unhappy paths
 
