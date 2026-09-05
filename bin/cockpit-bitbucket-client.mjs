@@ -1,13 +1,14 @@
 // cockpit-bitbucket-client -- the only thing in the dashboard that opens a socket
-// to BitBucket Cloud (DESIGN 3.1, 3.2). Two calls, both GET:
+// to BitBucket Cloud (DESIGN 3.1, 3.2). Three calls, all GET:
 //
-//   getUser      GET /2.0/user                    -> who the token belongs to
-//   listOpenPRs  GET .../pullrequests?state=OPEN   -> one repo's open PRs, all pages
+//   getUser        GET /2.0/user                         -> who the token belongs to
+//   listOpenPRs    GET .../pullrequests?state=OPEN        -> one repo's open PRs, all pages
+//   listPRComments GET .../pullrequests/{id}/comments     -> one PR's comments, all pages
 //
 // It fetches and paginates; it does not decide what a PR MEANS. Normalising a raw
 // PR into a row, classifying it into a tab, sorting and paging are the pure model's
 // job (T03), where they are testable from fixtures. This module hands the raw
-// `values[]` straight through.
+// `values[]` straight through -- PRs and comments alike.
 //
 // READ-ONLY BY CONSTRUCTION (DESIGN 5.2). There is no method here that POSTs, PUTs,
 // patches or removes anything -- every request is a GET -- so the dashboard cannot
@@ -70,15 +71,14 @@ function baseOrigin(origin) {
   return String(chosen).replace(/\/+$/, "");
 }
 
-// Basic auth is base64(username:password), and the credential IS `email:api-token`
-// (DESIGN 2.6), so base64-ing the raw key whole is exactly the header BitBucket
-// wants: the SERVER splits on the first colon to recover email and token, and
-// base64 preserves every byte, so a token that itself contains a colon survives
-// untouched. Splitting here and rejoining would reproduce the identical string, so
-// there is nothing to split -- the "split on the first colon" is the server's, and
-// this realises it by not getting in its way.
+// The credential is a BitBucket Cloud ACCESS TOKEN, sent as a bearer credential
+// (DESIGN 2.6, revised 2026-09-05). It is one opaque string with no halves to split:
+// the whole value is the token, so the header is the raw key after `Bearer `. This
+// replaced a Basic scheme that base64'd an `email:api-token` pair -- the real
+// read-only key is an access token, not that pair, and the Basic header was rejected
+// by the live API with a 400, `Invalid Authorization header` (FINDINGS 2026-09-05).
 function authHeader(key) {
-  return `Basic ${Buffer.from(String(key ?? ""), "utf8").toString("base64")}`;
+  return `Bearer ${String(key ?? "")}`;
 }
 
 // One GET, classified. Throws a BitBucketError; the public functions catch it and
@@ -178,6 +178,44 @@ export async function listOpenPRs({ key, workspace, repo, origin } = {}) {
       url = typeof data.next === "string" ? data.next : "";
     }
     return { prs };
+  } catch (e) {
+    return { error: { kind: e.kind || "transient" } };
+  }
+}
+
+function prCommentsUrl(origin, workspace, repo, prId) {
+  const u = new URL(
+    `${baseOrigin(origin)}/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${encodeURIComponent(prId)}/comments`,
+  );
+  // The sort ranks by UNRESOLVED INLINE THREADS (DESIGN 2.3), which the cheap PR-list
+  // call does not carry -- it has only a total comment_count. So each open PR costs
+  // one GET here for its comments (decision A, DESIGN 2.9). pagelen 100 (the
+  // endpoint's max) keeps a chatty PR to as few pages as possible. No field
+  // expansion: `inline`, `parent`, `resolution`, `deleted` and `user.uuid` -- every
+  // field the model reduces -- are in the default comment object, verified against
+  // real PRs (FINDINGS 2026-09-05).
+  u.searchParams.set("pagelen", "100");
+  return u.toString();
+}
+
+/**
+ * One pull request's comments, every page, raw (DESIGN 2.3, 2.9). The model reduces
+ * these to the unresolved-inline-thread counts the sort needs; the client only
+ * fetches and paginates, handing each `values[]` entry through untouched, exactly as
+ * listOpenPRs does for PRs. `prId` is a PR's numeric id from the list call.
+ *
+ * -> { comments: RawComment[] }  |  { error: { kind } }
+ */
+export async function listPRComments({ key, workspace, repo, prId, origin } = {}) {
+  try {
+    const comments = [];
+    let url = prCommentsUrl(origin, workspace, repo, prId);
+    for (let page = 0; url && page < MAX_PAGES; page++) {
+      const data = await getJson(url, key);
+      if (Array.isArray(data.values)) comments.push(...data.values);
+      url = typeof data.next === "string" ? data.next : "";
+    }
+    return { comments };
   } catch (e) {
     return { error: { kind: e.kind || "transient" } };
   }

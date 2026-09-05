@@ -6,7 +6,7 @@
 // names the loopback stub, and greps the client to prove it has no mutating verb.
 
 import http from "node:http";
-import { getUser, listOpenPRs } from "../../bin/cockpit-bitbucket-client.mjs";
+import { getUser, listOpenPRs, listPRComments } from "../../bin/cockpit-bitbucket-client.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A loopback stub. `stub.respond(req, n)` decides each reply (n is the 1-based
@@ -36,37 +36,37 @@ async function startStub() {
   return stub;
 }
 
-const decodeBasic = (auth) => Buffer.from(String(auth).replace(/^Basic /, ""), "base64").toString("utf8");
+const bearerToken = (auth) => String(auth ?? "").replace(/^Bearer /, "");
 
 async function main() {
-  section("the Authorization header is Basic base64(email:api-token)");
+  section("the Authorization header is Bearer <token>, verbatim");
   {
     const stub = await startStub();
     stub.respond = () => ({ status: 200, body: { uuid: "{u-1}", nickname: "me", account_id: "a1" } });
 
-    const key = "me@example.com:abc123TOKEN9876";
+    // A BitBucket access token (DESIGN 2.6, revised 2026-09-05): one opaque string,
+    // sent as-is. Not base64'd, not an email:token pair -- the Basic scheme this
+    // replaced 400'd the real key.
+    const key = "ATCTT3xFfGN0-abc123TOKEN9876";
     await getUser({ key, origin: stub.origin });
     const auth = stub.requests[0].headers.authorization;
-    ok("the scheme is Basic", /^Basic /.test(auth || ""), auth);
-    eq("it decodes back to the exact credential", decodeBasic(auth), key);
+    ok("the scheme is Bearer", /^Bearer /.test(auth || ""), auth);
+    eq("the token is the raw key, unencoded", bearerToken(auth), key);
 
     await stub.close();
   }
 
-  section("a token that itself contains a colon is preserved");
+  section("the token is sent untouched, whatever bytes it holds");
   {
     const stub = await startStub();
     stub.respond = () => ({ status: 200, body: { uuid: "{u}" } });
 
-    const key = "me@example.com:tok:with:colons";
+    // A colon in the token is no longer special (there is nothing to split on any
+    // more); it must survive verbatim like every other byte. Proven here so a future
+    // "let me parse the key" change has a test to answer to.
+    const key = "tok:with:colons-and.dashes_and+plus";
     await getUser({ key, origin: stub.origin });
-    const decoded = decodeBasic(stub.requests[0].headers.authorization);
-    eq("the whole credential round-trips", decoded, key);
-    // The server splits on the FIRST colon: everything after it is the password,
-    // colons and all. Proven here so a future "let me just split it client-side"
-    // change has a test to answer to.
-    eq("email is the part before the first colon", decoded.slice(0, decoded.indexOf(":")), "me@example.com");
-    eq("the token keeps its colons", decoded.slice(decoded.indexOf(":") + 1), "tok:with:colons");
+    eq("the whole token round-trips into the header", bearerToken(stub.requests[0].headers.authorization), key);
 
     await stub.close();
   }
@@ -113,8 +113,42 @@ async function main() {
     const r = await listOpenPRs({ key: "e:t", workspace: "acme", repo: "web", origin: stub.origin });
     eq("every page is concatenated in order", r.prs.map((p) => p.id), [1, 2, 3, 4]);
     eq("it stopped when `next` was absent", stub.requests.length, 3);
-    ok("the auth header is re-sent on every page", stub.requests.every((q) => /^Basic /.test(q.headers.authorization || "")));
+    ok("the auth header is re-sent on every page", stub.requests.every((q) => /^Bearer /.test(q.headers.authorization || "")));
 
+    await stub.close();
+  }
+
+  section("listPRComments hits the PR's comments endpoint and paginates");
+  {
+    const stub = await startStub();
+    stub.respond = (req, n) => {
+      if (n === 1) return { status: 200, body: { values: [{ id: 10 }, { id: 11 }], next: `${stub.origin}/c2` } };
+      return { status: 200, body: { values: [{ id: 12 }] } }; // no next -> stop
+    };
+
+    const r = await listPRComments({ key: "tok", workspace: "acme", repo: "web", prId: 7, origin: stub.origin });
+    const u = new URL(stub.requests[0].url, stub.origin);
+    eq("the path is the PR's comments collection", u.pathname, "/2.0/repositories/acme/web/pullrequests/7/comments");
+    eq("every page is concatenated in order", r.comments.map((c) => c.id), [10, 11, 12]);
+    eq("it stopped when `next` was absent", stub.requests.length, 2);
+    ok("the bearer header is sent", /^Bearer tok$/.test(stub.requests[0].headers.authorization || ""));
+
+    await stub.close();
+  }
+
+  section("listPRComments classifies auth and transient like the other calls");
+  {
+    for (const [status, kind] of [[401, "auth"], [403, "auth"], [500, "transient"]]) {
+      const stub = await startStub();
+      stub.respond = () => ({ status, body: { type: "error" } });
+      const r = await listPRComments({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
+      eq(`comments ${status} -> ${kind}`, r.error && r.error.kind, kind);
+      await stub.close();
+    }
+    const stub = await startStub();
+    stub.respond = () => "drop";
+    const r = await listPRComments({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
+    eq("a dropped socket -> transient", r.error && r.error.kind, "transient");
     await stub.close();
   }
 

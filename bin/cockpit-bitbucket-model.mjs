@@ -247,14 +247,14 @@ function configured(config) {
 
 // The setup greeting (DESIGN 2.n). Replaces the old fleet-view greeting, so a
 // first-time user still learns what this is and the exact commands that turn it on.
-// The `bitbucket-key` hint spells the CURRENT DESIGN 2.6 credential shape
-// (email:api-token); the pending Bearer reopen must update this line with §2.6.
+// The `bitbucket-key` hint spells the DESIGN 2.6 credential shape: a BitBucket
+// access token, sent as a bearer credential (revised 2026-09-05).
 function greetingLines() {
   return [
     bold("BITBUCKET"),
     "",
     dim("Set these in any cockpit terminal to begin:"),
-    `  ${bold("config bitbucket-key")} ${dim("‹email:api-token›")}`,
+    `  ${bold("config bitbucket-key")} ${dim("‹access-token›")}`,
     `  ${bold("config bitbucket-workspace")} ${dim("‹slug›")}`,
     `  ${bold("config bitbucket-repos")} ${dim("‹repo,slugs›")}`,
     "",

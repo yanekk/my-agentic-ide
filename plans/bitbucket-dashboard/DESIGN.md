@@ -168,7 +168,7 @@ T01). Reachable only inside a cockpit window, like today.
 
 | Setting | Shown as | Holds |
 |---|---|---|
-| `bitbucket-key` | masked (`set · …oken`) | your credential, `email:api-token` |
+| `bitbucket-key` | masked (`set · …oken`) | your credential, a BitBucket access token |
 | `bitbucket-workspace` | in full | the workspace slug |
 | `bitbucket-repos` | in full | comma-separated repo slugs to watch |
 | `bitbucket-team` | in full | comma-separated teammate identifiers (may be empty) |
@@ -177,11 +177,18 @@ T01). Reachable only inside a cockpit window, like today.
 cockpit PATH and so have `config`, and it must never become a way to print a secret. The other
 three carry nothing secret and are shown in full so you can see what is set.
 
-**The credential is `email:api-token`**, used as HTTP Basic auth (`Authorization: Basic
-base64(email:api-token)`). It is one pasted string; the client splits it on the first colon, so
-a token that itself contains a colon survives. This was chosen over an app password (same
-Basic-auth shape, older) and over a workspace access token (a single bearer, but it
-authenticates as the workspace and has no "me", so "assigned to me" could not work).
+**The credential is a BitBucket Cloud access token**, sent as a bearer credential
+(`Authorization: Bearer <token>`), revised 2026-09-05. It is one opaque pasted string with no
+halves to split — the whole value is the token. This replaced an earlier `email:api-token` pair
+used as HTTP Basic auth: the real read-only key the user holds is an access token, not that
+pair, and the Basic header the design first specified was rejected by the live API with a 400,
+`Invalid Authorization header` (FINDINGS 2026-09-05).
+
+**"Me" must still resolve from this token** (see the next paragraph): the whole "assigned to me
+/ authored by me / my threads" behaviour depends on `GET /2.0/user` returning the token owner's
+`uuid`. An earlier hand-check saw `getUser` return a real uuid (FINDINGS 2026-09-04), but that
+predates the Bearer switch, so the reopen re-verifies identity **and** the new per-PR comment
+fetch against the live token before the task is called done (T02 hand-check; §5.1).
 
 **"Me" is resolved from the token**, not configured: the client calls `GET /2.0/user` once and
 keeps the returned `uuid`. So the person the dashboard is "about" is whoever the token belongs
@@ -294,7 +301,7 @@ pure    cockpit-bitbucket-model.mjs   normalize a raw PR, classify into tabs, so
                                        paginate, render the dashboard lines, compute click
                                        hit-zones. Takes now and width as parameters. No clock,
                                        no I/O, no network, no process.env.
-shell   cockpit-bitbucket-client.mjs  the HTTPS calls to BitBucket. Basic auth, GET only.
+shell   cockpit-bitbucket-client.mjs  the HTTPS calls to BitBucket. Bearer auth, GET only.
         cockpit-bitbucket-store.mjs   reads the config settings, reads/writes the cache and
                                        view-state files.
         cockpitd.mjs (additions)      the fetch loop, the cmd-verb dispatch, the spawn primitive.
@@ -430,7 +437,7 @@ BitBucket client uses `node:https` directly, as the Google client does.
 
 | Cannot be tested automatically | Why it needs a person |
 |---|---|
-| The `email:api-token` credential authenticates against the real workspace | Needs the user's private token and private workspace; read-only (T02) |
+| The access token (`Bearer`) authenticates, resolves "me" from `GET /2.0/user`, and the per-PR comment fetch works | Needs the user's private token and private workspace; read-only (T02) |
 | A real click spawns a running agent already in the repo context | Needs the live WezTerm cockpit and `claude agents`; the stub cannot model claude spawning a session (T00, T09) |
 | The 75/25 dashboard looks right and stays legible in a live pane | Rendering is only real in WezTerm at a real width (T07) |
 | A click lands in the right pane region in live WezTerm | Mouse coordinates are only real in the running mux (T08) |
@@ -467,11 +474,13 @@ All dates 2026-09-03.
   taking the whole top pane (which would drop the notes/agenda glance) and over a half-width
   dashboard (too narrow for a six-column table with buttons).
 - **BitBucket Cloud, API v2.0.** The user's product.
-- **Credential is an Atlassian API token as `email:api-token`.** Chosen over app password
-  (older, same shape) and over a workspace access token (no user identity, so no "assigned to
-  me"). Probed against the public API: the list call with `fields=+values.participants,
-  +values.reviewers` returns approvals, reviewers, `comment_count` and `updated_on` in one call,
-  so counts and sort cost nothing extra.
+- **Credential is a BitBucket access token, sent as `Bearer`** (revised 2026-09-05; originally
+  an Atlassian API token as `email:api-token` over Basic auth). The original choice was made
+  against the public API, where an `email:api-token` pair worked; the user's real read-only key
+  turned out to be an access token, which the Basic header 400s, so §2.6 switched to Bearer. The
+  list call's field expansion (`fields=+values.participants,+values.reviewers`) still returns
+  approvals, reviewers, `comment_count` and `updated_on` in one call, so counts cost nothing
+  extra; the unresolved-thread sort's per-PR comment fetch is the one added cost (§2.3, §2.9).
 - **One workspace, a chosen repo list.** Chosen over all-repos-in-a-workspace (unbounded call
   count) and multiple workspaces (deferred, §8).
 - **To-review = my review queue + teammates' authored PRs; Mine = my authored PRs** — but

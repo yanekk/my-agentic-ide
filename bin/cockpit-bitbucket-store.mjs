@@ -114,6 +114,9 @@ function writeJson(dir, name, data) {
 // --- the PR cache (bitbucket-cache.json) -----------------------------------
 // Written only by the daemon (DESIGN 3.5), read by the pane.
 // Cache = { meUuid, repos: { <slug>: { fetchedAt, prs: RawPR[], error: {kind}|null } } }
+// Each RawPR carries its own `.comments` array, attached by the daemon's fetch loop
+// for the unresolved-thread sort (DESIGN 2.3); it rides through here untouched, like
+// every other PR field -- this store adds and strips nothing.
 
 /** Defensive: a corrupt or absent file reads back as an empty cache, never throwing. */
 export function readCache(dir = DEFAULT_DIR) {

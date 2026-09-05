@@ -10,12 +10,15 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T06 (pure renderer + hit-zones) reviewed clean 2026-09-05, no fix. Next
-ready ⬜ is T07 (rewire the welcome pane to 75/25). The folded T02/T04/T05 reopen (Bearer auth +
-per-PR comment fetch) is still open and unblocked (shapes + a working key in hand); doing it
-before or after T07 is a plan-scheduling decision for the user — see below.
+**Status:** Building. Folded **T02/T04/T05 reopen built** 2026-09-05 (user scheduled it before
+T07): client auth→Bearer, new `listPRComments`, daemon fetches comments per open PR into
+`raw.comments`, store passes through. All four suites green. **Live Bearer hand-check is pending**
+— the command is in "Blocked on the user" below; it must run before the reopen is called done,
+because the earlier getUser hand-check (2026-09-04) predates Bearer. This folded code did **not**
+go through the pir-review alternation (it is not a queue task); whether to give it a fresh-eyes
+pass is a plan-structure call for the user. Next ready ⬜ is T07.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T07 (unless the user schedules the T02/T04/T05 reopen first).
+**Next `pir-work` will:** implement T07 (the reopen's live hand-check is awaiting the user).
 
 ## Tasks
 
@@ -49,15 +52,40 @@ done · ⛔ blocked, needs a human.
   `email:api-token` header (DESIGN §2.6) rejects with 400. The T02 reopen must switch `authHeader`
   to Bearer and rewrite DESIGN §2.6; DESIGN and the client both still say Basic until then.
 
-## Scheduling decision for the user
+## Scheduling decision for the user — RESOLVED 2026-09-05
 
-- The folded **T02/T04/T05 reopen** (Bearer auth + per-PR comment fetch) is fully unblocked — the
-  endpoint shapes are verified and a working read-only key is in hand. T06 (the pure renderer) is
-  now built off the model, so the reopen is the remaining folded work. Recommendation: do it as one
-  unit after T06 is reviewed. It touches T02 (client `authHeader` → Bearer, per-PR comment GET),
-  T04 (cache carries comments) and T05 (daemon fetches them). This is a plan-structure call, yours.
+- The user chose to do the folded **T02/T04/T05 reopen** before T07. It is built (see Status).
+  T04 needed no code change — comments ride inside each raw PR, which the store already passes
+  through. Automated tests are green; the live hand-check below is what remains.
 
 ## Blocked on the user
+
+- **Reopen hand-check (do this next).** The Bearer switch is untested against the live token: the
+  getUser success on 2026-09-04 was before Bearer, so identity resolution with the access token is
+  unproven — and "assigned to me / authored by me / my threads" all die if `GET /2.0/user` does not
+  return a uuid for this token. Read-only (GET only, DESIGN 5.2). Run in the repo root:
+
+  ```
+  BITBUCKET_KEY="$(cat ~/.claude/cockpit/bitbucket-key)" \
+  BITBUCKET_WS="$(cat ~/.claude/cockpit/bitbucket-workspace)" \
+  BITBUCKET_REPOS="$(cat ~/.claude/cockpit/bitbucket-repos)" \
+    node -e 'import("./bin/cockpit-bitbucket-client.mjs").then(async m => {
+      const key = process.env.BITBUCKET_KEY;
+      const ws = process.env.BITBUCKET_WS;
+      const repo = (process.env.BITBUCKET_REPOS||"").split(",")[0].trim();
+      console.log("getUser:", await m.getUser({ key }));
+      const r = await m.listOpenPRs({ key, workspace: ws, repo });
+      console.log("listOpenPRs("+repo+"):", r.error || (r.prs.length+" open PRs"));
+      if (r.prs && r.prs.length) {
+        const c = await m.listPRComments({ key, workspace: ws, repo, prId: r.prs[0].id });
+        console.log("listPRComments #"+r.prs[0].id+":", c.error || (c.comments.length+" comments"));
+      }
+    })'
+  ```
+
+  Expect: getUser prints a real uuid (not `{error:...}`), a PR count, and a comment count on the
+  first PR. Tell me: did getUser return a uuid (Bearer identity works)? Did the PR list and the
+  comment fetch both succeed?
 
 - Items marked "hand-verified" that remain (T07 look, T09 spawn) need the user at the live cockpit
   when that task is reached; each task doc carries the exact command. (T00 verified 2026-09-04,

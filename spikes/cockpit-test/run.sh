@@ -2354,6 +2354,10 @@ const PRS = { values: [{
   updated_on: "2026-09-04T10:00:00+00:00", author: { uuid: "{author}" },
   participants: [], links: { html: { href: "https://bitbucket.org/ws/pr/7" } },
 }] };
+// One PR's comments: a single unresolved inline thread the sort would count
+// (DESIGN 2.3). The daemon fetches this per open PR (decision A, DESIGN 2.9) and
+// attaches it to the raw PR as `.comments`.
+const COMMENTS = { values: [{ id: 100, inline: { path: "a.js" }, user: { uuid: "ME-UUID" }, content: { raw: "x" } }] };
 const server = http.createServer((req, res) => {
   // Logged DECODED so an assertion looks for a plain `+` and `?state=OPEN` rather
   // than hunting %2B/%3D through a query string.
@@ -2362,6 +2366,15 @@ const server = http.createServer((req, res) => {
   if (req.url.startsWith("/2.0/user")) {
     if (m === "user-auth") return json(res, 401, { type: "error" });
     return json(res, 200, { uuid: "ME-UUID", nickname: "me", account_id: "acc" });
+  }
+  // The per-PR comments GET must be answered BEFORE the repo-list branch: the
+  // comments path (/pullrequests/{id}/comments) still matches the pullrequests regex,
+  // so without this it would be served a PR-list body. `comment-net` drops only the
+  // comment call, so a repo whose LIST succeeds still exercises "keep the PR's
+  // previous comments" (DESIGN 2.n).
+  if (/\/pullrequests\/\d+\/comments/.test(req.url)) {
+    if (m === "net" || m === "comment-net") return req.socket.destroy();  // -> transient
+    return json(res, 200, COMMENTS);
   }
   const repo = decodeURIComponent((req.url.match(/\/repositories\/[^/]+\/([^/]+)\/pullrequests/) || [])[1] || "");
   if (m === "net") return req.socket.destroy();          // dropped socket -> transient
@@ -2444,6 +2457,13 @@ same  "...untouched -- the raw title, not a normalised row" "$(bq "$S4" 'c.repos
 same  "...with a fresh fetchedAt"                 "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
 same  "...and the auth error cleared entirely"    "$(bq "$S4" 'c.repos.alpha.error')" "null"
 
+# Each open PR also costs one comments GET (decision A, DESIGN 2.9), attached to the
+# raw PR as `.comments` for the unresolved-thread sort (DESIGN 2.3). The store passes
+# it through untouched, so it is in the cache.
+check "each open PR's comments are fetched too"    "/pullrequests/7/comments" "$BBHITS"
+same  "...and attached to the raw PR for the sort" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
+check "...the log counts the comment fetches"      "alpha ok, 1 prs, 1 comment fetches" "$A4/daemon.log"
+
 # meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
 # repos are re-fetched but /2.0/user is not called again.
 : > "$BBHITS"
@@ -2474,6 +2494,16 @@ same "a success after a failure clears the error" "$(bq "$S4" 'c.repos.alpha.err
 # A later tick ran and wrote after passes that threw nothing but returned errors --
 # the daemon is still alive behind its window.
 same "...which is a later tick running"           "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
+
+# A comment fetch that fails while its PR LIST succeeds keeps that PR's previous
+# comments (the same "keep last" the repo level uses), so a blip does not zero a PR's
+# thread count and reshuffle the sort for a tick (DESIGN 2.3, 2.n). alpha's list still
+# succeeds, so the repo itself is not an error.
+echo comment-net > "$BBMODE"
+sleep 2
+same "a dropped comment fetch keeps the PR's previous comments" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
+same "...and the repo itself stays a success"                   "$(bq "$S4" 'c.repos.alpha.error')" "null"
+echo ok > "$BBMODE"
 
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window

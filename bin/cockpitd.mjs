@@ -32,7 +32,7 @@ import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google
 // The BitBucket dashboard's client (the only thing here that opens a socket to
 // BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
 // aliased because the agenda store already owns those names.
-import { getUser, listOpenPRs } from "./cockpit-bitbucket-client.mjs";
+import { getUser, listOpenPRs, listPRComments } from "./cockpit-bitbucket-client.mjs";
 import {
   isConfigured,
   readCache as readBBCache,
@@ -2946,9 +2946,36 @@ async function refreshPRs(reason) {
         log(`bitbucket ${reason}: ${safeText(slug)} failed, ${res.error.kind}`);
       } else {
         // A success clears `error` entirely and stamps a fresh fetchedAt. Raw PRs
-        // pass through untouched -- the model normalises them (DESIGN 3.1).
+        // pass through untouched -- the model normalises them (DESIGN 3.1) -- EXCEPT
+        // that each is given its `.comments`: the unresolved-inline-thread sort
+        // (DESIGN 2.3) needs per-PR comments the list call does not carry, so
+        // decision A (DESIGN 2.9) spends one GET per open PR here. The array rides
+        // inside the raw PR, so the store persists it for free (T04 passes prs
+        // through) and the model reads it as `raw.comments`.
+        //
+        // A comment fetch that FAILS while its PR list succeeded keeps that PR's
+        // PREVIOUS comments -- the same "keep last" the repo level uses -- so a blip
+        // does not drop a PR's thread count to zero and reshuffle the sort for a
+        // tick; the counts heal on the next pass. Any error kind is treated this way:
+        // the list call just proved the token is fine, so a comment 401 is a per-PR
+        // quirk, not the whole-dashboard auth signal.
+        const prevById = new Map((prev?.prs ?? []).map((p) => [p.id, p]));
+        let commentGets = 0;
+        for (const pr of res.prs) {
+          const cr = await listPRComments({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
+          if (cr.error) {
+            const prevComments = prevById.get(pr.id)?.comments;
+            pr.comments = Array.isArray(prevComments) ? prevComments : [];
+          } else {
+            pr.comments = cr.comments;
+            commentGets++;
+          }
+        }
         cache.repos[slug] = { fetchedAt: now, prs: res.prs, error: null };
-        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs`);
+        // The comment-fetch count makes the per-minute call volume visible in the log
+        // (DESIGN 2.9): if a real workspace ever makes the budget tight, this is what
+        // shows it -- a count only, never a title or author.
+        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs, ${commentGets} comment fetches`);
       }
     }
 
