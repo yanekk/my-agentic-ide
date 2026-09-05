@@ -171,17 +171,20 @@ view. Re-opening the window is the supported way to rebuild everything.
 ```
 bin/install.sh          per-machine setup: prerequisites, config.lua, the symlink
 bin/cockpit-layout.sh   splits panes (incl. the strip), records ids, starts daemon
-bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews
+bin/cockpitd.mjs        follows the fleet view, retargets panes, injects reviews; PR fetch + spawnAgent
 bin/cockpit-strip.mjs   renders the terminal list (strip) and key legend (footer)
-bin/cockpit-welcome.mjs renders the fleet list's top pane: greeting | notes column
+bin/cockpit-welcome.mjs renders the fleet list's top pane: bitbucket dashboard | notes/agenda column
 bin/cockpit-auto-name.mjs  names every session "<repo> / <topic>"; registers itself; the Haiku call
-bin/cockpit-config.mjs  the `config` command and the API-key store (cockpit terminals only)
+bin/cockpit-config.mjs  the `config` command and its stores: anthropic-api-key + the four bitbucket-* settings (cockpit terminals only)
 bin/cockpit-note.mjs    the `note` command (cockpit terminals only)
 bin/cockpit-notes.mjs   the notes store, shared by the command and the renderer
 bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
 bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic writes
 bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
 bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
+bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, paginate, render, hit-zones
+bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments
+bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
@@ -190,6 +193,7 @@ spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
+spikes/bitbucket-test/  the dashboard's model, client, store, config and render (312)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -223,7 +227,13 @@ renamed it by hand; a file each rather
 than one shared JSON so concurrent agents need no lock, pruned at 30 days),
 `anthropic-api-key` (the key `config anthropic-api-key` writes — plain text, `0600`, atomic
 temp-then-rename; an absent file simply means the Haiku naming is off, and it is read
-directly by the hook, never exported as a variable), all three agenda files `0600` — the cache included, it holds your meeting titles — under
+directly by the hook, never exported as a variable), the four BitBucket settings
+`bitbucket-key`/`bitbucket-workspace`/`bitbucket-repos`/`bitbucket-team` (one `0600` file each,
+written by `config` like the Anthropic key — `bitbucket-key` masked on read), `bitbucket-cache.json`
+(the fetched PRs per repo plus the cached `meUuid`, written by the daemon and watched by the pane)
+and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
+click verb, read by the pane) — both `0600` (the cache holds PR titles) and **lockless**, one writer
+each so an atomic temp-then-rename covers the read/write race, all three agenda files `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to
 `cockpit-note.mjs`, `cockpit-agenda.mjs` and `cockpit-config.mjs`, relinked on every
 rebuild — the whole of how the commands are "inside the cockpit only"), and `cmd`
@@ -244,7 +254,7 @@ this is the index.
 
 | | |
 |---|---|
-| `\r` → `\n` on every injected payload | `\r` is what Enter sends and **submits**; `\n` only inserts a newline. This one substitution is why a review can arrive unsent. |
+| `\r` → `\n` on every injected payload — except the spawn primitive, which sends a real `\r` | `\r` is what Enter sends and **submits**; `\n` only inserts a newline. This one substitution is why a review can arrive unsent. The lone exception is `spawnAgent` (bb-review/bb-address, DESIGN §2.8): it types `@{slug} {prompt}` into the fleet box and sends a **real** Enter, because its job is to *launch* an agent, not draft an editable prompt — the inversion is deliberate and has its own spike (T00). |
 | Never type unless attached to an agent | The fleet **list**'s prompt box dispatches a **new agent**; a review typed there would spawn one. |
 | Bind none of revdiff's keys — the flush→Claude jump rides on `--post-flush-command` | revdiff's flush gesture *is* uppercase `O` (`map O flush_output`), so a `{ key = "O", mods = "SHIFT" }` binding stole it: the diff pane never flushed and no pane could type an `O` at all. A *successful* flush instead appends `focus-claude` to the `cmd` channel and the daemon activates `panes.fleet` (the **Claude** pane, where the review was injected — not `panes.shell`). One `O` both sends and lands you where you edit it. Only revdiff emits the verb, only on a real flush, so no focus gate is needed. |
 | `revdiff --untracked` always, and the range is `HEAD` passed **symbolically** | `git diff` omits untracked files and agents create them constantly. `HEAD` → working tree is the agent's **uncommitted** work, matching what it sees from `git status`; passing `HEAD` rather than a resolved SHA means a reload re-reads it, so committing drops work *out* of the diff instead of pinning it. A merge-base base was tried and froze at launch, showing committed work for ever. |

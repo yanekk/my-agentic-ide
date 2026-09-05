@@ -10,14 +10,14 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T09 done ✅** 2026-09-05. Code review clean (spawnAgent + bb-review/address
-read against DESIGN §2.8; §14d tests genuine — the `\r`-vs-`\n` submit really distinguished); two
-stale "inert until T09" comments fixed. Live spawn hand-verified with the user: Review and Address
-each start a real agent. Full test command green (cockpit 510). **T10 (install.sh, docs, CLAUDE.md)
-is next and last.** Still open, user's call: the folded T02/T04/T05 reopen never took the
-pir-review alternation.
+**Status:** Building. **T10 implemented 🔍** 2026-09-05 (the last task). Docs/install pass, no code:
+docs/cockpit.md gained a full BitBucket dashboard section (fetch, spawnAgent, tabs, sort, config,
+storage, boundary); CLAUDE.md file map (+3 bin files, spike 312), state list and truths table
+updated; install.sh needs no change (confirmed via `--check`, exit 0). Full four-suite test command
+green. **Awaiting review — once T10 is ✅ the plan is complete.** Still open, user's call: the folded
+T02/T04/T05 reopen never took the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T10 — deps T09 ✅ met. New settings, new suite in the test command, docs.
+**Next `pir-work` will:** review T10 — the docs/install task; then the plan is done.
 
 ## Tasks
 
@@ -36,9 +36,9 @@ done · ⛔ blocked, needs a human.
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
 | T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ✅ | Reviewed clean; two fixes (wheel-click excluded, tab switch resets to page 1) both hand-verified live 2026-09-05. See FINDINGS. |
 | T09 | Review/Address auto-spawn | T00, T08 | ✅ | Reviewed clean 2026-09-05; 2 stale-comment fixes. spawnAgent activates fleet then types (welcome pane ≠ fleet, so activate is needed); absent id = safe no-op shared with Open; prompt not logged; §14d tests genuine. Live spawn hand-verified with the user: Review and Address each start a real agent (FINDINGS). |
-| T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
+| T10 | install.sh, docs, CLAUDE.md | T09 | 🔍 | Docs only, no code. cockpit.md: dashboard section + stale "greeting" intro fixed + suite listed. CLAUDE.md: file map (+3 bin, spike 312), state list, and the `\r`→`\n` truths row *amended* with the spawn-`\r` exception (kept 30, no new row). install.sh unchanged (confirmed `--check`). |
 
-**Review queue:** empty. Next work implements T10 (the last task).
+**Review queue:** T10 (docs/install). Once reviewed ✅ the plan is complete.
 
 ## Plan decisions (2026-09-05)
 

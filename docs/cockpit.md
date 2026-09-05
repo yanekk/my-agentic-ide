@@ -231,8 +231,10 @@ where it was (`spikes/pane-swap/RESULTS.md`).
 
 ## Notes
 
-The fleet view's top pane is split down the middle: the cockpit's greeting on the
-left, a **notes list** on the right, newest first.
+The fleet view's top pane is a 75/25 split: the [BitBucket
+dashboard](#bitbucket-dashboard) on the left, and this right-hand column — a
+**notes list** over the agenda, newest first. (Before the dashboard the left half
+was a plain greeting; the dashboard's own unconfigured state took that job over.)
 
 ```
 ┌──────────────────────┬───────────────────────────────────────────┐
@@ -584,6 +586,213 @@ and silently discarding a refresh token costs two browser round trips.
 - **The feature is in the way.** `agenda rm` every slug: with nothing configured the tick returns
   immediately, nothing is fetched, and the column falls back to notes alone.
 
+## BitBucket dashboard
+
+The fleet list's top pane no longer opens on a greeting. Its left ~75% is a **BitBucket
+pull-request dashboard** — a live glance at the PRs waiting on you — and NOTES over AGENDA move
+to the ~25% column on the right. Attaching an agent parks the whole pane and revdiff comes back
+at full width exactly as before; the dashboard is a resting screen, nothing about the agent view
+changes.
+
+```
+┌───────────────────────────────────────────────┬──────────────┐
+│  To review  ·  Mine                            │ NOTES     4  │
+│  ───────────────────────────────────────────── │ ──────────── │
+│  proj   #128  fix the retry backoff   alice ✓2 │ 5c4f 2h rebas│
+│  proj   #131  tidy the config loader  bob   ·  │ ──────────── │
+│  api    #47   bump the client         carol ✎3 │ TODAY · Wed  │
+│           [Review] [Open]                       │ ▌ NOW standup│
+│  ‹ prev · 1/2 · next ›                          │ … +2 · agenda│
+└───────────────────────────────────────────────┴──────────────┘
+```
+
+It is a **launchpad, not a PR client**. It answers "what needs me" and hands the work to an
+agent; it never comments, approves, merges or edits a PR itself. Every fetch is read-only and
+the client has no method that mutates BitBucket, so it cannot damage anything even by mistake.
+
+### The two tabs
+
+One tab shows at a time; a tab strip at the top switches between them by click, and the active
+tab is remembered for the session.
+
+- **To review** — open PRs that concern you as a reviewer: ones where you are a requested
+  reviewer, plus ones authored by anyone on your `bitbucket-team` pick-list (so a colleague who
+  never assigns you still surfaces). Drafts, and any PR you have already approved, are excluded.
+  Columns: repo slug, PR number, title, author, approval count, comment count, **[Review]**, **[Open]**.
+- **Mine** — open PRs you authored, including your own drafts. Same columns without the author
+  (it is always you), and **[Address]** in place of Review.
+
+**Titles are one line, truncated with an ellipsis** — never word-wrapped. A single-line row is
+what makes every row the same height, which lets a page be a fixed count of rows and a click's
+target row a trivial function of its y. The full title is one click away via Open. A zero
+approval or comment count is drawn as a dim `·`, not `0`, so a row that has feedback stands out.
+
+### The sort — by unresolved threads, not recency
+
+Rows are ordered by **unresolved inline-comment threads**, not by `updated_on` (which only
+breaks ties):
+
+- **To review** rises for the PRs you have *not* yet commented on — ascending by the count of
+  unresolved inline threads *you* authored. A PR you have already picked over is waiting on its
+  author, so it sinks; the one still needing your eyes floats up.
+- **Mine** falls for the PRs with the most feedback for you to deal with — descending by the
+  count of *all* unresolved inline threads.
+- Only **inline** threads count; they carry a resolution state, general PR comments do not.
+
+This precise sort is the one thing the cheap per-repo list call cannot supply — it carries only
+a total `comment_count`, which cannot tell a resolved thread from an open one. So the sort costs
+an extra comment fetch, bounded as below.
+
+### The fetch — one daemon, a pure pane
+
+The dashboard obeys the same split as the agenda, and for the same load-bearing reason: the top
+pane is **one** WezTerm pane that the daemon swaps in and out as the diff slot by parking exactly
+one pane. So the daemon owns the network and writes a cache file; `cockpit-welcome.mjs` is pure
+display and only draws it. Network I/O in the pane would not break the pane machinery today, but
+it would break the rule the diff-slot swap depends on.
+
+The daemon fetches on the agenda's three triggers — every minute, on return to the fleet list,
+and once at startup. A refresh is **one GET per watched repo** (following `next` past 50 open
+PRs — cribl has 739, ~15 pages), plus one `GET /2.0/user` the first time to resolve "me" from
+the token, plus **one comment GET per PR that concerns you**. That last is bounded by
+`model.concernsMe`, classify's own membership predicate: the daemon runs it on each raw PR and
+reads comments only for the handful that will actually show, so even at 739 open PRs the comment
+budget stays a handful per repo rather than one call per open PR. `concernsMe` is shared between
+the fetch and the display so a PR is never fetched-but-hidden or shown-but-unfetched.
+
+The pane cannot scroll, so overflow is **paged**, not folded: a clickable
+`‹ prev · 1/3 · next ›` under the table. Every row's buttons stay reachable, which is the whole
+point of the dashboard — a "+N more" fold would hide the very buttons you came to press. Each tab
+keeps its own page, but switching tabs returns the tab you land on to page 1 (arriving deep in a
+list you had switched away from was surprising). The daemon cannot cheaply know a tab's page
+count — it depends on live pane geometry — so `renderDashboard` returns `pages` and the daemon
+reads the pane's size from `wezterm cli list` and calls the model to clamp a paging click, one
+source of truth for pagination.
+
+### Clicks, Open, and the spawn primitive
+
+Clicks reach the daemon exactly as the strip's do: the pane enables its own SGR mouse reporting
+and appends a fixed verb to `~/.claude/cockpit/cmd`; the daemon owns every consequence. A verb
+carries the repo slug and PR id (`bb-open:{slug}/{id}`) so the daemon finds the PR in the cache
+without the pane and daemon having to agree on row order. The pure model maps a click's (x, y) to
+a verb through `verbAt` over the hit-zones a render produces.
+
+- **Open** launches the PR's web page — `spawn("/usr/bin/open", [htmlUrl], { detached })`, the
+  URL taken from the PR's `links.html.href`. `BITBUCKET_BROWSER` overrides the opener so a test
+  launches no browser. Open works even for a repo that is not cloned locally: it uses the web URL.
+- **Review** / **Address** start a new cockpit agent already working in that PR's repository,
+  with a minimal directive — `Review Bitbucket PR {url}` or `Address the review comments on
+  Bitbucket PR {url}`, issued against `@{slug}`. The agent is expected to have its own BitBucket
+  MCP to fetch the diff and comments; the cockpit supplies only the URL, the repo context and the
+  directive. Wiring that MCP up is the user's environment, out of scope — a later session must not
+  read a bare prompt as a bug.
+
+Both buttons go through **`spawnAgent({ repo, prompt })`**, a general daemon helper built to be
+reused by a future feature. It focuses the fleet pane (`panes.fleet`), which at the list shows the
+new-session box, types `@{repo} {prompt}` into it, and sends a **real Enter** so the agent starts.
+It lands the agent in the repo context by leaning on the layout: the fleet view runs with its cwd
+at the projects root, so `@{slug}` resolves to `{projectsRoot}/{slug}` — the local clone, exactly
+what you would type by hand.
+
+**This deliberately inverts the cockpit's central injection rule.** Everywhere else an injected
+`\r` is swapped for `\n` so a review arrives unsent and editable. The spawn primitive sends a real
+`\r` on purpose, because its whole job is to launch, not to draft — which is why it is a named
+primitive with its own spike (T00), not a reuse of `injectReview`. The accepted cost: a stray
+click launches an agent. Agents are cheap and killable, so this is a known limit, not a thing
+guarded against with a confirm step.
+
+**A watched repo must be cloned under the projects root in a folder named for its BitBucket slug.**
+The spawn types `@{slug}` and relies on `{projectsRoot}/{slug}` existing; a missing or
+differently-named clone lands the agent nowhere useful (it starts, finds no repo, and says so —
+harmless and killable). This is a documented limit, not a pre-flight check, the same accepted cost
+as the stray click.
+
+### Configuration, through `config`
+
+Four new settings, set and read through the existing cockpit-only `config` command — reachable
+only inside a cockpit window, like the Anthropic key:
+
+```bash
+config bitbucket-key        <token>          # your credential (masked on read)
+config bitbucket-workspace  <slug>           # the workspace slug
+config bitbucket-repos      proj,api,infra   # comma-separated repo slugs to watch
+config bitbucket-team       "Alice A,Bob B"  # comma-separated teammate display names (may be empty)
+```
+
+**The credential is a BitBucket Cloud access token, sent as `Authorization: Bearer <token>`** —
+one opaque pasted string with no halves to split. This replaced an earlier `email:api-token` pair
+used as HTTP Basic auth: the real read-only key is an access token, and the Basic header the design
+first specified was rejected live with a 400, `Invalid Authorization header`. Bearer only; a Basic
+pair is deliberately not supported (auto-detecting the scheme from a colon in the key was declined).
+`bitbucket-key` is masked on read for the reason the Anthropic key is — agents inherit the cockpit
+PATH and so have `config`, and it must never become a way to print a secret; the other three carry
+nothing secret and are shown in full.
+
+**"Me" is resolved from the token, not configured.** The client calls `GET /2.0/user` once and
+keeps the returned `uuid`, so the person the dashboard is "about" is whoever the token belongs to,
+and there is nothing to keep in sync. Note that `bitbucket-team` entries match the author's
+`nickname` (BitBucket removed `username` from its API; on cribl the nickname is the full display
+name, e.g. "Ryan Cribb"), case-insensitive, while you and reviewers are matched by uuid.
+
+### The unhappy paths
+
+- **Unconfigured** — no key, workspace or repos: the dashboard shows its own greeting (the
+  product name and the `config` lines that turn it on), which is what replaced the old fleet
+  greeting, so a first-time user still learns what this is.
+- **Configured, nothing to show** — a tab with no PRs shows a one-line empty state, so it reads
+  as "checked, all clear" not "broken".
+- **Offline / transient** — the last good cache is kept and drawn with one dim
+  `last updated {n}m ago · offline` line, like the agenda. Every fetched repo failing draws one
+  aggregate line; a subset draws a per-repo line each. The client cannot tell a 404 typo from a
+  network blip (both are `transient`), so a bad repo slug shows a dim per-repo error rather than
+  being distinguished as permanent.
+- **Expired or bad token (401/403)** — distinguished because you can act on it:
+  `sign-in expired · config bitbucket-key`.
+- **Corrupt cache** — the pane reads defensively and falls back to the unconfigured/empty state
+  rather than throwing; this is the resting screen of the whole cockpit. It never rescues or
+  rewrites the file — that is the daemon's job.
+- **The clock** — all "n minutes ago" staleness is computed from a single `now` passed into the
+  pure model, never read inside it.
+
+### Where it lives, and why not in the repo
+
+All under `~/.claude/cockpit/`, all `0600` (the cache holds PR titles), none in the repo — a
+checked-in file would land in the very diff an agent is reviewed on.
+
+```
+bitbucket-key, bitbucket-workspace, bitbucket-repos, bitbucket-team   one file each, written by config
+bitbucket-cache.json   { version, meUuid, repos: { "<slug>": { fetchedAt, prs, error } } }  — daemon writes, pane reads
+bitbucket-view.json    { version, tab, pages: { toReview, mine } }                          — daemon writes, pane reads
+```
+
+**No lock, unlike the agenda.** Each file has a single writer — `config` for a setting, the daemon
+for the cache and view — so an atomic temp-then-rename is enough for the read/write race, and the
+shared-file locking the agenda needs (agents write its files too) would be cost without a hazard.
+`bitbucket-view.json` is written only by the daemon (on a click verb) so the pane stays pure
+display: it never decides which tab is active, it draws the one the daemon recorded.
+
+### Recovery
+
+The credential is removed with `config bitbucket-key --unset`, returning the dashboard to its
+unconfigured state. A corrupt `bitbucket-cache.json` or `bitbucket-view.json` can simply be
+deleted; the daemon rewrites the cache on its next fetch and the pane falls back to the
+unconfigured/empty state until it does. An agent started by a stray click is killed from the fleet
+view like any other.
+
+### The pure/shell boundary
+
+Same shape as the agenda. `cockpit-bitbucket-model.mjs` is **pure** — it normalizes a raw PR,
+classifies into tabs, sorts, paginates, renders the lines and computes the click hit-zones, taking
+`now` and `width` as parameters with no clock, network or I/O. `spikes/bitbucket-test/run.sh` greps
+it for `node:fs`/`node:http`/`node:https`/`node:child_process`/`fetch(`/`Date.now(`/a
+zero-argument `new Date()`/`process.env` and fails on a hit — the same check the agenda model is
+held to. If it fails, the fix is to move the code, never to relax the check.
+`cockpit-bitbucket-client.mjs` (Bearer auth, GET only, `getUser`/`listOpenPRs`/`listPRComments`,
+endpoints built from a base origin so a test can re-point them at a loopback stub) and
+`cockpit-bitbucket-store.mjs` (reads the four settings, atomically reads/writes the two JSON files)
+are the shell side, alongside the additions to `cockpitd.mjs`, `cockpit-welcome.mjs` and
+`cockpit-config.mjs`.
+
 ## Session names
 
 The fleet list's rows are labelled with each session's **name**. Left alone,
@@ -863,7 +1072,19 @@ spikes/cockpit-test/run.sh
 spikes/notes-test/run.sh        # the `note` command and the right column
 spikes/agenda-test/run.sh       # the agenda's store, model, Google client, command
 spikes/auto-name-test/run.sh    # session naming and its settings.json merge
+spikes/bitbucket-test/run.sh    # the dashboard's model, client, store, config, render
 ```
+
+`spikes/bitbucket-test` also needs no WezTerm — the dashboard is a region drawn
+inside the welcome pane, not a pane of its own — so it runs standalone like the
+notes and agenda suites. 312 assertions across five node suites (model, client,
+store, config, render) plus 6 bash checks. Its seatbelt is the throwaway
+`COCKPIT_DIR`: the real `~/.claude/cockpit` holds a live BitBucket credential and
+no test may read or write one, so `run.sh` fingerprints the settings files
+afterwards (names, sizes, mtimes — never contents) rather than trusting it. The
+bash checks fence the model's purity grep, the origin seam (no test may name a
+non-loopback BitBucket origin), and the browser seam (no test may name a real
+opener).
 
 `spikes/auto-name-test` needs no WezTerm — the naming hook is a plain
 stdin/stdout filter — so it runs standalone. Its seatbelt is `~/.claude/settings.json`:
