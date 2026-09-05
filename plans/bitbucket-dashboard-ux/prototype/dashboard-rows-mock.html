@@ -1,0 +1,339 @@
+<title>Two-Line PR Rows</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #f4f6f8;
+    --panel: #0d1013;
+    --panel-2: #14181d;
+    --hair: #262c33;
+    --dim: #6b7480;
+    --dimmer: #4b525c;
+    --text: #d8dde3;
+    --bright: #f2f5f8;
+    --cyan: #57c7d4;
+    --cyan-deep: #2b3b3f;
+    --new: #7fcf6b;
+    --active: #e2a13b;
+    --stale: #8b93a0;
+    --page-text: #2a2f36;
+    --page-dim: #6a7280;
+    --card: #ffffff;
+    --card-hair: #e3e7ec;
+    --accent: #1d7d8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0a0c0e;
+      --page-text: #d3d8de;
+      --page-dim: #8b929c;
+      --card: #14181d;
+      --card-hair: #262c33;
+      --accent: #57c7d4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0a0c0e;
+    --page-text: #d3d8de;
+    --page-dim: #8b929c;
+    --card: #14181d;
+    --card-hair: #262c33;
+    --accent: #57c7d4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--page-text);
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 72px; }
+
+  header.top { margin-bottom: 28px; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(24px, 4vw, 34px); font-weight: 700; margin: 0 0 10px;
+    color: var(--page-text); text-wrap: balance; letter-spacing: -0.01em;
+  }
+  .lede { margin: 0; max-width: 62ch; color: var(--page-dim); font-size: 14px; }
+  .throwaway {
+    display: inline-block; margin-top: 14px; font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--page-dim);
+    border: 1px dashed var(--card-hair); border-radius: 4px; padding: 4px 10px;
+  }
+
+  /* ---- the terminal panel ---- */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 18px 20px 20px;
+    box-shadow: 0 18px 50px -24px rgba(0,0,0,0.6);
+    overflow-x: auto;
+  }
+  .panel-chrome {
+    display: flex; align-items: center; gap: 7px; margin-bottom: 16px;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #e05a52; } .dot.y { background: #e2a13b; } .dot.g { background: #5aa564; }
+  .panel-chrome .cap { margin-left: 10px; font-size: 12px; color: var(--dimmer); }
+
+  .term { font-size: 13.5px; line-height: 1.72; color: var(--text); white-space: nowrap; min-width: 660px; }
+  .tabs { margin-bottom: 10px; }
+  .tab-on { color: var(--bright); font-weight: 700; }
+  .tab-off { color: var(--dim); }
+  .tab-sep { color: var(--dimmer); padding: 0 10px; }
+  .colhead { color: var(--dim); font-size: 12px; letter-spacing: 0.04em; margin-bottom: 4px; }
+
+  .row { padding: 5px 0; border-radius: 5px; }
+  .row + .row { border-top: 1px solid #191d22; }
+  .l1 { display: flex; align-items: baseline; gap: 14px; }
+  .l2 { display: flex; align-items: baseline; gap: 12px; padding-left: 22px; margin-top: 1px; }
+  .repo { color: var(--dim); width: 62px; display: inline-block; }
+  .num { color: var(--cyan); width: 46px; display: inline-block; }
+  .title { color: var(--bright); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .counts { color: var(--dim); font-size: 12.5px; white-space: nowrap; }
+  .counts .hot { color: var(--text); }
+  .counts .zero { color: var(--dimmer); }
+
+  .age { color: var(--dim); font-size: 12px; }
+  .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    padding: 1px 7px; border-radius: 3px; border: 1px solid transparent;
+  }
+  .tag.new { color: var(--new); border-color: #2f4a2b; background: #14210f; }
+  .tag.active { color: var(--active); border-color: #4a3a1c; background: #211a0d; }
+  .tag.stale { color: var(--stale); border-color: #2c333c; background: #161a1f; }
+  .l2 .meta { color: var(--dimmer); font-size: 12px; }
+
+  /* buttons */
+  .btns { display: inline-flex; gap: 8px; margin-left: 6px; }
+  .tbtn {
+    font-family: inherit; font-size: 12.5px; font-weight: 500;
+    color: var(--cyan); background: transparent;
+    border: 1px solid var(--cyan-deep); border-radius: 4px;
+    padding: 2px 10px; cursor: pointer;
+    transition: background 90ms ease, color 90ms ease, transform 60ms ease, border-color 90ms ease;
+    -webkit-user-select: none; user-select: none;
+  }
+  .tbtn.open { color: var(--dim); border-color: #2a3138; }
+  .tbtn:hover { background: #10343a; border-color: var(--cyan); color: var(--bright); }
+  .tbtn.open:hover { background: #1b2127; border-color: #3d454e; color: var(--text); }
+  .tbtn:active { background: var(--cyan); color: #06181b; border-color: var(--cyan); transform: translateY(1px); }
+  .tbtn.open:active { background: var(--text); color: #0d1013; border-color: var(--text); transform: translateY(1px); }
+  .tbtn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .row:hover { background: #101418; }
+
+  .pager { text-align: center; color: var(--dimmer); font-size: 12px; margin-top: 12px; }
+
+  /* ---- annotations ---- */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 26px; margin-top: 30px; }
+  @media (min-width: 860px) { .grid { grid-template-columns: 1.05fr 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--card-hair);
+    border-radius: 8px; padding: 20px 22px;
+  }
+  .card h2 {
+    font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--page-dim); margin: 0 0 16px; font-weight: 700;
+  }
+  .legend { display: flex; flex-direction: column; gap: 14px; }
+  .leg { display: grid; grid-template-columns: 92px 1fr; gap: 14px; align-items: start; }
+  .leg .swatch { display: flex; }
+  .leg p { margin: 0; font-size: 13px; color: var(--page-text); }
+  .leg p .k { color: var(--page-dim); }
+  .chip {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; padding: 1px 7px; border-radius: 3px;
+  }
+  .chip.new { color: #3f7d33; background: #e4f3df; border: 1px solid #bfe0b5; }
+  .chip.active { color: #8a5a12; background: #f8ecd4; border: 1px solid #e6cf9e; }
+  .chip.stale { color: #5a636e; background: #eef1f4; border: 1px solid #d7dce2; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .chip.new { color: var(--new); background: #14210f; border-color: #2f4a2b; }
+    :root:not([data-theme="light"]) .chip.active { color: var(--active); background: #211a0d; border-color: #4a3a1c; }
+    :root:not([data-theme="light"]) .chip.stale { color: var(--stale); background: #161a1f; border-color: #2c333c; }
+  }
+  :root[data-theme="dark"] .chip.new { color: var(--new); background: #14210f; border-color: #2f4a2b; }
+  :root[data-theme="dark"] .chip.active { color: var(--active); background: #211a0d; border-color: #4a3a1c; }
+  :root[data-theme="dark"] .chip.stale { color: var(--stale); background: #161a1f; border-color: #2c333c; }
+
+  .steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 13px; }
+  .steps li { display: grid; grid-template-columns: 20px 1fr; gap: 12px; font-size: 13px; color: var(--page-text); }
+  .steps .n { color: var(--accent); font-weight: 700; }
+  .steps .k { color: var(--page-dim); }
+
+  .toggle-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin: 22px 0 4px; font-size: 13px; color: var(--page-dim);
+  }
+  .sw { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; -webkit-user-select: none; user-select: none; }
+  .sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .track { width: 38px; height: 21px; border-radius: 11px; background: var(--card-hair); position: relative; transition: background 140ms; flex: none; }
+  .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform 140ms; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .sw input:checked + .track { background: var(--accent); }
+  .sw input:checked + .track::after { transform: translateX(17px); }
+  .sw input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sw .lab { font-weight: 500; color: var(--page-text); }
+
+  .propose {
+    margin-top: 30px; border: 1px solid var(--card-hair); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 20px 22px; background: var(--card);
+  }
+  .propose h2 { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
+  .propose p { margin: 0 0 8px; font-size: 13.5px; color: var(--page-text); max-width: 66ch; }
+  .propose .verdict { font-size: 12.5px; color: var(--page-dim); margin-top: 12px; }
+
+  .note-inline { color: var(--page-dim); font-size: 12px; margin-top: 8px; }
+  code.k { color: var(--accent); background: transparent; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow">BitBucket dashboard · direction mock</p>
+    <h1>Two-line PR rows, with clickable buttons that respond</h1>
+    <p class="lede">A throwaway mock to settle the feel before anything is designed. Hover the
+      <strong>[Review]</strong> / <strong>[Open]</strong> buttons and press them — that reaction is
+      proposal&nbsp;#1. Each PR now takes two lines: title and buttons on top, age and activity tags
+      below. Numbers, names and times are illustrative.</p>
+    <span class="throwaway">Not the real thing · nothing here is wired · sizes/wording still open</span>
+  </header>
+
+  <div class="toggle-bar">
+    <span>Toggles to compare:</span>
+    <label class="sw">
+      <input type="checkbox" id="tg-stale" checked>
+      <span class="track"></span>
+      <span class="lab">Show proposed <span style="color:var(--accent)">[STALE]</span> tag</span>
+    </label>
+    <label class="sw">
+      <input type="checkbox" id="tg-branch">
+      <span class="track"></span>
+      <span class="lab">Show branch on line 2</span>
+    </label>
+  </div>
+
+  <div class="panel">
+    <div class="panel-chrome">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="cap">cockpit · fleet list · BitBucket pane (left 75%)</span>
+    </div>
+    <div class="term">
+      <div class="tabs">
+        <span class="tab-on">To review · 5</span><span class="tab-sep">·</span><span class="tab-off">Mine · 3</span>
+      </div>
+      <div class="colhead">repo&nbsp;&nbsp;&nbsp;#&nbsp;&nbsp;&nbsp;title</div>
+
+      <!-- rows injected by tiny script so toggles can rebuild them -->
+      <div id="rows"></div>
+
+      <div class="pager">‹ prev&nbsp;&nbsp;·&nbsp;&nbsp;1/2&nbsp;&nbsp;·&nbsp;&nbsp;next ›</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>What the tags mean</h2>
+      <div class="legend">
+        <div class="leg">
+          <span class="swatch"><span class="chip new">NEW</span></span>
+          <p><span class="k">PR opened within the last 24 hours.</span> The one that just landed and you haven't seen yet.</p>
+        </div>
+        <div class="leg">
+          <span class="swatch"><span class="chip active">ACTIVE</span></span>
+          <p><span class="k">Several comments in the last 24 hours.</span> A live discussion is happening right now.</p>
+        </div>
+        <div class="leg">
+          <span class="swatch"><span class="chip stale">STALE</span></span>
+          <p><span class="k">Proposed.</span> No activity in over 14 days — going cold, may need a nudge or a close.</p>
+        </div>
+      </div>
+      <p class="note-inline">Age reads <code class="k">5h</code> under a day, <code class="k">3d</code> under a week,
+        then a date like <code class="k">Aug&nbsp;20</code>.</p>
+    </div>
+
+    <div class="card">
+      <h2>The button reaction (proposal #1)</h2>
+      <ul class="steps">
+        <li><span class="n">1</span><span><span class="k">Rest —</span> a quiet outline, primary in cyan, Open muted.</span></li>
+        <li><span class="n">2</span><span><span class="k">Hover —</span> the button fills faintly and brightens, so the pointer target is unmistakable.</span></li>
+        <li><span class="n">3</span><span><span class="k">Press —</span> it inverts for a beat — solid fill, text knocked out — confirming the click registered before the agent spawns.</span></li>
+      </ul>
+      <p class="note-inline">Try it on the rows above. This is what a terminal pane can plausibly do; whether
+        hover works on the unfocused pane is a technical question the plan will probe first.</p>
+    </div>
+  </div>
+
+  <div class="propose">
+    <h2>Something useful I'd add — your call</h2>
+    <p><strong>A [STALE] tag</strong> for a PR with no activity in over two weeks. It completes the
+      activity story the other two tags start: <span class="chip new" style="font-size:10px">NEW</span> just
+      arrived, <span class="chip active" style="font-size:10px">ACTIVE</span> is busy now,
+      <span class="chip stale" style="font-size:10px">STALE</span> has gone quiet and is easy to forget.
+      It costs nothing extra — it reads the same update time the age already uses.</p>
+    <p class="verdict">Toggle it on and off above to see it in place. Accept, reject, or change the threshold —
+      I won't build it unless you say so.</p>
+  </div>
+</div>
+
+<script>
+  // Rows as data so the toggles can rebuild them. Illustrative only.
+  const ROWS = [
+    { repo: "cribl",  num: 47424, title: "Add retry backoff to the S3 output flush path", ap: 1, cm: 8,  branch: "fix/s3-retry → main",       age: "3h",     tags: ["new"] },
+    { repo: "cribl",  num: 47390, title: "Refactor the pipeline scheduler into a worker pool", ap: 2, cm: 21, branch: "refactor/sched → main",  age: "9h",     tags: ["active"] },
+    { repo: "cribl",  num: 47201, title: "Wire the new telemetry counters through to the dashboard", ap: 0, cm: 2, branch: "feat/telemetry → main", age: "2d", tags: [] },
+    { repo: "logs",   num: 883,   title: "Bump vector to 0.39 and drop the shim", ap: 3, cm: 0, branch: "chore/vector-0.39 → main", age: "5d",     tags: [] },
+    { repo: "logs",   num: 640,   title: "Prototype the columnar reader (draft, do not merge yet)", ap: 0, cm: 1, branch: "spike/columnar → main", age: "Aug 20", tags: ["stale"] },
+  ];
+
+  const rowsEl = document.getElementById("rows");
+  const tgStale = document.getElementById("tg-stale");
+  const tgBranch = document.getElementById("tg-branch");
+
+  function esc(s){ return s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+  function countCell(ap, cm){
+    const a = ap > 0 ? `<span class="hot">✓${ap}</span>` : `<span class="zero">·</span>`;
+    const c = cm > 0 ? `<span class="hot">✎${cm}</span>` : `<span class="zero">·</span>`;
+    return `<span class="counts">${a}&nbsp;&nbsp;${c}</span>`;
+  }
+
+  function tagHtml(t){
+    const label = { new: "NEW", active: "ACTIVE", stale: "STALE" }[t];
+    return `<span class="tag ${t}">${label}</span>`;
+  }
+
+  function render(){
+    const showStale = tgStale.checked;
+    const showBranch = tgBranch.checked;
+    rowsEl.innerHTML = ROWS.map(r => {
+      const tags = r.tags.filter(t => t !== "stale" || showStale).map(tagHtml).join(" ");
+      const branch = showBranch ? `<span class="meta">${esc(r.branch)}</span>` : "";
+      return `
+      <div class="row">
+        <div class="l1">
+          <span class="repo">${esc(r.repo)}</span>
+          <span class="num">#${r.num}</span>
+          <span class="title">${esc(r.title)}</span>
+          ${countCell(r.ap, r.cm)}
+          <span class="btns">
+            <button class="tbtn">[Review]</button>
+            <button class="tbtn open">[Open]</button>
+          </span>
+        </div>
+        <div class="l2">
+          <span class="age">${esc(r.age)}</span>
+          ${tags}
+          ${branch}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  tgStale.addEventListener("change", render);
+  tgBranch.addEventListener("change", render);
+  render();
+</script>
