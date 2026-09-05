@@ -37,9 +37,11 @@ const FOOTER = process.argv[2] === "footer";
 
 const ESC = "\x1b[";
 
-// The three diff-mode labels, in the order the footer draws them. A click is
-// mapped back to one of these by column.
-const DIFF_ORDER = ["uncommitted", "lastcommit", "custom"];
+// The four diff-mode labels, in the order the footer draws them. A click is
+// mapped back to one of these by column, so this list is what gives each label a
+// hit zone as well as a position -- a mode left out of it is drawn nowhere and
+// clickable nowhere.
+const DIFF_ORDER = ["uncommitted", "lastcommit", "custom", "browse"];
 
 // Strip CSI sequences to measure how many COLUMNS a rendered string occupies:
 // escapes take no width, so the label positions a click must match are the
@@ -53,8 +55,13 @@ function read() {
 }
 
 // The daemon persists one of these mode names; anything else falls back to the
-// default (uncommitted) rather than showing a raw token.
-const DIFF_MODE_LABELS = { uncommitted: "Uncommitted Changes", lastcommit: "Last Commit", custom: "Custom" };
+// default (uncommitted) rather than showing a raw token. `browse` needs an entry
+// for a sharper reason than being listed: the highlight below falls back to
+// uncommitted for an unknown mode, so a missing entry would light up "Uncommitted
+// Changes" while the agent is actually browsing -- worse than showing nothing.
+const DIFF_MODE_LABELS = {
+  uncommitted: "Uncommitted Changes", lastcommit: "Last Commit", custom: "Custom", browse: "Browse",
+};
 
 // Name a terminal by what is RUNNING in it, VSCode-style: `zsh` at a prompt,
 // `node`/`npm`/`vim` while a command is in the foreground. WezTerm's pane title

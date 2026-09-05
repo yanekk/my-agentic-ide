@@ -61,32 +61,51 @@ const LOCK_TRIES = Math.ceil(LOCK_STALE_MS / LOCK_WAIT_MS);
 // unlinked it -- leaving the rest of the outer transaction running with no lock at
 // all, which is the opposite of what wrapping it was for. So count depth: the
 // outermost call owns the file and the inner ones simply run.
-let lockDepth = 0;
+//
+// The depth is counted PER LOCK FILE, and that is not tidiness. Browse mode's push
+// takes this same helper over viewer-tabs.lock (DESIGN 3.5), so a viewer-tabs write
+// can end up nested inside an agenda one -- and with a single module-level counter
+// the inner call would see depth > 0, take the reentrant branch, and run holding NO
+// lock on its own file at all: precisely the failure the counter was added to
+// prevent, wearing a different hat. Keyed by file, the agenda's own behaviour falls
+// out of it unchanged.
+const lockDepth = new Map();
 
-export function withLock(fn) {
-  if (lockDepth > 0) {
-    lockDepth++;
-    try { return fn(); } finally { lockDepth--; }
+/**
+ * Run `fn` holding an exclusive lock, breaking one a killed process left behind.
+ *
+ * @param {Function} fn
+ * @param {string}   lockFile  which lock -- agenda.lock by default; browse mode's
+ *                             push passes viewer-tabs.lock, so an agenda write and
+ *                             a file push never wait on each other.
+ */
+export function withLock(fn, lockFile = LOCK_FILE) {
+  const depth = lockDepth.get(lockFile) || 0;
+  if (depth > 0) {
+    lockDepth.set(lockFile, depth + 1);
+    try { return fn(); } finally { lockDepth.set(lockFile, (lockDepth.get(lockFile) || 1) - 1); }
   }
   let fd = null;
-  try { fs.mkdirSync(DIR, { recursive: true }); } catch { /* exists, or unwritable */ }
+  // dirname rather than DIR: the default lock lives there, but a caller's does not
+  // have to, and a missing directory would only surface as a failure to lock.
+  try { fs.mkdirSync(path.dirname(lockFile), { recursive: true }); } catch { /* exists, or unwritable */ }
   for (let i = 0; i < LOCK_TRIES; i++) {
-    try { fd = fs.openSync(LOCK_FILE, "wx"); break; } catch {
+    try { fd = fs.openSync(lockFile, "wx"); break; } catch {
       // A process killed mid-write leaves the lock behind forever; break one that
       // is clearly older than any write could take.
       try {
-        if (Date.now() - fs.statSync(LOCK_FILE).mtimeMs > LOCK_STALE_MS) fs.unlinkSync(LOCK_FILE);
+        if (Date.now() - fs.statSync(lockFile).mtimeMs > LOCK_STALE_MS) fs.unlinkSync(lockFile);
       } catch { /* someone else just cleared it */ }
       sleepSync(LOCK_WAIT_MS);
     }
   }
-  lockDepth = 1;
+  lockDepth.set(lockFile, 1);
   try {
     return fn();
   } finally {
-    lockDepth = 0;
+    lockDepth.delete(lockFile);
     if (fd !== null) try { fs.closeSync(fd); } catch { /* already gone */ }
-    try { fs.unlinkSync(LOCK_FILE); } catch { /* already gone */ }
+    try { fs.unlinkSync(lockFile); } catch { /* already gone */ }
   }
 }
 

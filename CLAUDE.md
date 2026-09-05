@@ -119,12 +119,18 @@ an agent's worktree, and they park and come back on a switch exactly like an
 agent's. A thin full-width **footer** along the bottom always shows
 that key legend, so the gestures are discoverable without memorising them.
 
-The diff has **three modes**, toggled with the same `⌥[` / `⌥]` — but only while the
+The diff has **four modes**, toggled with the same `⌥[` / `⌥]` — but only while the
 **diff pane is focused**; focused on a terminal, those keys still cycle terminals.
 `uncommitted` (the default) is `HEAD` → working tree, the agent's uncommitted work;
 `lastcommit` is `HEAD~1` → `HEAD`, just the most recent commit; `custom` is an
 arbitrary branch/SHA → working tree (`revdiff --untracked <ref>`, the same shape as
-`uncommitted` against a base you name). Cycling **into** `custom` pops an ASCII
+`uncommitted` against a base you name). The fourth, `browse`, is not a diff at all
+but a **read-only tour of the agent's worktree**: it swaps the single revdiff pane
+for a two-pane pair — a `broot` file tree on the left, a read-only `micro` viewer on
+the right — where Enter pushes a text file into the viewer as a new tab (a non-text
+file opens broot's own preview instead). Like the diffs it is **parked, not killed**
+on a switch, so the tree position and the reader's open tabs survive the return.
+Cycling **into** `custom` pops an ASCII
 "modal" (drawn in the diff pane by `cockpit-custom-prompt.mjs`) that asks for the
 ref every time, **pre-filled** with that agent's last one; a ref git cannot resolve
 re-shows the prompt with an error. The mode is **per agent** and **session-only**:
@@ -152,7 +158,7 @@ makes typing-without-submitting possible.
 
 ## Running it
 
-Once per machine: `bin/install.sh`. It checks the five tools, records where this
+Once per machine: `bin/install.sh`. It checks the seven tools, records where this
 checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
 registers the session-naming hook in `~/.claude/settings.json`.
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
@@ -177,6 +183,8 @@ bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic 
 bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
 bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
+bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
+bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
@@ -243,7 +251,7 @@ this is the index.
 | Watch the **directory**, never the file — the review file and the git reflog alike | revdiff flushes atomically (write temp + rename) and git rewrites `logs/HEAD` with a lock-file + rename, so both get a new inode every time and a file watch goes deaf after one event. That reflog watch is also the only way a **commit** reloads the diff: `git commit` touches no working-tree file, it moves `HEAD` — which for a linked agent worktree lives outside the worktree entirely. Reviews trigger on mtime+size, never content: `O` is an explicit "send this", so pressing it twice must inject twice. |
 | `--no-confirm-reload` **not** passed, `--no-confirm-discard` **is** | Opposite calls for opposite reasons: `R` fires *automatically*, so it must prompt rather than silently discard unflushed annotations; Shift+Q is an *explicit human* "throw them away", so the confirm is friction. `healQuitDiff` relaunches revdiff the moment the pane drops to a shell, making Q read as "clear all annotations and keep reviewing" — cooldown-guarded, because revdiff looks like a shell for ~1s while it paints and a relaunch in that gap types into a starting revdiff where every key is a binding. |
 | Never send `R`, `q` or a relaunch while the annotation editor is open | revdiff reads every keystroke as comment text (`comment on A` → `comment on AR`), and switching diff mode **restarts** revdiff (`q` then relaunch — `R` only reloads the *same* range), so the whole command would land in the comment. Detected by the editor's footer, `[enter] save`. On a visible pane you would see it; in a parked one you would not. |
-| "Is revdiff running" takes **two** signals | The pane title becomes `revdiff` but lags the launch by ~1s, longer after a move. Believing a stale `bash` retypes the whole command into a live revdiff, where every character is a keybinding. So the framed screen (19 lines starting with `│`, 0 at a prompt) is counted too; either signal is enough. |
+| "Is a pane running X" takes **three** signals, and the pane TITLE is the weakest | The title is not a name for what a pane runs — it is whatever last wrote it. On a headless mux nothing does, so WezTerm falls back to the process name and the title reads `revdiff`; on a real machine the **shell** writes it from a `preexec` hook, as the command's **first word**. Measured 2026-09-02: a pane running revdiff titled `cd` (launched `cd <wt> && revdiff …`), an idle shell titled its cwd. Even where the fallback does apply the title lags the launch by ~1s, longer after a move, and believing a stale `bash` retypes the whole command into a live revdiff where every character is a keybinding. So the **framed screen** is counted (19 lines starting with `│`, 0 at a prompt) and, when neither of those answers, the tty's **foreground process GROUP** (`ps -t`) — a pane is running the program if **any** member of that group is it, never merely the last one. Any one of the three signals is enough. revdiff survives on its frame alone; broot and micro draw none, so for them the title was the whole decision and it was wrong for the entire life of browse mode — the healer retyped broot's launch command into broot's filter box every 3s. Reading only the **last** member of the group left that same symptom behind, intermittently, on every Enter: broot spawns its Enter verb's `cockpit-open` **in its own process group** rather than a new one, so mid-push the pane answers `broot`, `/bin/sh` and `ps`, all three foreground (measured under `script(1)`, 2026-09-04) — and last-wins read a live broot as a quit shell. `terminalIsIdle` makes the same `ps` call and still reads the **last**, deliberately: a terminal's job takes a *new* process group and the shell drops out of the foreground, so there the question really is which single one is in front. |
 | The layout script names every split's program, and `exec`s a shell rather than exiting | A split that names no program inherits `default_prog` and re-runs the layout script for ever. And as `default_prog` the script is the window's only pane, so exiting on a failure closes the window and takes the error message with it. |
 | Panes are **moved**, never restarted — diffs and terminals alike | Starting revdiff costs seconds of git and parsing, once paid on every switch. `move-pane-to-new-tab` parks the outgoing pane and `split-pane --move-pane-id` brings the incoming one back, so WezTerm never tears the PTY down: a parked revdiff returns with its selected file, scroll position and unflushed annotations, and a `sleep 60` left running has ~30s left when you return 30s later (measured: a 1/s counter accrued 21 ticks while parked). Parked diffs keep their worktree watcher, or instant switching would just mean instantly showing something stale. Those parked panes live in **tabs** of the cockpit window, which is why the tab bar is off (`enable_tab_bar = false`) — clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished — and why parking re-activates the cockpit tab, since in the GUI the newly created tab becomes the active one. |
 | Both slots swap by splitting the **incoming** pane into the outgoing one | The diff pane spans the window, so its geometry *is* the slot: park it first and the only thing left to split is the fleet pane's half-width region — revdiff comes back at 59 of 120 columns. Splitting *into* the outgoing pane and disposing of it afterwards makes the incoming one inherit the slot. Same for the terminal, once the strip sits on its right edge (measured: terminal 47 cols, strip 12, fleet 59). Rebuilding an **empty** diff slot is the exception: park the terminal *and* the strip so `split-pane --top` comes off the fleet pane alone, then move both back. The strip is otherwise **never parked** — it is pure display and stays on the right edge for every agent. |
