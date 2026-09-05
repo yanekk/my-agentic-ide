@@ -4,8 +4,11 @@
 // sit here, whose only content was a one-line echo and a prompt showing the
 // repo's directory name -- which read as "the cockpit is just a git prompt".
 //
-// It is split down the middle: the cockpit's own greeting on the left, and on
-// the right the NOTES list over a rule over the AGENDA. All of it is drawn by
+// It is a 75/25 virtual split: the BitBucket DASHBOARD fills the left ~75%, and
+// on the right the NOTES list over a rule over the AGENDA takes the remaining
+// ~25% (DESIGN 2.1). The old centred greeting is gone -- its job of telling a
+// first-time user what this is is now the dashboard's own unconfigured state
+// (DESIGN 2.n), drawn by the pure model. All of it is drawn by
 // THIS ONE PROCESS -- the right column is a virtual pane, not a WezTerm one, and
 // so are the two sections inside it. That is deliberate: the diff slot is
 // swapped by parking exactly one pane and splitting the incoming one into it
@@ -23,7 +26,10 @@
 // Notes are added and edited from the `note` command in any cockpit terminal
 // (bin/cockpit-note.mjs); this only ever reads them. The agenda is the same
 // shape: `agenda` (bin/cockpit-agenda.mjs) configures it and cockpitd fetches
-// it, and this reads the two state files and draws what they say.
+// it, and this reads the two state files and draws what they say. The dashboard
+// is the same shape once more: `config` sets the credentials and cockpitd fetches
+// the PRs, and this reads the config + cache + view-state files and hands them to
+// the pure model, which decides every line and every hit-zone (DESIGN 3.1, 3.4).
 //
 // Started for you by bin/cockpit-layout.sh.
 
@@ -32,25 +38,14 @@ import fs from "node:fs";
 import { DIR, cockpitRepo, readNotes, relTime } from "./cockpit-notes.mjs";
 import { agendaHeight, clip, pad, renderAgenda, visibleLen } from "./cockpit-agenda-model.mjs";
 import { readCache, readState } from "./cockpit-agenda-store.mjs";
+import { renderDashboard } from "./cockpit-bitbucket-model.mjs";
+import {
+  readCache as readBBCache,
+  readConfig as readBBConfig,
+  readView as readBBView,
+} from "./cockpit-bitbucket-store.mjs";
 
 const ESC = "\x1b[";
-
-// Two phrasings of the same greeting. The left half is only half a window wide
-// now, so on a smaller cockpit the long form would be clipped mid-word -- which
-// looks like a bug rather than a greeting. Picked by the width actually available.
-const GREETING_LONG = [
-  `${ESC}1magentic-ide cockpit${ESC}0m`,
-  "",
-  `${ESC}2menter an agent in the fleet view below to review its work${ESC}0m`,
-  `${ESC}2mits diff opens here; its shell opens to the right${ESC}0m`,
-];
-const GREETING_SHORT = [
-  `${ESC}1magentic-ide cockpit${ESC}0m`,
-  "",
-  `${ESC}2menter an agent below to review it${ESC}0m`,
-  `${ESC}2mits diff opens here${ESC}0m`,
-];
-const greeting = (w) => (w >= 58 ? GREETING_LONG : GREETING_SHORT);
 
 // visibleLen/pad/clip come from the model now, where T03 put them, rather than
 // being kept in a second copy here: both sections of the right column must
@@ -191,6 +186,33 @@ function rightColumn(width, rows, now) {
   return out;
 }
 
+// --- the dashboard column --------------------------------------------------
+// The left ~75%. Everything it shows -- the tabs, the table, the pager, the
+// unconfigured greeting, the offline footnotes -- is decided by the pure model's
+// one call (DESIGN 3.3); this half only reads the three files and hands over the
+// arguments the model may not read for itself. The model already returns EXACTLY
+// `rows` lines, each clipped to `width`, so there is no budgeting to do here.
+//
+// It also returns the click hit-zones, computed for T08 (the daemon maps a
+// click's coordinates to a zone's verb). This task does not act on them -- the
+// pane is still pure display -- so they are discarded for now; T08 wires them.
+//
+// Nothing in here may throw: this is the resting screen of the whole cockpit
+// (DESIGN 2.n). The store's reads already return the empty/default shape on a
+// corrupt or absent file rather than throwing, so a corrupt cache draws the
+// empty/unconfigured view; the catch is for everything nobody thought of.
+function dashboardColumn(width, rows, now) {
+  try {
+    const config = readBBConfig();
+    const cache = readBBCache();
+    const view = readBBView();
+    const { lines } = renderDashboard({ width, rows, cache, view, now, config });
+    return lines;
+  } catch {
+    return Array.from({ length: rows }, () => "");
+  }
+}
+
 // --- the frame -------------------------------------------------------------
 // Recomputed on every render so it tracks resizes -- the pane is resized to the
 // full tab and back on every agent switch, so it takes two SIGWINCHes per swap.
@@ -199,35 +221,29 @@ function render() {
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
   // The ONE clock read in this process (DESIGN 3.4 -- the daemon's tick is the
-  // other one in the whole feature). Both sections are drawn from this single
-  // instant, so a note's age and the agenda's `NOW` row can never disagree.
+  // other one in the whole feature). All three regions are drawn from this single
+  // instant, so a note's age, the agenda's `NOW` row and the dashboard's offline
+  // "22m ago" can never disagree.
   const now = Date.now();
 
-  // Below this the notes column would be a few characters wide and unreadable, so
-  // the pane keeps its old single-column greeting rather than showing two useless
-  // halves. Notes are still there; `note ls` reads them.
-  const leftW = Math.floor((cols - 3) / 2);
+  // The 75/25 split (DESIGN 2.1). The 3 columns are the " │ " divider between the
+  // two regions. Below the notes/agenda floor the right column is a few characters
+  // wide and unreadable, so the dashboard takes the WHOLE pane rather than showing
+  // a cramped column beside it -- the same floor the old greeting/notes split used
+  // (the notes are still there; `note ls` reads them).
+  const leftW = Math.floor((cols - 3) * 0.75);
   const rightW = cols - leftW - 3;
   const split = rightW >= 24;
 
-  const lines0 = greeting(split ? leftW : cols);
-  const left = [];
-  const top = Math.max(0, Math.floor((rows - lines0.length) / 2));
-  for (let i = 0; i < top; i++) left.push("");
-  left.push(...lines0);
-
-  const centre = (line, w) => {
-    const p = Math.max(0, Math.floor((w - visibleLen(line)) / 2));
-    return " ".repeat(p) + line;
-  };
-
   const lines = [];
   if (!split) {
-    for (let r = 0; r < rows; r++) lines.push(centre(left[r] ?? "", cols));
+    const dash = dashboardColumn(cols, rows, now);
+    for (let r = 0; r < rows; r++) lines.push(clip(dash[r] ?? "", cols));
   } else {
+    const dash = dashboardColumn(leftW, rows, now);
     const right = rightColumn(rightW, rows, now);
     for (let r = 0; r < rows; r++) {
-      const l = pad(centre(clip(left[r] ?? "", leftW), leftW), leftW);
+      const l = pad(clip(dash[r] ?? "", leftW), leftW);
       lines.push(`${l} ${ESC}2m│${ESC}0m ${clip(right[r] ?? "", rightW)}`);
     }
   }
@@ -246,8 +262,14 @@ setInterval(render, 2000);                          // repaint if a resize is mi
 // directories. agenda-cache.json is what the daemon rewrites every minute,
 // and agenda.json is what `agenda add` writes, so both belong here: a calendar
 // attached in a terminal should appear up here without waiting for the 2s tick.
+// bitbucket-cache.json is what the daemon rewrites every minute with the fetched
+// PRs, and bitbucket-view.json is what it rewrites on a tab/page click, so both
+// belong here too: a fresh fetch or a tab switch should land without a tick wait.
+// The four bitbucket-* config files are NOT watched -- configuring is a one-time
+// setup and the 2s repaint covers the moment the dashboard turns on.
 const INTERESTING = new Set([
   "notes.json", "panes.json", "agenda.json", "agenda-cache.json",
+  "bitbucket-cache.json", "bitbucket-view.json",
 ]);
 try {
   fs.watch(DIR, (_e, name) => {

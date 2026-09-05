@@ -161,7 +161,7 @@ echo "== 8. the fleet view's notes column =="
 # scheduling accident, so the assertion below it would be a coin toss.
 render 140 24 > "$T/frame"
 check "the column is headed"                     "NOTES" "$T/frame"
-check "the greeting keeps the left half"         "agentic-ide cockpit" "$T/frame"
+check "the dashboard greeting keeps the left half" "BITBUCKET" "$T/frame"
 check "the halves are divided"                   "│" "$T/frame"
 check "a note is shown"                          "concurrent note 10" "$T/frame"
 check "with its id"                              "$(note ls | head -1 | awk '{print $1}')" "$T/frame"
@@ -184,7 +184,7 @@ check "...and how to add one"                    "in any cockpit terminal" "$T/f
 # unreadable and the greeting would clip mid-word.
 render 44 10 > "$T/frame"
 refute "a narrow pane drops back to one column"  "│" "$T/frame"
-check "...keeping the greeting"                  "agentic-ide cockpit" "$T/frame"
+check "...keeping the dashboard greeting"        "BITBUCKET" "$T/frame"
 
 echo
 echo "== 9. the agenda under the notes =="
@@ -308,13 +308,13 @@ same "...at another size too" \
 arender "$A" 44 10 > "$T/frame"
 refute "a narrow pane draws no agenda"           "AGENDA" "$T/frame"
 refute "...and stays one column"                 "│" "$T/frame"
-check "...keeping the greeting"                  "agentic-ide cockpit" "$T/frame"
+check "...keeping the dashboard greeting"        "BITBUCKET" "$T/frame"
 
 # A cockpit that will not paint because a JSON file lost a brace is worse than one
 # that has forgotten a calendar (DESIGN 2.7).
 printf '{ this is not json' > "$A/agenda-cache.json"
 arender "$A" 140 24 > "$T/frame"
-check "a corrupt cache still draws the pane"     "agentic-ide cockpit" "$T/frame"
+check "a corrupt agenda cache still draws the pane" "BITBUCKET" "$T/frame"
 check "...with the notes intact"                 "agenda-pane note 12" "$T/frame"
 check "...and the agenda saying it has nothing"  "nothing today or tomorrow" "$T/frame"
 printf '{ nor is this' > "$A/agenda.json"
@@ -340,31 +340,45 @@ code() { grep -vE '^[[:space:]]*(//|\*|/\*)' "$W"; }
 same "it starts no process"        "$(code | grep -cE 'child_process|execSync|execFileSync|spawn\(')" "0"
 same "it opens no socket"          "$(code | grep -cE 'node:net|node:http|node:https|fetch\(|Socket')" "0"
 same "it never drives wezterm"     "$(code | grep -ciE 'wezterm')" "0"
-# The agenda arrived by importing two modules; anything else new is a way back in.
-same "and imports only the model, the store and the notes" \
+# The agenda arrived by importing two modules and the dashboard two more (the pure
+# bitbucket model and its dumb store); anything ELSE new is a way back in. All four
+# are on the pure/dumb-store side of the boundary -- none starts a process, opens a
+# socket or drives wezterm (the three checks above), so importing them keeps this
+# pane the swappable diff slot.
+same "and imports only the models, the stores and the notes" \
   "$(code | grep -oE '(from|import)[[:space:]]*\(?[[:space:]]*"[^"]+"' | grep -oE '"[^"]+"' \
-     | grep -vcE '^"(node:fs|\./cockpit-(notes|agenda-model|agenda-store)\.mjs)"$')" "0"
+     | grep -vcE '^"(node:fs|\./cockpit-(notes|agenda-model|agenda-store|bitbucket-model|bitbucket-store)\.mjs)"$')" "0"
 
 echo
 echo "== 11. a new cache repaints the pane, with no restart =="
-# The daemon rewrites agenda-cache.json every five minutes and `agenda add` writes
-# it immediately; neither restarts this pane. It watches the state DIRECTORY
-# rather than the file because every write is temp-plus-rename, so a file watch
-# would go deaf on the new inode after the first one.
+# The daemon rewrites bitbucket-cache.json every minute and agenda-cache.json every
+# five; neither restarts this pane. It watches the state DIRECTORY rather than the
+# files because every write is temp-plus-rename, so a file watch would go deaf on
+# the new inode after the first one. Both caches ride the ONE fs.watch(DIR) via the
+# INTERESTING set, so proving it for the dashboard proves it for the agenda too --
+# and the dashboard is drawn full-width even at the piped child's 80 columns (where
+# 25% is below the 24-column split floor and the agenda column is not drawn at all),
+# so the marker is on screen for the harness to see.
 cat > "$T/watch.mjs" <<'WATCH'
 // Drives the real pane as a child with a pipe for a screen, replaces the cache
-// the way the store does, and times how long the new title takes to appear.
+// the way the store does, and times how long the new PR title takes to appear.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 const [welcome, dir, repo] = process.argv.slice(2);
-const cache = `${dir}/agenda-cache.json`;
+const cache = `${dir}/bitbucket-cache.json`;
 const write = (title) => {
-  const now = Date.now(), h = 3600000;
-  fs.writeFileSync(`${cache}.tmp`, JSON.stringify({ version: 1, calendars: { w: {
-    fetchedAt: now, error: null,
-    // All-day, so it is on screen whatever the hour the suite runs at.
-    events: [{ id: "x", title, start: now - 12 * h, end: now + 12 * h, allDay: true, reply: "n/a" }],
-  } } }));
+  // One open PR authored by a pick-list member, so it lands on the default
+  // "To review" tab and its title is drawn (DESIGN 2.3).
+  const pr = {
+    id: 1, title, author: { uuid: "other", nickname: "teammate" },
+    updated_on: "2026-01-01T00:00:00Z", participants: [], reviewers: [],
+    draft: false, comment_count: 0, links: { html: { href: "h" } },
+    source: { branch: { name: "s" } },
+    destination: { branch: { name: "main" }, repository: { name: "alpha" } },
+    comments: [],
+  };
+  fs.writeFileSync(`${cache}.tmp`, JSON.stringify({ version: 1, meUuid: "me",
+    repos: { alpha: { fetchedAt: Date.now(), error: null, prs: [pr] } } }));
   fs.renameSync(`${cache}.tmp`, cache);
 };
 write("before-the-write");
@@ -386,15 +400,75 @@ kid.stdout.on("data", (d) => {
 setTimeout(() => finish(started ? "NO REPAINT" : "NEVER PAINTED"), 1200);
 WATCH
 V="$T/watched"; mkdir -p "$V"
-printf '{"version":1,"accounts":{},"calendars":[{"slug":"w","account":"a@b","calendarId":"c","title":"w","colour":"teal","addedAt":1}]}\n' > "$V/agenda.json"
-COCKPIT_DIR="$V" note "a note in the watched pane" > /dev/null
+printf 'tok'   > "$V/bitbucket-key"
+printf 'ws'    > "$V/bitbucket-workspace"
+printf 'alpha' > "$V/bitbucket-repos"
+printf 'teammate' > "$V/bitbucket-team"
 out="$(node "$T/watch.mjs" "$ROOT/bin/cockpit-welcome.mjs" "$V" "$T/repo")"
 printf '%s\n' "$out" > "$T/out"
 # Under 1200ms with the fallback repaint 2s out: only the directory watch can
 # have done this.
-refute "a replaced cache is on screen without a restart" "NO REPAINT" "$T/out"
+refute "a replaced bitbucket cache is on screen without a restart" "NO REPAINT" "$T/out"
 refute "...and the pane painted at all"                  "NEVER PAINTED" "$T/out"
 check "...from the watch, not the 2s repaint"            "repainted in" "$T/out"
+
+echo
+echo "== 12. the bitbucket dashboard fills the left ~75% (T07) =="
+# The pure model decides every dashboard line (spikes/bitbucket-test covers that
+# exhaustively). This section only proves the PANE wires it into the left region:
+# the split ratio, that the greeting is now the dashboard's unconfigured state, and
+# that a corrupt cache never stops the pane painting.
+rightof() { node -e 'const fs=require("node:fs");process.stdout.write(fs.readFileSync(process.argv[1],"utf8").split("\n").map((l)=>l.split("│")[1]??"").join("\n"))' "$1"; }
+# Visible columns before the first divider: ~103 at 140 (75%), where a 50/50 split
+# would be ~69. The discriminator is generous so it does not turn on a rounding.
+dcol() { node -e 'const fs=require("node:fs");const l=fs.readFileSync(process.argv[1],"utf8").split("\n").find((x)=>x.includes("│"));process.stdout.write(String(l?[...l.split("│")[0].replace(/\r/g,"")].length:0))' "$1"; }
+
+BB="$T/bb"; mkdir -p "$BB"
+printf 'tok'   > "$BB/bitbucket-key"
+printf 'ws'    > "$BB/bitbucket-workspace"
+printf 'alpha' > "$BB/bitbucket-repos"
+printf 'alice' > "$BB/bitbucket-team"
+# One open PR by a pick-list member -> the default "To review" tab (DESIGN 2.3).
+cat > "$BB/bitbucket-cache.json" <<'CACHE'
+{"version":1,"meUuid":"me","repos":{"alpha":{"fetchedAt":1000,"error":null,"prs":[
+ {"id":7,"title":"add the widget flow","author":{"uuid":"alice-uuid","nickname":"alice"},
+  "updated_on":"2026-09-01T10:00:00Z","participants":[],"reviewers":[],"draft":false,
+  "comment_count":2,"links":{"html":{"href":"https://bitbucket.org/ws/alpha/pr/7"}},
+  "source":{"branch":{"name":"feat"}},
+  "destination":{"branch":{"name":"main"},"repository":{"name":"alpha"}},"comments":[]}
+]}}}
+CACHE
+COCKPIT_DIR="$BB" note "sidebar-note" > /dev/null
+
+COCKPIT_DIR="$BB" render 140 24 > "$T/frame"
+rightof "$T/frame" > "$T/right"; leftof "$T/frame" > "$T/left"
+check "the dashboard's PR is drawn"              "add the widget flow" "$T/frame"
+check "...in the left region"                    "add the widget flow" "$T/left"
+check "the To-review tab carries its count"      "To review · 1" "$T/left"
+check "the notes sit in the right region"        "sidebar-note" "$T/right"
+refute "the PR does not spill into the notes"    "add the widget flow" "$T/right"
+gt "the left region takes about three quarters"  "$(dcol "$T/frame")" "90"
+
+# The old centred greeting is gone; its job is the dashboard's unconfigured state.
+U="$T/unconf"; mkdir -p "$U"
+COCKPIT_DIR="$U" render 140 24 > "$T/frame"
+check "an unconfigured pane shows the setup greeting" "BITBUCKET" "$T/frame"
+check "...naming the command that turns it on"   "config bitbucket-key" "$T/frame"
+refute "the old fleet-view greeting is gone"     "agentic-ide cockpit" "$T/frame"
+
+# A cockpit that will not paint because the PR cache lost a brace is worse than one
+# showing the empty view (DESIGN 2.n). The store returns an empty cache on a corrupt
+# file, so a configured pane falls back to the empty table, not a crash.
+printf '{ this is not json' > "$BB/bitbucket-cache.json"
+COCKPIT_DIR="$BB" render 140 24 > "$T/frame"
+same "a corrupt PR cache still paints all 24 rows" \
+  "$(wc -l < "$T/frame" | tr -d ' ')" "24"
+check "...falling back to the empty table"       "nothing waiting on you" "$T/frame"
+check "...with the notes intact"                 "sidebar-note" "$T/frame"
+# And it is left exactly where it is: the daemon is the cache's single writer, so
+# this pure-display pane must not race it by rescuing (DESIGN 3.5).
+same "...and the pane did not move the corrupt cache aside" \
+  "$(cat "$BB/bitbucket-cache.json")" "{ this is not json"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; fi

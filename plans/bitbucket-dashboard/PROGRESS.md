@@ -10,16 +10,14 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. Folded **T02/T04/T05 reopen complete and hand-verified** 2026-09-05: client
-auth→Bearer (Bearer-only, confirmed with the user), new `listPRComments`, daemon reads comments
-**only for PRs that concern me** via the new pure `model.concernsMe` — the fix for cribl's 739
-open PRs, which the user caught. Live-verified against the real cribl access token: identity
-resolves (uuid returned), listing (739) and comment fetch (#47424→11) all work. All four suites
-green (bitbucket model 50, cockpit 486). **Remaining question, user's call:** this folded code did
-not go through the pir-review alternation (not a queue task) — whether to give it a fresh-eyes
-pass. Next ready ⬜ is T07.
+**Status:** Building. **T07 built (🔍)** 2026-09-05: welcome pane rewired to 75/25 — dashboard on
+the left via `model.renderDashboard`, notes/agenda on the right; below the split floor the
+dashboard takes the whole pane. All four suites green (notes now 103, cockpit 486 — park/swap
+unchanged). **T07's look is unverified — needs the user at a live cockpit** (command in the report
+and the task doc). Still open, user's call: the folded T02/T04/T05 reopen never took the
+pir-review alternation — whether to give it a fresh-eyes pass.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T07 (75/25 pane rewire; needs the user at the live cockpit).
+**Next `pir-work` will:** review T07.
 
 ## Tasks
 
@@ -35,12 +33,12 @@ done · ⛔ blocked, needs a human.
 | T04 | Store: config reads, cache + view-state files | T01 | ✅ | Reviewed clean 2026-09-04, no fix. Fully testable, no hands-on half. |
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. All 3 triggers wired; orphan cache entries never pruned → T06 iterates config.repos. |
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Tests genuine (zones re-walked vs coords; exact-rows/width at 5 widths). Purity holds (agenda-model is itself import-free). Probed pager reserve math, clip-vs-zone (buttons last), auth-vs-mixed split, tiny-n degradation, de-watched-repo test. 4 deviations all sound; greeting's `email:api-token` correct per current §2.6 (Bearer reopen updates it). |
-| T07 | Rewire welcome pane to 75/25 | T05, T06 | ⬜ | Touches the diff-slot pane; keep the park/swap invariant. Hand-verify look. |
+| T07 | Rewire welcome pane to 75/25 | T05, T06 | 🔍 | Pane forwards config+cache+view to `renderDashboard` (left 75%), notes/agenda right 25%; split floor `rightW≥24` else full-width dashboard. Tests: notes-test +13 (now 103) — new §12, and §11 watch repointed agenda→bitbucket cache (piped child is 80 cols, non-split, so agenda column undrawn). cockpit-test 486 unchanged. **Look unverified — needs live cockpit.** |
 | T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⬜ | Open uses BITBUCKET_BROWSER seam. |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty.
+**Review queue:** T07.
 
 ## Plan decisions (2026-09-05)
 
