@@ -2348,12 +2348,25 @@ const json = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 // One raw PR in BitBucket's shape. The title is deliberately shouty: the daemon
-// must never write it to a log that gets pasted into conversations.
-const PRS = { values: [{
+// must never write it to a log that gets pasted into conversations. ME-UUID is a
+// reviewer, so this PR CONCERNS me -- the daemon reads comments only for PRs that
+// will show (DESIGN 2.3, 2.9), and this is the one that does.
+const MINE = {
   id: 7, title: "SECRET-PR-TITLE", state: "OPEN", comment_count: 2,
   updated_on: "2026-09-04T10:00:00+00:00", author: { uuid: "{author}" },
-  participants: [], links: { html: { href: "https://bitbucket.org/ws/pr/7" } },
-}] };
+  participants: [], reviewers: [{ uuid: "ME-UUID" }],
+  links: { html: { href: "https://bitbucket.org/ws/pr/7" } },
+};
+// A second PR that concerns NOBODY here (I do not review it, I did not write it):
+// the daemon must NOT spend a comment read on it. `two-prs` mode returns both.
+const NOTMINE = {
+  id: 8, title: "OTHER-PR", state: "OPEN", comment_count: 0,
+  updated_on: "2026-09-03T10:00:00+00:00", author: { uuid: "{other}" },
+  participants: [], reviewers: [],
+  links: { html: { href: "https://bitbucket.org/ws/pr/8" } },
+};
+const PRS = { values: [MINE] };
+const PRS2 = { values: [MINE, NOTMINE] };
 // One PR's comments: a single unresolved inline thread the sort would count
 // (DESIGN 2.3). The daemon fetches this per open PR (decision A, DESIGN 2.9) and
 // attaches it to the raw PR as `.comments`.
@@ -2381,6 +2394,7 @@ const server = http.createServer((req, res) => {
   if (m === "auth") return json(res, 401, { type: "error" });
   if (m === "one-bad" && repo === "bad") return json(res, 500, { type: "error" });  // -> transient
   if (m === "slow") return setTimeout(() => json(res, 200, PRS), 2000);
+  if (m === "two-prs") return json(res, 200, PRS2);
   json(res, 200, PRS);
 });
 server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
@@ -2460,9 +2474,25 @@ same  "...and the auth error cleared entirely"    "$(bq "$S4" 'c.repos.alpha.err
 # Each open PR also costs one comments GET (decision A, DESIGN 2.9), attached to the
 # raw PR as `.comments` for the unresolved-thread sort (DESIGN 2.3). The store passes
 # it through untouched, so it is in the cache.
-check "each open PR's comments are fetched too"    "/pullrequests/7/comments" "$BBHITS"
+check "the concerning PR's comments are fetched"   "/pullrequests/7/comments" "$BBHITS"
 same  "...and attached to the raw PR for the sort" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 check "...the log counts the comment fetches"      "alpha ok, 1 prs, 1 comment fetches" "$A4/daemon.log"
+
+# Only PRs that concern me cost a comment read (DESIGN 2.3, 2.9; FINDINGS 2026-09-05).
+# two-prs adds #8, which I neither review nor authored: it is cached raw but must NOT
+# trigger a comment GET, so a repo with hundreds of open PRs still costs a read only
+# for the handful shown.
+: > "$BBHITS"
+echo two-prs > "$BBMODE"
+sleep 2
+same  "both raw PRs are cached"                    "$(bq "$S4" 'c.repos.alpha.prs.length')" "2"
+check "the PR I review still gets a comment read"  "/pullrequests/7/comments" "$BBHITS"
+same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/comments' "$BBHITS")" "0"
+same  "...and it carries an empty comments array"  "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).comments.length')" "0"
+check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches" "$A4/daemon.log"
+echo ok > "$BBMODE"
+sleep 2
+same  "back to one PR when the extra one closes"   "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 # meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
 # repos are re-fetched but /2.0/user is not called again.

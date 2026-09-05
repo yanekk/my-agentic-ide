@@ -4,7 +4,7 @@
 // network, no state dir touched. The bash run.sh separately greps the module for
 // anything impure.
 
-import { normalizePR, classify, paginate } from "../../bin/cockpit-bitbucket-model.mjs";
+import { normalizePR, classify, concernsMe, paginate } from "../../bin/cockpit-bitbucket-model.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A raw BitBucket PR, only the fields the model reads. The comments array is what
@@ -184,6 +184,33 @@ function main() {
     const p8 = nPR({ id: 8, authorUuid: "{other}", reviewers: [ME], approvedByMe: true });
     const { toReview } = classify([p8], { meUuid: ME, team: [] });
     eq("approved-by-me is filtered out", ids(toReview), []);
+  }
+
+  // concernsMe is the daemon's "is this worth a comment fetch" gate, and it MUST
+  // agree with classify's membership exactly (DESIGN 2.3, FINDINGS 2026-09-05) --
+  // else the sort would rank a PR whose comments were never fetched, or the daemon
+  // would waste a fetch on a PR that never shows.
+  section("concernsMe agrees with classify membership, comment-free");
+  {
+    const opts = { meUuid: ME, team: ["leon"] };
+    ok("a PR I review concerns me",
+      concernsMe(nPR({ authorUuid: "{other}", authorNick: "magda", reviewers: [ME] }), opts) === true);
+    ok("a PR I authored concerns me",
+      concernsMe(nPR({ authorUuid: ME, authorNick: "me" }), opts) === true);
+    ok("a pick-list author's PR concerns me",
+      concernsMe(nPR({ authorUuid: "{leon}", authorNick: "Leon" }), opts) === true);
+    ok("a stranger's PR does not",
+      concernsMe(nPR({ authorUuid: "{s}", authorNick: "stranger" }), opts) === false);
+    ok("someone else's draft I review does not (excluded like classify)",
+      concernsMe(nPR({ authorUuid: "{other}", reviewers: [ME], draft: true }), opts) === false);
+    ok("my own draft concerns me (it is mine)",
+      concernsMe(nPR({ authorUuid: ME, authorNick: "me", draft: true }), opts) === true);
+    ok("a PR I already approved does not",
+      concernsMe(nPR({ authorUuid: "{other}", reviewers: [ME], approvedByMe: true }), opts) === false);
+    ok("with no meUuid and no pick-list, nothing concerns me",
+      concernsMe(nPR({ authorUuid: "{leon}", authorNick: "leon", reviewers: [] }), { meUuid: "", team: [] }) === false);
+    ok("but a pick-list author concerns me even with no meUuid",
+      concernsMe(nPR({ authorUuid: "{leon}", authorNick: "leon" }), { meUuid: "", team: ["leon"] }) === true);
   }
 
   section("sort: toReview by myUnresolved asc, mine by unresolved desc, updatedOn tiebreak");

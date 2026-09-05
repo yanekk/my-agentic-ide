@@ -10,17 +10,16 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. Folded **T02/T04/T05 reopen built** 2026-09-05: client auth→Bearer, new
-`listPRComments`, daemon fetches comments per open PR into `raw.comments`, store passes through.
-All four suites green. **Bearer-only confirmed with the user** 2026-09-05 after a live diagnosis
-found the then-configured key was a personal `email:api-token` (Basic works, Bearer 401s) — the
-wrong key, not a reason to support Basic. **One live check still open:** does `GET /2.0/user`
-resolve an identity for the real cribl **Bearer** access token? "Assigned to me / my threads" die
-if not — command in "Blocked on the user". This folded code did **not** go through the pir-review
-alternation (not a queue task); a fresh-eyes pass is a plan-structure call for the user. Next
-ready ⬜ is T07.
+**Status:** Building. Folded **T02/T04/T05 reopen complete and hand-verified** 2026-09-05: client
+auth→Bearer (Bearer-only, confirmed with the user), new `listPRComments`, daemon reads comments
+**only for PRs that concern me** via the new pure `model.concernsMe` — the fix for cribl's 739
+open PRs, which the user caught. Live-verified against the real cribl access token: identity
+resolves (uuid returned), listing (739) and comment fetch (#47424→11) all work. All four suites
+green (bitbucket model 50, cockpit 486). **Remaining question, user's call:** this folded code did
+not go through the pir-review alternation (not a queue task) — whether to give it a fresh-eyes
+pass. Next ready ⬜ is T07.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T07 (the reopen's Bearer-identity check awaits the user).
+**Next `pir-work` will:** implement T07 (75/25 pane rewire; needs the user at the live cockpit).
 
 ## Tasks
 
@@ -62,30 +61,10 @@ done · ⛔ blocked, needs a human.
 
 ## Blocked on the user
 
-- **Reopen hand-check (the cribl Bearer token, do before the reopen is done).** The client is
-  Bearer-only; the load-bearing unknown is whether `GET /2.0/user` returns a uuid for the real
-  cribl **access token** (a personal email:api-token was diagnosed in config on 2026-09-05 and is
-  the wrong key — it 401s under Bearer, proving nothing). Read-only (GET only, DESIGN 5.2). Paste
-  the cribl Bearer token and a cribl workspace/repo, run in the repo root:
-
-  ```
-  BB_KEY="<cribl access token>" BB_WS="<cribl workspace>" BB_REPO="<a cribl repo>" \
-    node -e 'import("./bin/cockpit-bitbucket-client.mjs").then(async m => {
-      const key = process.env.BB_KEY, ws = process.env.BB_WS, repo = process.env.BB_REPO;
-      console.log("getUser:", await m.getUser({ key }));
-      const r = await m.listOpenPRs({ key, workspace: ws, repo });
-      console.log("listOpenPRs("+repo+"):", r.error || (r.prs.length+" open PRs"));
-      if (r.prs && r.prs.length) {
-        const c = await m.listPRComments({ key, workspace: ws, repo, prId: r.prs[0].id });
-        console.log("listPRComments #"+r.prs[0].id+":", c.error || (c.comments.length+" comments"));
-      }
-    })'
-  ```
-
-  Expect: getUser prints a real uuid (not `{error:...}`), a PR count, and a comment count on a PR.
-  Tell me: did getUser return a uuid (Bearer identity works for the access token)? Did the PR list
-  and comment fetch both succeed? If getUser 401s while the list works, that is the design risk in
-  DESIGN §2.6 — identity needs a different source, a decision for the user.
+- **Reopen hand-check — DONE 2026-09-05** (FINDINGS ✅). Against the real cribl Bearer access
+  token: `getUser` returned a uuid (identity resolves — the DESIGN §2.6 risk is closed),
+  `listOpenPRs` 739, `listPRComments` #47424 → 11. Auth, listing and the comment fetch all work
+  live. Nothing outstanding here.
 
 - Items marked "hand-verified" that remain (T07 look, T09 spawn) need the user at the live cockpit
   when that task is reached; each task doc carries the exact command. (T00 verified 2026-09-04,

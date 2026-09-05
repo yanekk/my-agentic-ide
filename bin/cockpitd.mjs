@@ -33,6 +33,7 @@ import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google
 // BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
 // aliased because the agenda store already owns those names.
 import { getUser, listOpenPRs, listPRComments } from "./cockpit-bitbucket-client.mjs";
+import { normalizePR, concernsMe } from "./cockpit-bitbucket-model.mjs";
 import {
   isConfigured,
   readCache as readBBCache,
@@ -2953,23 +2954,38 @@ async function refreshPRs(reason) {
         // inside the raw PR, so the store persists it for free (T04 passes prs
         // through) and the model reads it as `raw.comments`.
         //
-        // A comment fetch that FAILS while its PR list succeeded keeps that PR's
-        // PREVIOUS comments -- the same "keep last" the repo level uses -- so a blip
-        // does not drop a PR's thread count to zero and reshuffle the sort for a
-        // tick; the counts heal on the next pass. Any error kind is treated this way:
-        // the list call just proved the token is fine, so a comment 401 is a per-PR
-        // quirk, not the whole-dashboard auth signal.
+        // ONLY read comments for the PRs that will actually show (DESIGN 2.3, 2.9;
+        // FINDINGS 2026-09-05). A repo can have hundreds of open PRs -- cribl has 739
+        // -- but only the handful I review or authored are ever displayed; reading
+        // every open PR's comments each minute would break the rate limit and never
+        // finish a tick. concernsMe applies classify's OWN membership rule to the
+        // cheap list fields (reviewer/author/draft/approved) with no comment read, so
+        // what is fetched here and what classify shows cannot drift. A non-concerning
+        // PR is still cached raw (the pure model owns the display decision, DESIGN
+        // 3.1) but gets an empty `comments` -- it is filtered out before the sort
+        // ever looks at it.
+        //
+        // A comment fetch that FAILS on a concerning PR keeps that PR's PREVIOUS
+        // comments -- the same "keep last" the repo level uses -- so a blip does not
+        // drop its thread count to zero and reshuffle the sort for a tick; the counts
+        // heal on the next pass. Any error kind is treated this way: the list call
+        // just proved the token is fine, so a comment 401 is a per-PR quirk, not the
+        // whole-dashboard auth signal.
         const prevById = new Map((prev?.prs ?? []).map((p) => [p.id, p]));
+        const prevComments = (id) => {
+          const c = prevById.get(id)?.comments;
+          return Array.isArray(c) ? c : [];
+        };
         let commentGets = 0;
         for (const pr of res.prs) {
-          const cr = await listPRComments({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
-          if (cr.error) {
-            const prevComments = prevById.get(pr.id)?.comments;
-            pr.comments = Array.isArray(prevComments) ? prevComments : [];
-          } else {
-            pr.comments = cr.comments;
-            commentGets++;
+          const norm = normalizePR(pr, { meUuid: cache.meUuid, repo: slug });
+          if (!concernsMe(norm, { meUuid: cache.meUuid, team: cfg.team })) {
+            pr.comments = prevComments(pr.id);   // not shown -> no read; keep any it had
+            continue;
           }
+          const cr = await listPRComments({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
+          pr.comments = cr.error ? prevComments(pr.id) : cr.comments;
+          if (!cr.error) commentGets++;
         }
         cache.repos[slug] = { fetchedAt: now, prs: res.prs, error: null };
         // The comment-fetch count makes the per-minute call volume visible in the log

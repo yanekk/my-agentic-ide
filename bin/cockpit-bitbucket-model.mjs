@@ -129,24 +129,48 @@ function commentAuthorUuid(c) {
  */
 export function classify(prs, { meUuid = "", team = [] } = {}) {
   const list = Array.isArray(prs) ? prs : [];
-  const teamSet = new Set(
-    (Array.isArray(team) ? team : [])
-      .map((t) => String(t).trim().toLowerCase())
-      .filter(Boolean),
-  );
+  const teamSet = teamSetOf(team);
 
-  const iReview = (pr) => !!meUuid && pr.reviewers.includes(meUuid);
-  const onPickList = (pr) => teamSet.has(String(pr.author.nickname).trim().toLowerCase());
-  const authoredByMe = (pr) => !!meUuid && pr.author.uuid === meUuid;
-
-  const toReview = dedupe(
-    list.filter((pr) => !pr.draft && !pr.approvedByMe && (iReview(pr) || onPickList(pr))),
-  );
-  const mine = dedupe(list.filter(authoredByMe));
+  const toReview = dedupe(list.filter((pr) => inToReview(pr, meUuid, teamSet)));
+  const mine = dedupe(list.filter((pr) => inMine(pr, meUuid)));
 
   toReview.sort(byCount((pr) => pr.myUnresolved, "asc"));
   mine.sort(byCount((pr) => pr.unresolved, "desc"));
   return { toReview, mine };
+}
+
+// The membership half of classify, factored out so the same three rules decide both
+// what SHOWS (classify) and what is worth a comment fetch (concernsMe) -- kept beside
+// each other so they cannot drift. All read only the cheap list fields (reviewers,
+// author, draft, participants-derived approvedByMe); NONE reads a comment.
+function teamSetOf(team) {
+  return new Set(
+    (Array.isArray(team) ? team : [])
+      .map((t) => String(t).trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+function inToReview(pr, meUuid, teamSet) {
+  const iReview = !!meUuid && pr.reviewers.includes(meUuid);
+  const onPickList = teamSet.has(String(pr.author.nickname).trim().toLowerCase());
+  return !pr.draft && !pr.approvedByMe && (iReview || onPickList);
+}
+function inMine(pr, meUuid) {
+  return !!meUuid && pr.author.uuid === meUuid;
+}
+
+/**
+ * Does this normalized PR belong on EITHER tab for this user -- i.e. is it worth a
+ * comment fetch (DESIGN 2.3 membership, without the sort)? The DAEMON calls this to
+ * decide which PRs to read comments for, so a repo with hundreds of open PRs (cribl:
+ * 739, FINDINGS 2026-09-05) costs a comment GET only for the handful that actually
+ * show, not one per open PR. It is the SAME rule classify applies, on the same
+ * comment-free fields, which is the whole point of sharing it: what is fetched and
+ * what is shown are decided by one function, so they cannot disagree.
+ */
+export function concernsMe(pr, { meUuid = "", team = [] } = {}) {
+  const teamSet = teamSetOf(team);
+  return inToReview(pr, meUuid, teamSet) || inMine(pr, meUuid);
 }
 
 // A PR is identified by repo + id, so the same PR reached by two inclusion rules

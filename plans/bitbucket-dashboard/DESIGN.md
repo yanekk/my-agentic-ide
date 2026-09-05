@@ -131,12 +131,15 @@ ones they wrote, so I can review them proactively even when unassigned.
 
 **Cost of the precise sort (decision A over B).** "Unresolved" and "authored by me" are not in
 the cheap per-repo list call — that call carries only a total `comment_count`. Computing them
-needs one extra GET per open PR for its comments (§2.9), which reopens the client (T02), the
+needs one extra GET per shown PR for its comments (§2.9), which reopened the client (T02), the
 cache shape (T04) and the daemon fetch (T05) to carry that data through to the pure model. The
 cheaper alternative — sort by the free total `comment_count` — was declined (2026-09-05): it
 would rank a PR with many *resolved* threads as if it were still busy, the exact signal the sort
-exists to avoid. `classify` stays one swappable pure function (§3.3) so the metric can still be
-changed in one place with its tests.
+exists to avoid. The comment fetch is **bounded to the PRs that show, not every open PR** (§2.9):
+the daemon uses classify's own membership predicate (`concernsMe`) to skip the hundreds that never
+appear, so decision A's cost stays a handful per repo even at cribl's 739 open PRs. `classify` and
+`concernsMe` stay pure functions (§3.3) so the metric and the membership can each change in one
+place with their tests.
 
 ### 2.4 Approval and comment counts
 
@@ -263,16 +266,24 @@ fresh the instant you look at it), and once at startup.
 A refresh is **one GET per watched repo, plus one `GET /2.0/user`** the first time (the uuid is
 then cached). Each repo call is
 `GET /2.0/repositories/{workspace}/{repo}/pullrequests?state=OPEN&fields=%2Bvalues.participants,%2Bvalues.reviewers&pagelen=50`,
-following `next` if a repo has more than 50 open PRs (rare). Tab membership, approvals and the
-displayed comment total all come out of that one response per repo, so no per-role query is
-needed. **The one exception is the sort.** The unresolved-thread sort (§2.3) needs each PR's
-comments, which the list call does not carry, so a refresh also makes **one GET per open PR** for
-its comments — bounded by the number of open PRs, not a fixed cost. This is the accepted price of
-the precise sort (§2.3, decision A); the cheaper total-`comment_count` sort would have kept the
-one-call-per-repo budget. For a handful of repos with a handful of open PRs each this is still a
-few dozen calls a minute, inside BitBucket Cloud's authenticated rate limit, so no backoff logic
-is designed in; if a real workspace ever makes this tight, that is a finding, not a guess to
-pre-build against.
+following `next` if a repo has more than 50 open PRs (which is not rare — cribl has 739, so this
+follow runs ~15 pages). Tab membership, approvals and the displayed comment total all come out of
+that one response per repo, so no per-role query is needed. **The one exception is the sort.** The
+unresolved-thread sort (§2.3) needs each PR's comments, which the list call does not carry, so a
+refresh also makes **one GET per open PR _that concerns me_** for its comments.
+
+**Bounded to the PRs that show, not to every open PR** (revised 2026-09-05). The first cut of the
+reopen read comments for *every* open PR, which at cribl's 739 is 739 GETs a minute — past the
+rate limit and slower than the 60s tick. But only the handful I review or authored are ever
+displayed, and tab membership is decided entirely from the cheap list fields (reviewer, author,
+draft, approved — no comment needed). So the daemon runs `model.concernsMe` on each raw PR first
+and reads comments only for the ones that pass; a non-concerning PR is cached raw with an empty
+`comments`. `concernsMe` is classify's own membership rule, shared so what is fetched and what is
+shown cannot drift (§3.3). This keeps the precise sort (decision A) while the comment budget is a
+handful per repo, not hundreds. The cheaper total-`comment_count` sort (decision B) would have
+needed no comment fetch at all; it was declined again after 739 surfaced, because the selective
+fetch keeps the budget small without giving up resolved-vs-open precision (§2.3). No backoff is
+designed in; if the *shown* set ever grows enough to make even this tight, that is a finding.
 
 ### 2.n The unhappy paths
 
@@ -347,13 +358,17 @@ else:
 
 ```
 classify(prs, { meUuid, team })        -> { toReview: PR[], mine: PR[] }   // sorted, deduped
-renderDashboard({ width, rows, cache, view, now })
+concernsMe(pr, { meUuid, team })       -> boolean   // classify's membership half, no comments
+renderDashboard({ width, rows, cache, view, now, config })
                                        -> { lines: string[], hitZones: Zone[] }
 ```
 
 `classify` is the one the T03 brainstorm shapes (§2.3); keeping it a single pure function is
-what makes trying a filter idea a one-line change with a test, not a refactor. A `Zone` is
-`{ verb, x0, x1, y }` — the daemon-bound verb a click in that cell emits (§3.4).
+what makes trying a filter idea a one-line change with a test, not a refactor. `concernsMe` is
+its membership half, factored out (2026-09-05) so the **daemon** can decide which PRs are worth a
+comment fetch (§2.9) using the exact rule classify shows — the two share the predicate so a PR is
+never fetched-but-hidden or shown-but-unfetched. A `Zone` is `{ verb, x0, x1, y }` — the
+daemon-bound verb a click in that cell emits (§3.4).
 
 ### 3.4 Data flow
 
