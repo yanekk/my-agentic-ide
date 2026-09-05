@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-05 | 📌 | T05 review clean, no fix. refreshPRs only fetches/writes `cfg.repos`, so a de-watched repo's cache entry lingers in `bitbucket-cache.json` forever (never pruned). Harmless on disk, but T06's renderer must iterate the config's repos, not `cache.repos` keys, or a removed repo still shows. |
 | 2026-09-04 | 📌 | T05: a cockpit-test daemon launched `envfn node … >log &` binds `$!` to the subshell, not node, so `kill $!` orphans cockpitd. Agenda sections hide this via staleness; the dashboard has none, so a leak out-ticks the next daemon. D4/D5 use `stopbb` (kills the node child). Agenda's own D2/D3/main kill still leak. |
 | 2026-09-04 | ✅ | T02 hand-verified with the user: `getUser` authenticated against their real workspace (real uuid, not `{error:{kind:"auth"}}`); `listOpenPRs` succeeded returning 0 PRs (an empty test repo). Raw-PR shape already confirmed vs the public API (row below); auth was T02's only live unknown. |
 | 2026-09-04 | 📌 | T01 reviewed clean, no fix. `bitbucket-test/run.sh` prints the `ALL PASS`/`FAILURES` sentinel the other four suites use, not DESIGN §5's `bitbucket-test: N ok` example — reviewed and endorsed, so don't "fix" it back to the example. |
