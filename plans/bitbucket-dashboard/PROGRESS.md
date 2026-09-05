@@ -10,17 +10,15 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T08 code-reviewed clean; hand-check found + fixed two things** 2026-09-05.
-Live with the user: tab clicks switch, a bottom-row Open lands on the right PR (clicks hit the
-drawn row). Two fixes applied this review: (1) the wheel bit (64) now excluded so a scroll no
-longer fires a stray click — in both mouse readers, welcome + strip; (2) switching tabs resets to
-page 1 (DESIGN 2.5 rule changed at the user's request; §14d test added). Suites green (agenda,
-notes 106, cockpit 502, bitbucket). **T08 held ⛔** for a 20s live re-confirm of those two fixes
-before ✅ — T09 turns Review/Address live, which is exactly what a stray wheel-scroll would spawn.
-Still open, user's call: the folded T02/T04/T05 reopen never took the pir-review alternation.
+**Status:** Building. **T08 done ✅** 2026-09-05. Code review clean; hand-check with the user
+found and fixed two things, both now confirmed live: (1) a mouse-wheel scroll fired a stray click
+(bit 64 leaked through the left-click filter) — fixed in both mouse readers (welcome + strip), no
+stray click on scroll now; (2) switching tabs resets to page 1 (DESIGN 2.5 rule changed at the
+user's request; §14d test). Core clicks (tabs, bottom-row Open) also hand-verified. Suites green
+(agenda, notes 106, cockpit 502, bitbucket). **T09 is next.** Still open, user's call: the folded
+T02/T04/T05 reopen never took the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** hold until the user re-confirms the wheel + tab-reset fixes (see Blocked).
-Then T08 → ✅ and T09 implements.
+**Next `pir-work` will:** implement T09 (Review/Address auto-spawn) — deps T00 ✅ and T08 ✅ are met.
 
 ## Tasks
 
@@ -37,12 +35,11 @@ done · ⛔ blocked, needs a human.
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. All 3 triggers wired; orphan cache entries never pruned → T06 iterates config.repos. |
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
-| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⛔ | Code review clean. Core hand-verified: tabs switch, bottom-row Open lands right. Two review-fixes: wheel bit excluded (no stray click; welcome + strip), tab switch resets to page 1 (DESIGN 2.5 changed, §14d test). Suites green (cockpit 502). ⛔ for a 20s live re-confirm of both fixes before ✅ — T09 spawns on the same clicks. |
+| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ✅ | Code review clean. Hand-verified live: tabs switch, bottom-row Open lands right. Two review-fixes, both confirmed live: wheel bit excluded (no stray click on scroll; welcome + strip), tab switch resets to page 1 (DESIGN 2.5 changed, §14d test). Suites green (cockpit 502). |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty. T08's code is reviewed clean; it is ⛔ awaiting the user's live click
-hand-check, not a re-review.
+**Review queue:** empty. Next work implements T09.
 
 ## Plan decisions (2026-09-05)
 
@@ -67,13 +64,8 @@ hand-check, not a re-review.
   the right PR (real clicks land on the drawn row). Live paging was not seen — 9 PRs fit one page,
   so no pager drew; its logic is covered by the §14d automated test instead.
 
-- **T08 wheel-fix re-confirm — OUTSTANDING.** ~15 seconds, and the only thing between T08 and ✅.
-  The wheel path is TTY-bound so no automated test can reach it. Rebuild the cockpit (re-open the
-  WezTerm window) so the pane picks up the fix, then at the fleet list **spin the mouse wheel** over
-  the dashboard — over Open and over a tab. It must NOT switch tabs or open anything now. Tell me.
-  This gates T09, which makes Review/Address live — the exact thing a stray wheel-scroll would spawn.
-  (The tab-switch→page-1 change is not separately checkable here: 9 PRs never overflow to a 2nd page,
-  so it is invisible without shrinking the window; it is proven by the §14d automated test instead.)
+- **T08 fixes re-confirmed — DONE 2026-09-05** (FINDINGS). Live: the mouse wheel over the dashboard
+  no longer fires a stray click, and switching tabs lands on page 1. Nothing outstanding on T08.
 
 - **Reopen hand-check — DONE 2026-09-05** (FINDINGS ✅). Against the real cribl Bearer access
   token: `getUser` returned a uuid (identity resolves — the DESIGN §2.6 risk is closed),
