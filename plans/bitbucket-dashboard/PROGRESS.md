@@ -10,16 +10,12 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T03 pure model reviewed ✅ and hand-verified against the user's real `cribl`
-workspace (read-only key): every comment accessor and PR-list field the model reads matches real
-BitBucket data, resolved-vs-open confirmed on real threads — no model fix. Auth finding: the real
-read-only key is a Bearer Access Token, which the T02 client's Basic header rejects; the user
-decided to change the design to Bearer. That plus the per-PR comment fetch (decision A) are the
-folded T02/T04/T05 reopen, now unblocked (shapes + a working key in hand).
+**Status:** Building. T06 (the pure renderer + hit-zones) implemented 🔍 and awaiting review —
+every state renders, 123 render tests, full suite green. The folded T02/T04/T05 reopen (Bearer
+auth + per-PR comment fetch) is still open and unblocked (shapes + a working key in hand); it is a
+plan-scheduling decision for the user — see below.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T06 (the pure renderer), which depends only on T03 ✅ and is
-buildable now. The folded T02/T04/T05 reopen (Bearer auth + comment fetch) is a plan-scheduling
-decision for the user — see below.
+**Next `pir-work` will:** review T06.
 
 ## Tasks
 
@@ -34,13 +30,13 @@ done · ⛔ blocked, needs a human.
 | T03 | Pure model: normalize, classify, sort, paginate | T02 | ✅ | Reviewed 2026-09-05. Model correct; tests genuine and cover the doc; purity holds; full suite green. Hand-verified vs real cribl PRs (read-only key): all comment accessors (inline/parent/resolution/deleted/user.uuid) and PR-list fields (author.nickname/uuid, participants, reviewers) match; resolved-vs-open confirmed (PR#85 vs #40). No model fix. Auth→Bearer folds into T02 reopen. |
 | T04 | Store: config reads, cache + view-state files | T01 | ✅ | Reviewed clean 2026-09-04, no fix. Fully testable, no hands-on half. |
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. Interfaces vs T02/T04 correct, syntax/no import collisions, all 3 triggers wired, full suite green (475). Deviation (per-repo auth signal) sound. Probed: guard test genuinely defends overlap; orphan cache entries never pruned → FINDINGS for T06's renderer. |
-| T06 | Pure renderer + hit-zones | T03 | ⬜ | All states: populated, empty, unconfigured, offline, expired. |
+| T06 | Pure renderer + hit-zones | T03 | 🔍 | Renderer + hit-zones in the model. All states render; 123 render tests; full suite green. Deviations: `renderDashboard` also takes `config` (a pure renderer needs it for the unconfigured state + the team pick-list — T07's pane forwards `store.readConfig`); imports the draw helpers from agenda-model (as cockpit-welcome does); error footnotes split by breadth (all-repos-transient → one offline line, a subset → per-repo). See FINDINGS. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ⬜ | Touches the diff-slot pane; keep the park/swap invariant. Hand-verify look. |
 | T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⬜ | Open uses BITBUCKET_BROWSER seam. |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** empty. Next is T06 (implement the pure renderer).
+**Review queue:** T06 (awaiting review).
 
 ## Plan decisions (2026-09-05)
 
@@ -55,12 +51,11 @@ done · ⛔ blocked, needs a human.
 
 ## Scheduling decision for the user
 
-- The folded **T02/T04/T05 reopen** (Bearer auth + per-PR comment fetch) is now fully unblocked —
-  the endpoint shapes are verified and a working read-only key is in hand. Does it run **before**
-  T06, or does T06 (the pure renderer, buildable now off the model) go next with the reopen after?
-  T06 is pure and does not depend on the fetch, so either order works. Recommendation: build T06
-  next (no live dependency), then do the T02/T04/T05 reopen as one unit. This is a plan-structure
-  call, so it is yours.
+- The folded **T02/T04/T05 reopen** (Bearer auth + per-PR comment fetch) is fully unblocked — the
+  endpoint shapes are verified and a working read-only key is in hand. T06 (the pure renderer) is
+  now built off the model, so the reopen is the remaining folded work. Recommendation: do it as one
+  unit after T06 is reviewed. It touches T02 (client `authHeader` → Bearer, per-PR comment GET),
+  T04 (cache carries comments) and T05 (daemon fetches them). This is a plan-structure call, yours.
 
 ## Blocked on the user
 
