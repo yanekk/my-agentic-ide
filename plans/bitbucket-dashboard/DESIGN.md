@@ -160,9 +160,11 @@ comments stands out.
 A terminal pane cannot scroll — it redraws a fixed number of rows each time. So when a tab has
 more PRs than fit, the dashboard shows one page and a clickable pager `‹ prev · 1/3 · next ›`
 (§2.8). Every PR's row and its buttons stay reachable, which a "+N more" fold like the notes
-list could not offer, and acting on a row is the whole point of the dashboard. The current page
-is remembered per tab for the session and resets to page 1 when the tab's contents change
-enough that the page would be out of range.
+list could not offer, and acting on a row is the whole point of the dashboard. Each tab keeps
+its own page while you page within it, but switching tabs returns the tab you land on to page 1
+— arriving deep in a list you had switched away from was surprising (user, 2026-09-05). The page
+also resets to 1 when the tab's contents change enough that the current page would be out of
+range.
 
 ### 2.6 Configuration, through `config`
 

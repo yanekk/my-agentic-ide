@@ -3092,11 +3092,15 @@ function bitbucketOpen(slug, id) {
 
 /** Dispatch one bb-* click verb from the cmd channel. */
 function bitbucketVerb(verb) {
-  // Tabs (DESIGN 2.8): switch the active tab. The pane watches bitbucket-view.json and
-  // redraws, so writing the view IS the whole action.
+  // Tabs (DESIGN 2.8): switch the active tab, and land on its FIRST page (DESIGN 2.5,
+  // user 2026-09-05: arriving at a tab deep in a list you switched away from was
+  // surprising). The pane watches bitbucket-view.json and redraws, so writing the view
+  // IS the whole action; resetting page[tab] here means the reset happens once on the
+  // switch, not on every repaint.
   if (verb === "bb-tab:toReview" || verb === "bb-tab:mine") {
     const tab = verb === "bb-tab:mine" ? "mine" : "toReview";
-    writeBBView({ ...readBBView(), tab });
+    const view = readBBView();
+    writeBBView({ ...view, tab, page: { ...view.page, [tab]: 1 } });
     return;
   }
   // Paging (DESIGN 2.5): move the ACTIVE tab's page by one, clamped to [1, pages]. The

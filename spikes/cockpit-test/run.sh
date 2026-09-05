@@ -2651,6 +2651,13 @@ same "bb-page:next past the last page is clamped (stays 3)" "$(vq "$S6" 'v.page.
 echo bb-page:prev >> "$S6/cmd"; sleep 1
 same "bb-page:prev steps back to page 2"      "$(vq "$S6" 'v.page.toReview')" "2"
 
+# Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is on page 2
+# now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back in
+# the middle of a list you switched away from.
+echo bb-tab:mine >> "$S6/cmd"; sleep 1
+echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toReview')" "1"
+
 # daemon.log gets pasted into conversations (DESIGN 2.9): a click path logs no title.
 refute "no PR title reaches the log via a click" "PAGED-PR" "$A6/daemon.log"
 

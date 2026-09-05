@@ -229,12 +229,16 @@ function enableMouse(onClick) {
   process.stdin.on("data", (buf) => {
     const s = buf.toString("latin1");
     // SGR mouse: ESC [ < b ; x ; y  (M = press, m = release). Act on a left-button
-    // press only: low two bits 0 = left; bit 32 set = motion, which we ignore.
+    // press only: low two bits 0 = left; bit 32 set = motion, and bit 64 set = a WHEEL
+    // event -- both ignored. Wheel-up is 64, whose low two bits are 0, so without the
+    // bit-64 guard a scroll over the strip would read as a left click and close/add/
+    // select a terminal. The dashboard's twin reader (cockpit-welcome.mjs) carries the
+    // same guard; the wheel-as-click was hand-verified there (FINDINGS 2026-09-05).
     const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
     let m;
     while ((m = re.exec(s))) {
       const b = Number(m[1]);
-      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onClick(Number(m[2]), Number(m[3]));
+      if (m[4] === "M" && (b & 3) === 0 && !(b & 32) && !(b & 64)) onClick(Number(m[2]), Number(m[3]));
     }
   });
 }

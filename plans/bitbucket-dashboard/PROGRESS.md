@@ -10,15 +10,17 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. **T08 code-reviewed clean (no fix)** 2026-09-05: tests genuine and cover
-the doc; purity + testability boundary held; deviations (verbAt, model `pages`) sound. All four
-suites green (agenda, notes 106, cockpit 501, bitbucket). **T08 is ⛔, not ✅** — its "Done when"
-requires a live click hand-check only the user can run, and T09 builds on clicks, so the queue
-must hold until that is seen. Still open, user's call: the folded T02/T04/T05 reopen never took
-the pir-review alternation.
+**Status:** Building. **T08 code-reviewed clean; hand-check found + fixed two things** 2026-09-05.
+Live with the user: tab clicks switch, a bottom-row Open lands on the right PR (clicks hit the
+drawn row). Two fixes applied this review: (1) the wheel bit (64) now excluded so a scroll no
+longer fires a stray click — in both mouse readers, welcome + strip; (2) switching tabs resets to
+page 1 (DESIGN 2.5 rule changed at the user's request; §14d test added). Suites green (agenda,
+notes 106, cockpit 502, bitbucket). **T08 held ⛔** for a 20s live re-confirm of those two fixes
+before ✅ — T09 turns Review/Address live, which is exactly what a stray wheel-scroll would spawn.
+Still open, user's call: the folded T02/T04/T05 reopen never took the pir-review alternation.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** nothing until the user runs the T08 live hand-check (see Blocked). Then
-T08 → ✅ and T09 implements.
+**Next `pir-work` will:** hold until the user re-confirms the wheel + tab-reset fixes (see Blocked).
+Then T08 → ✅ and T09 implements.
 
 ## Tasks
 
@@ -35,7 +37,7 @@ done · ⛔ blocked, needs a human.
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. All 3 triggers wired; orphan cache entries never pruned → T06 iterates config.repos. |
 | T06 | Pure renderer + hit-zones | T03 | ✅ | Reviewed clean 2026-09-05, no fix. Iterates config.repos (de-watched repo not drawn); pager/clip/zone math and tiny-n probed; greeting credential per §2.6. |
 | T07 | Rewire welcome pane to 75/25 | T05, T06 | ✅ | Reviewed clean 2026-09-05, no code fix; hand-verified live with the user (aligned, titles readable; 9+9 real cribl PRs). Probed split-threshold ripple (full-width fallback now ~93 cols), double-clip no-op, removed-greeting refs, genuine team-match in tests. First-view zero was fetch latency, not a bug (FINDINGS). |
-| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⛔ | Code review clean, no fix. Tests genuine: verbAt hit/miss, `pages` per state, §14d walks bb-tab/open/absent-id/inert and next→3→clamp via the daemon's real geometry read. Purity + boundary held; deviations (verbAt, model `pages`) sound. ⛔ on the live click hand-check — T09 must not build on unconfirmed clicks. Wheel-bit filter edge logged (FINDINGS, shared with the strip). |
+| T08 | Clicks: mouse, verbs, dispatch (tabs, paging, Open) | T07 | ⛔ | Code review clean. Core hand-verified: tabs switch, bottom-row Open lands right. Two review-fixes: wheel bit excluded (no stray click; welcome + strip), tab switch resets to page 1 (DESIGN 2.5 changed, §14d test). Suites green (cockpit 502). ⛔ for a 20s live re-confirm of both fixes before ✅ — T09 spawns on the same clicks. |
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
@@ -61,15 +63,17 @@ hand-check, not a re-review.
 
 ## Blocked on the user
 
-- **T08 live click hand-check — OUTSTANDING.** The code review is clean; this is the only thing
-  between T08 and ✅, and T09 must not be built until it is seen. In a live cockpit at the fleet
-  list with PRs shown: click the two tabs, the pager arrows, and an Open button. Expect: tabs
-  switch, the page changes, Open opens the PR in the browser. Confirm each click hits what you
-  aimed at, including the bottom-most row and after paging. Also probe: does **scrolling the mouse
-  wheel** over the dashboard (a tab / Open / pager) fire a phantom click? (Wheel events set bit 64;
-  the filter does not exclude them — FINDINGS 2026-09-05. If it fires, that is a real fix for both
-  cockpit-welcome.mjs and cockpit-strip.mjs.) `BITBUCKET_BROWSER` is unset live, so Open uses
-  `/usr/bin/open` — the seatbelt is that it only ever opens a PR page, nothing destructive.
+- **T08 core hand-check — DONE 2026-09-05** (FINDINGS ✅). Tabs switch; a bottom-row Open opened
+  the right PR (real clicks land on the drawn row). Live paging was not seen — 9 PRs fit one page,
+  so no pager drew; its logic is covered by the §14d automated test instead.
+
+- **T08 wheel-fix re-confirm — OUTSTANDING.** ~15 seconds, and the only thing between T08 and ✅.
+  The wheel path is TTY-bound so no automated test can reach it. Rebuild the cockpit (re-open the
+  WezTerm window) so the pane picks up the fix, then at the fleet list **spin the mouse wheel** over
+  the dashboard — over Open and over a tab. It must NOT switch tabs or open anything now. Tell me.
+  This gates T09, which makes Review/Address live — the exact thing a stray wheel-scroll would spawn.
+  (The tab-switch→page-1 change is not separately checkable here: 9 PRs never overflow to a 2nd page,
+  so it is invisible without shrinking the window; it is proven by the §14d automated test instead.)
 
 - **Reopen hand-check — DONE 2026-09-05** (FINDINGS ✅). Against the real cribl Bearer access
   token: `getUser` returned a uuid (identity resolves — the DESIGN §2.6 risk is closed),

@@ -305,12 +305,17 @@ function enableMouse() {
   process.stdin.on("data", (buf) => {
     const s = buf.toString("latin1");
     // SGR mouse: ESC [ < b ; x ; y  (M = press, m = release). Act on a left-button
-    // press only: low two bits 0 = left; bit 32 set = motion, which we ignore.
+    // press only: low two bits 0 = left; bit 32 set = motion, and bit 64 set = a WHEEL
+    // event -- both ignored. The wheel matters: WezTerm reports a scroll under 1000h as
+    // a button with bit 64 (wheel-up is 64, so its low two bits are 0 and it would sail
+    // through a `(b & 3) === 0` filter as a "left click"), which hand-verified as a
+    // stray Open on a scroll over the dashboard (FINDINGS 2026-09-05). Excluding bit 64
+    // is what keeps a scroll from firing a click here (and a spawn on Review/Address).
     const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
     let m;
     while ((m = re.exec(s))) {
       const b = Number(m[1]);
-      if (m[4] === "M" && (b & 3) === 0 && !(b & 32)) onDashClick(Number(m[2]), Number(m[3]));
+      if (m[4] === "M" && (b & 3) === 0 && !(b & 32) && !(b & 64)) onDashClick(Number(m[2]), Number(m[3]));
     }
   });
 }
