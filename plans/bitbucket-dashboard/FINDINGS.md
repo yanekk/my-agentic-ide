@@ -11,6 +11,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-05 | 📌 | T03: the model purity grep in run.sh greps the file whole, comments included (no comment-stripping, unlike the config import check). Spelling the banned tokens literally in a doc comment trips it — describe them obliquely. Cost one failed run. |
+| 2026-09-05 | 📌 | T03: BitBucket removed `username` from its API; the human handle is `nickname`. classify matches the pick-list (bitbucket-team) against author.nickname, case-insensitive; me and reviewers are matched by uuid. Confirm nickname vs display_name against real PRs next round. |
 | 2026-09-05 | 🔄 | T03 classify rules settled (brainstorm). To-review = I'm a reviewer + pick-list authors (by username), minus drafts and PRs I approved; Mine = my open PRs incl. my drafts. Sort by unresolved inline threads: To-review by my-comments asc, Mine by all desc, updatedOn tiebreak. DESIGN §2.3. |
 | 2026-09-05 | 📌 | The unresolved-thread sort (decision A) needs per-PR comment fetches — not in the cheap list call. Reopens T02 (client), T04 (cache) and T05 (daemon) to carry comments to the pure model. Slotting is a user plan decision. Real PRs come next round to verify comment/author field names. |
 | 2026-09-05 | 📌 | T05 review clean, no fix. refreshPRs only fetches/writes `cfg.repos`, so a de-watched repo's cache entry lingers in `bitbucket-cache.json` forever (never pruned). Harmless on disk, but T06's renderer must iterate the config's repos, not `cache.repos` keys, or a removed repo still shows. |

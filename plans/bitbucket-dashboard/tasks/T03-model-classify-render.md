@@ -37,19 +37,23 @@ comment counts), §2.5 (pagination), §3.1 (the boundary), §3.3 (the decision f
 ## Interface
 
 ```
-export function normalizePR(raw, { meUuid }) -> {
-  repo, id, title, author,                    // author: { uuid, username }
+export function normalizePR(raw, { meUuid, repo }) -> {
+  repo, id, title, author,                    // author: { uuid, nickname }; repo is the watched slug
   updatedOn,                                  // ISO string, the tiebreaker sort key
   approvals,                                  // count of participants with approved === true
   approvedByMe,                               // participants has meUuid with approved === true
   comments,                                   // raw.comment_count — the displayed total
   unresolved,                                 // count of unresolved inline threads (all authors)
   myUnresolved,                               // count of unresolved inline threads authored by meUuid
-  reviewers,                                  // requested reviewers (username), for the assigned-to-me rule
+  reviewers,                                  // requested reviewers, as uuids, for the assigned-to-me match
   draft,                                      // raw.draft
   htmlUrl,                                    // raw.links.html.href, for the Open button
   sourceBranch, destBranch,
 }
+// `repo` is passed in (the caller iterates the cache per repo); the raw PR does not
+// reliably carry the watched slug, and the click verbs need it. author.nickname is
+// BitBucket's human handle — the API has no `username` field (removed for GDPR), so
+// the "username" the user names the pick-list with is matched against nickname.
 // unresolved/myUnresolved are computed from the PR's comments, which the fetch layer attaches to
 // raw (decision A, DESIGN §2.9). Exact comment-field names verified against real PRs before this
 // is written. A PR with no comments attached yields zero, never throws.
