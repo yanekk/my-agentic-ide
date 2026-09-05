@@ -10,14 +10,16 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. T03 pure model implemented 🔍 (normalize/classify/paginate, 41 model tests;
-purity grep and the full suite green — agenda, notes, cockpit, bitbucket all PASS). Two follow-ons
-are carried, both needing the user's real workspace next round: (1) verify BitBucket's comment-object
-field names against real PRs (isolated in normalizePR's three accessors); (2) the per-PR comment
-fetch that feeds the sort, folded into T02/T04/T05 as scoped reopens (decision A, confirmed).
+**Status:** Building. T03 pure model reviewed ✅ and hand-verified against the user's real `cribl`
+workspace (read-only key): every comment accessor and PR-list field the model reads matches real
+BitBucket data, resolved-vs-open confirmed on real threads — no model fix. Auth finding: the real
+read-only key is a Bearer Access Token, which the T02 client's Basic header rejects; the user
+decided to change the design to Bearer. That plus the per-PR comment fetch (decision A) are the
+folded T02/T04/T05 reopen, now unblocked (shapes + a working key in hand).
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** review T03 (the pure model). The folded comment-fetch plumbing follows,
-with real PRs.
+**Next `pir-work` will:** implement T06 (the pure renderer), which depends only on T03 ✅ and is
+buildable now. The folded T02/T04/T05 reopen (Bearer auth + comment fetch) is a plan-scheduling
+decision for the user — see below.
 
 ## Tasks
 
@@ -29,7 +31,7 @@ done · ⛔ blocked, needs a human.
 | T00 | Spawn spike: running agent in a repo's context | — | ✅ | Verified live 2026-09-04: `@{slug} {prompt}`+Enter in the fleet box spawns a running agent in `{projectsRoot}/{slug}`. Feeds T09 spawnAgent. See FINDINGS. |
 | T01 | `config` settings + `bitbucket-test` suite | — | ✅ | Reviewed clean 2026-09-04 (a570b7b). All 8 items; readApiKey/maskedStatus kept as wrappers; ALL PASS/FAILURES sentinel endorsed over §5's example. |
 | T02 | BitBucket HTTPS client | T01 | ✅ | Reviewed clean 2026-09-04; auth hand-verified with the user (FINDINGS). |
-| T03 | Pure model: normalize, classify, sort, paginate | T02 | 🔍 | Built: normalizePR, classify, paginate + 41 tests, purity grep + full suite green. Comment reduction isolated in 3 accessors — real-PR field check pending (FINDINGS). Deviations: run.sh purity grep already present (T01), not re-added; normalizePR takes {meUuid,repo}; author.nickname; reviewers as uuids. |
+| T03 | Pure model: normalize, classify, sort, paginate | T02 | ✅ | Reviewed 2026-09-05. Model correct; tests genuine and cover the doc; purity holds; full suite green. Hand-verified vs real cribl PRs (read-only key): all comment accessors (inline/parent/resolution/deleted/user.uuid) and PR-list fields (author.nickname/uuid, participants, reviewers) match; resolved-vs-open confirmed (PR#85 vs #40). No model fix. Auth→Bearer folds into T02 reopen. |
 | T04 | Store: config reads, cache + view-state files | T01 | ✅ | Reviewed clean 2026-09-04, no fix. Fully testable, no hands-on half. |
 | T05 | Daemon `refreshPRs` (tick, return, start) | T02, T04 | ✅ | Reviewed clean 2026-09-05, no fix. Interfaces vs T02/T04 correct, syntax/no import collisions, all 3 triggers wired, full suite green (475). Deviation (per-repo auth signal) sound. Probed: guard test genuinely defends overlap; orphan cache entries never pruned → FINDINGS for T06's renderer. |
 | T06 | Pure renderer + hit-zones | T03 | ⬜ | All states: populated, empty, unconfigured, offline, expired. |
@@ -38,21 +40,30 @@ done · ⛔ blocked, needs a human.
 | T09 | Review/Address auto-spawn | T00, T08 | ⬜ | Uses the T00 primitive. Hand-verified. |
 | T10 | install.sh, docs, CLAUDE.md | T09 | ⬜ | New settings, new suite in the test command, the 30-row table if a truth emerges. |
 
-**Review queue:** T03 (the pure model — normalize/classify/paginate).
+**Review queue:** empty. Next is T06 (implement the pure renderer).
 
-## Plan decision (resolved 2026-09-05)
+## Plan decisions (2026-09-05)
 
-- **Sort = decision A (unresolved threads), folded into T03's chain** (user, 2026-09-05). The
-  per-PR comment fetch that A needs extends the client (T02), the cache shape (T04) and the daemon
-  fetch (T05) as scoped reopens riding with T03's chain — not a separate task, and not the free
-  total-`comment_count` fallback (B). Those reopens are queued for next round: they need a live
-  token and the real comment-endpoint shape, so they wait on the user's workspace.
+- **Sort = decision A (unresolved threads), folded into T03's chain** (user). The per-PR comment
+  fetch that A needs extends the client (T02), the cache shape (T04) and the daemon fetch (T05) as
+  scoped reopens — not a separate task, and not the free total-`comment_count` fallback (B). The
+  comment-endpoint shape is now verified (FINDINGS 2026-09-05), so the reopen is unblocked.
+- **Auth = Bearer Access Token** (user, 2026-09-05). The real read-only key is a BitBucket Access
+  Token used as `Authorization: Bearer <token>` (no colon), which the T02 client's Basic
+  `email:api-token` header (DESIGN §2.6) rejects with 400. The T02 reopen must switch `authHeader`
+  to Bearer and rewrite DESIGN §2.6; DESIGN and the client both still say Basic until then.
+
+## Scheduling decision for the user
+
+- The folded **T02/T04/T05 reopen** (Bearer auth + per-PR comment fetch) is now fully unblocked —
+  the endpoint shapes are verified and a working read-only key is in hand. Does it run **before**
+  T06, or does T06 (the pure renderer, buildable now off the model) go next with the reopen after?
+  T06 is pure and does not depend on the fetch, so either order works. Recommendation: build T06
+  next (no live dependency), then do the T02/T04/T05 reopen as one unit. This is a plan-structure
+  call, so it is yours.
 
 ## Blocked on the user
 
-- **Real PRs, next round.** The user provides workspace access for two things: verifying the
-  comment-object field names in normalizePR's accessors (nickname vs display_name too), and then
-  building the folded T02/T04/T05 comment fetch above against the real endpoint.
-- Everything else marked "hand-verified" (T02 token check, T07 look, T09 spawn) needs the
-  user at the live cockpit when that task is reached; each task doc carries the exact command.
-  (T00 done: verified 2026-09-04.)
+- Items marked "hand-verified" that remain (T07 look, T09 spawn) need the user at the live cockpit
+  when that task is reached; each task doc carries the exact command. (T00 verified 2026-09-04,
+  T02 auth 2026-09-04, T03 field shapes 2026-09-05.)
