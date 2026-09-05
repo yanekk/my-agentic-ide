@@ -1,6 +1,6 @@
 # T00 — Spike: mouse motion to the unfocused dashboard pane
 
-**Phase A · depends on nothing · throwaway · gates T04**
+**Phase A · depends on nothing · throwaway · gates T05**
 
 ## Goal
 
@@ -27,7 +27,7 @@ the pointer over the probe pane without clicking.
 
 - It is recorded in FINDINGS whether motion events arrive at the unfocused pane, with the observed
   button bytes, and whether a repaint-on-motion is smooth or flickers.
-- A recommendation for T04 is written: build hover (and if so, the throttle — repaint only when the
+- A recommendation for T05 is written: build hover (and if so, the throttle — repaint only when the
   hovered zone changes), or drop it (press feedback stands).
 - The probe code is deleted; nothing under `bin/` references it.
 
@@ -55,5 +55,5 @@ Tell me: (1) do move lines appear at all while the pane is unfocused?
 ## Notes
 
 `?1003h` reports every pointer move; `?1002h` reports motion only while a button is held, which is
-not hover. If motion arrives but floods, the T04 throttle (repaint only on a hovered-zone change) is
+not hover. If motion arrives but floods, the T05 throttle (repaint only on a hovered-zone change) is
 the mitigation, not a reason to drop hover — say which case was observed.

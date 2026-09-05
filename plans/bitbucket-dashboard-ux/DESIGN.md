@@ -1,10 +1,10 @@
 # BitBucket dashboard — two-line rows and reacting buttons
 
 This plan extends the existing BitBucket dashboard (`plans/bitbucket-dashboard/`, complete
-2026-09-05). It changes only how a PR row is drawn and how its buttons react to the mouse. It
-adds no network calls, no config, no new tools, and touches neither the client, the store, nor
-the daemon's fetch. Read the parent plan's DESIGN for how the dashboard as a whole works; this
-document covers only what changes.
+2026-09-05). It changes how a PR row is drawn, adds one bounded network call per shown PR (the
+diffstat, for the changed-files and line counts — §2.4), and gives the buttons a mouse reaction.
+It adds no config and no new tools. Read the parent plan's DESIGN for how the dashboard as a whole
+works; this document covers only what changes.
 
 ## 1. Purpose
 
@@ -12,20 +12,29 @@ The dashboard lists the PRs that concern you, one per row, with `[Review]`/`[Add
 `[Open]` buttons. Two gaps, both raised by the user:
 
 1. A single line per PR wastes the room a PR row could use. Extend each row to **two lines** so a
-   PR can also show **how old it is** and **whether it is new or busy right now**.
+   PR can also show, on the second line: **how old it is**, **whether it is new or busy right now**,
+   its **branch → target branch**, its **changed-file count**, and its **lines added / removed**.
 2. The buttons are drawn once and never react to the pointer. Give them a **hover** and a
    **press** appearance so a click has visible feedback before the agent spawns.
 
-Success: every shown PR carries an age and, when they apply, activity tags; the buttons visibly
-respond to hover (if the terminal allows it — §4) and to a press; the automated suite stays green;
-and it is confirmed by hand in a live cockpit that the rows read well and the buttons react.
+Success: every shown PR carries an age, its branch and its diff size, and — when they apply —
+activity tags; the buttons visibly respond to hover (if the terminal allows it — §4) and to a
+press; the automated suite stays green; and it is confirmed by hand in a live cockpit that the rows
+read well and the buttons react.
 
 ## 2. What each row shows
 
 A PR is now **two lines**. Line one is unchanged from the parent plan: repository, `#id`, title,
 author (To review only), the ✓/✎ counts, and the two buttons. Line two is new, indented under the
-title, and holds the age and any activity tags. The buttons stay on line one, so a click's target
-is still the row's first line and the hit-zone math changes only in which line number it stamps.
+title, and holds — left to right — the age, any activity tags, the branch → target branch, the
+changed-file count, and the lines added / removed. The buttons stay on line one, so a click's
+target is still the row's first line and the hit-zone math changes only in which line number it
+stamps.
+
+Line two can outgrow a narrow pane, so it has a **drop order**, mirroring line one's: when the
+width runs out, the branch drops first (it is context, not a metric), then the added/removed detail,
+then the file count, always keeping the age and the tags — the two things the user asked for first.
+Each dropped item frees its space; nothing wraps.
 
 Two lines per PR halves how many PRs fit a page; the pager (parent §2.5) absorbs the rest. This is
 the cost the user accepted for the extra room.
@@ -69,13 +78,49 @@ comments for the unresolved-thread sort (parent §2.3), and every comment carrie
 `[ACTIVE]` costs no extra call — it reduces data already in the cache. A PR whose comments were not
 fetched (it does not concern you, so it is never shown) simply reads as not active.
 
-### 2.3 What line two does not hold
+### 2.3 Branch and diff size
+
+Also on line two, added at the user's request (2026-09-05):
+
+- **Branch → target** — `source.branch.name → destination.branch.name` (e.g. `fix/s3-retry → main`).
+  This is **free**: both names are already in the PR list response and `normalizePR` already extracts
+  `sourceBranch`/`destBranch`; only the drawing is new. A long branch name is clipped, not wrapped.
+- **Changed files and lines added / removed** — `N files  +A −R`. These are **not** in the PR list
+  response; BitBucket carries them only on a separate per-PR **diffstat** endpoint (§2.4). Drawn as
+  a small file count and a signed pair; the `+A` and `−R` may be coloured to read at a glance, the
+  exact styling settled when the row is drawn.
+
+### 2.4 The diffstat call — the one added cost
+
+The changed-file and line counts need one extra GET per shown PR:
+`GET /2.0/repositories/{ws}/{repo}/pullrequests/{id}/diffstat`, which returns one entry per changed
+file, each with `lines_added`, `lines_removed` and a status. Summed, they give the file count and
+the added/removed totals. This is the **same shape and cost as the parent plan's per-PR comment
+fetch** (parent §2.9): the daemon fetches it only for the PRs that `concernsMe` — the handful that
+show — so even at cribl's 739 open PRs the cost stays a few calls per repo, not one per open PR.
+
+The summing is a **pure** function (`summarizeDiffstat`, §5), so the daemon stores only the three
+numbers `{ files, added, removed }` in the cache, not the per-file list: the cache stays small and
+the repaint never re-sums hundreds of entries. A PR whose diffstat has not been fetched (offline, or
+it does not concern you) shows no counts rather than a zero, so an absent fetch never reads as "an
+empty PR".
+
+### 2.5 What line two does not hold
 
 The author stays on line one, where it already is. Moving it to line two to widen the title was
 considered and left out: it is a larger change to line one's column logic for a cosmetic gain, and
-the user's ask was the age and tags, not a re-layout. Noted as a possible later refinement, not
-built here. The prototype also showed a source→dest branch on line two as an exploration; it was
-not opted into and is not built.
+the user's ask was the age, tags, branch and diff size, not a re-layout. Noted as a possible later
+refinement, not built here.
+
+### 2.6 The row separator
+
+A dim hairline separates one PR from the next, as the prototype showed. The user asked for it
+explicitly to **not** be a dedicated line (2026-09-05) — a `────` row would halve the PR density
+again for pure decoration. So it is drawn as a **dim underline on each PR's second line**: terminals
+underline trailing spaces (WezTerm does), so an underlined full-width line two reads as a hairline
+under the PR while still being the row it already occupies. It costs no vertical space. Whether the
+last row on a page carries the underline is the renderer's choice, fixed and tested either way (a rule
+just above the pager is harmless).
 
 ## 3. The buttons reacting
 
@@ -107,27 +152,36 @@ whole pane.
 
 So **T00 is a throwaway spike**: enable motion reporting in a real dashboard-shaped pane, move the
 mouse over it without focusing it, and see whether the events arrive and whether a repaint-on-hover
-is smooth. Its outcome, plus the user's call, decides T04:
+is smooth. Its outcome, plus the user's call, decides T05:
 
-- **Motion is delivered and smooth** → build hover (T04), repainting only when the hovered button
+- **Motion is delivered and smooth** → build hover (T05), repainting only when the hovered button
   *changes* (not per pixel), which throttles the redraw to state transitions.
-- **Motion is not delivered, or flickers badly** → drop hover. The press feedback (T03) stands as
+- **Motion is not delivered, or flickers badly** → drop hover. The press feedback (T04) stands as
   the button reaction, which the user pre-accepted as the floor ("decide after the probe").
 
-The press feedback (T03) does not depend on the spike and is built regardless.
+The press feedback (T04) does not depend on the spike and is built regardless.
 
 ## 5. Architecture — nothing crosses the boundary that did not already
 
-The pure/impure split is the parent plan's and is unchanged. Age and the tags are pure functions of
-a normalized PR and `now`, living in `cockpit-bitbucket-model.mjs` beside the render code; the
+The pure/impure split is the parent plan's and is unchanged. Age, the tags and the diffstat
+summing are pure functions living in `cockpit-bitbucket-model.mjs` beside the render code; the
 purity grep in `spikes/bitbucket-test/run.sh` already guards that file and keeps guarding it. **If
 that grep fails the fix is to move the code, never to relax the grep.** `normalizePR` gains the
-parsed `created_on` (as milliseconds) and the list of comment timestamps (as milliseconds); parsing
-a timestamp string to a number is not a clock read, so purity holds. `now` is not read in
-`normalizePR` — the NEW/ACTIVE/STALE decision is made in the render path where `now` already flows,
-so the model never reaches for a clock.
+parsed `created_on` (as milliseconds), the list of comment timestamps (as milliseconds), and the
+diffstat triple read off the cached PR; parsing a timestamp string to a number is not a clock read,
+so purity holds. `now` is not read in `normalizePR` — the NEW/ACTIVE/STALE decision is made in the
+render path where `now` already flows, so the model never reaches for a clock. `summarizeDiffstat`
+takes the raw diffstat entries and returns `{ files, added, removed }`; it too is pure, so the
+counts are proven from fixtures.
 
-The mouse wiring (press in T03, hover in T04) is impure and lives in `cockpit-welcome.mjs`, the same
+The **new network call** is in `cockpit-bitbucket-client.mjs` — a `listPRDiffstat` beside the
+existing `listPRComments`, GET-only, paginated the same way, so the read-only-by-construction grep
+still passes. The **daemon** (`cockpitd.mjs`) fetches it for the same shown PRs it already fetches
+comments for, calls the pure `summarizeDiffstat`, and caches the triple on the PR entry. The
+**store**/cache shape carries three extra numbers per shown PR — small, and covered by the existing
+atomic-write path (no new file, no lock change).
+
+The mouse wiring (press in T04, hover in T05) is impure and lives in `cockpit-welcome.mjs`, the same
 file that already reads presses and appends verbs. It starts no process and opens no socket; it only
 enables a reporting mode and repaints.
 
@@ -143,18 +197,21 @@ spikes/agenda-test/run.sh && spikes/notes-test/run.sh && spikes/cockpit-test/run
 ```
 
 Quiet on pass (one `bitbucket-test: N ok` line), no colour, loud on failure with a non-zero exit.
-New tests for the age, the tags and the two-line render go in the existing `spikes/bitbucket-test/`
-suite; its fixtures currently set only `updated_on`, so they gain `created_on` and comment
-timestamps. See the agenda suite for how to turn verbose output back on to debug.
+New tests for the age, the tags, `summarizeDiffstat`, the `listPRDiffstat` client call and the
+two-line render go in the existing `spikes/bitbucket-test/` suite; its fixtures currently set only
+`updated_on`, so they gain `created_on`, comment timestamps and a diffstat fixture. The new client
+call is covered against the loopback stub under the existing origin seam (no test may name a
+non-loopback origin). See the agenda suite for how to turn verbose output back on to debug.
 
 ### 6.1 What the test command cannot reach
 
 | Cannot be tested automatically | Why it needs a person |
 |---|---|
 | Whether WezTerm reports mouse **motion** to the unfocused dashboard pane, and whether a repaint-on-hover is smooth | Motion delivery and flicker are only real in the running mux at a real width (T00) |
+| The live `diffstat` call authenticates and returns the file/line counts for a real PR | Needs the user's private token and workspace; read-only (T01) |
 | The two-line rows read well and stay aligned in a live pane | Rendering is only real in WezTerm at a real width (T02) |
 | The press flash is visible and lands on the right button when clicked live | Mouse timing and coordinates are only real in the running mux (T03) |
-| The hover highlight tracks the pointer and does not flicker | Same — only real in the running mux (T04, if built) |
+| The hover highlight tracks the pointer and does not flicker | Same — only real in the running mux (T05, if built) |
 
 ### 6.2 Seatbelts
 
@@ -183,20 +240,29 @@ All dates 2026-09-05 unless noted.
   complete the activity trio. Reads last-activity, not creation.
 - **Both NEW and ACTIVE may show together; STALE excludes them by construction.** They are
   independent signals; suppressing one when another applies would hide something true.
+- **Branch → target on line two — free, so built.** Both names are already fetched; only the
+  drawing is new. Added at the user's request (2026-09-05), the same idea the prototype floated.
+- **Changed files and lines +/- on line two, via a per-PR diffstat call.** User's request
+  (2026-09-05). The counts are not in the PR list response, so they cost one extra GET per shown PR
+  — accepted because it is the same bounded pattern as the comment fetch (§2.4), not a new class of
+  cost. The daemon stores only the summed triple (pure `summarizeDiffstat`), keeping the cache small
+  and the repaint cheap.
+- **Line two has a drop order: branch, then +/-, then file count, keeping age and tags.** The age
+  and tags were the first ask, so they never drop; the branch is context and drops first (§2.2).
+- **Rows are separated by an underline on line two, not a dedicated `────` row** (§2.6). User's
+  explicit request (2026-09-05): a visible separator that costs no vertical space.
 - **Press feedback is a fixed short flash, built regardless of the spike; hover is spike-gated.**
   The press is certain (the pane already gets the click); hover depends on motion delivery to an
   unfocused pane, which is unproven. The user pre-accepted press-only as the floor.
 - **Direction confirmed via a throwaway mock** (2026-09-05), parked at `prototype/`. The user
   reacted to it and refined the tag thresholds; it is a non-binding reference for the real UI, not
   a spec.
-- **The prototype's author-on-line-two and branch-on-line-two ideas are not built.** Explorations,
-  not opted into.
+- **The prototype's author-on-line-two idea is not built.** An exploration, not opted into.
 
 ## 8. Out of scope
 
 - Configuring the tag thresholds. They are fixed constants with their reasons here; a setting is
-  cost without a asked-for user.
-- Moving the author to line two / widening the title (§2.3).
-- A branch line (§2.3).
+  cost without an asked-for user.
+- Moving the author to line two / widening the title (§2.5).
 - Any change to which PRs show or their order — that is the parent plan's classify/sort, untouched.
-- Any new BitBucket call, config setting, or tool.
+- Any new config setting or tool. (The one new BitBucket call, the diffstat, is in scope — §2.4.)
