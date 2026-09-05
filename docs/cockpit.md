@@ -762,7 +762,7 @@ checked-in file would land in the very diff an agent is reviewed on.
 ```
 bitbucket-key, bitbucket-workspace, bitbucket-repos, bitbucket-team   one file each, written by config
 bitbucket-cache.json   { version, meUuid, repos: { "<slug>": { fetchedAt, prs, error } } }  — daemon writes, pane reads
-bitbucket-view.json    { version, tab, pages: { toReview, mine } }                          — daemon writes, pane reads
+bitbucket-view.json    { version, tab, page: { toReview, mine } }                           — daemon writes, pane reads
 ```
 
 **No lock, unlike the agenda.** Each file has a single writer — `config` for a setting, the daemon
