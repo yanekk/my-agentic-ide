@@ -3321,8 +3321,8 @@ tail(CMD_FILE, (line) => {
   // names the terminal outright, so it can jump straight to any one, not just cycle.
   if (/^select-\d+$/.test(verb)) { terminalCommand(verb); return; }
   // Clicking in the welcome pane's dashboard appends one of these (bitbucket-dashboard
-  // T08, see cockpit-welcome.mjs). The daemon owns the tab switch, the page change and
-  // the Open; Review/Address are recognised but inert until T09.
+  // T08, see cockpit-welcome.mjs). The daemon owns the tab switch, the page change, the
+  // Open (T08) and the Review/Address agent spawn (T09).
   if (verb.startsWith("bb-")) { bitbucketVerb(verb); return; }
   if (!TERM_VERBS.has(verb)) return;
   // ⌥[/⌥] are shared: next/prev cycle the DIFF MODE when the diff pane is focused

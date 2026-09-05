@@ -2571,7 +2571,8 @@ echo "== 14d. the dashboard reacts to clicks (tabs, paging, Open) =="
 # so the mouse coordinates themselves stay a hand-check, DESIGN 5.1). The DAEMON owns
 # every consequence: a tab switch and a page change rewrite bitbucket-view.json; Open
 # spawns the browser via the BITBUCKET_BROWSER seam (DESIGN 2.7, 5.2). Review/Address
-# are recognised but inert until T09. Reuses the still-running BB stub above.
+# spawn a running agent in the PR's repo (T09, tested below). Reuses the still-running
+# BB stub above.
 echo ok > "$BBMODE"; : > "$BBHITS"
 A6="$T/bb6"; S6="$A6/state"
 mkdir -p "$A6" "$S6"
