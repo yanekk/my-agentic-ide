@@ -10,15 +10,17 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-04 — 2 fixed, 3 decided with the user
 
-**Status:** Building. Folded **T02/T04/T05 reopen built** 2026-09-05 (user scheduled it before
-T07): client auth→Bearer, new `listPRComments`, daemon fetches comments per open PR into
-`raw.comments`, store passes through. All four suites green. **Live Bearer hand-check is pending**
-— the command is in "Blocked on the user" below; it must run before the reopen is called done,
-because the earlier getUser hand-check (2026-09-04) predates Bearer. This folded code did **not**
-go through the pir-review alternation (it is not a queue task); whether to give it a fresh-eyes
-pass is a plan-structure call for the user. Next ready ⬜ is T07.
+**Status:** Building. Folded **T02/T04/T05 reopen built** 2026-09-05: client auth→Bearer, new
+`listPRComments`, daemon fetches comments per open PR into `raw.comments`, store passes through.
+All four suites green. **Bearer-only confirmed with the user** 2026-09-05 after a live diagnosis
+found the then-configured key was a personal `email:api-token` (Basic works, Bearer 401s) — the
+wrong key, not a reason to support Basic. **One live check still open:** does `GET /2.0/user`
+resolve an identity for the real cribl **Bearer** access token? "Assigned to me / my threads" die
+if not — command in "Blocked on the user". This folded code did **not** go through the pir-review
+alternation (not a queue task); a fresh-eyes pass is a plan-structure call for the user. Next
+ready ⬜ is T07.
 **Last updated:** 2026-09-05
-**Next `pir-work` will:** implement T07 (the reopen's live hand-check is awaiting the user).
+**Next `pir-work` will:** implement T07 (the reopen's Bearer-identity check awaits the user).
 
 ## Tasks
 
@@ -60,19 +62,16 @@ done · ⛔ blocked, needs a human.
 
 ## Blocked on the user
 
-- **Reopen hand-check (do this next).** The Bearer switch is untested against the live token: the
-  getUser success on 2026-09-04 was before Bearer, so identity resolution with the access token is
-  unproven — and "assigned to me / authored by me / my threads" all die if `GET /2.0/user` does not
-  return a uuid for this token. Read-only (GET only, DESIGN 5.2). Run in the repo root:
+- **Reopen hand-check (the cribl Bearer token, do before the reopen is done).** The client is
+  Bearer-only; the load-bearing unknown is whether `GET /2.0/user` returns a uuid for the real
+  cribl **access token** (a personal email:api-token was diagnosed in config on 2026-09-05 and is
+  the wrong key — it 401s under Bearer, proving nothing). Read-only (GET only, DESIGN 5.2). Paste
+  the cribl Bearer token and a cribl workspace/repo, run in the repo root:
 
   ```
-  BITBUCKET_KEY="$(cat ~/.claude/cockpit/bitbucket-key)" \
-  BITBUCKET_WS="$(cat ~/.claude/cockpit/bitbucket-workspace)" \
-  BITBUCKET_REPOS="$(cat ~/.claude/cockpit/bitbucket-repos)" \
+  BB_KEY="<cribl access token>" BB_WS="<cribl workspace>" BB_REPO="<a cribl repo>" \
     node -e 'import("./bin/cockpit-bitbucket-client.mjs").then(async m => {
-      const key = process.env.BITBUCKET_KEY;
-      const ws = process.env.BITBUCKET_WS;
-      const repo = (process.env.BITBUCKET_REPOS||"").split(",")[0].trim();
+      const key = process.env.BB_KEY, ws = process.env.BB_WS, repo = process.env.BB_REPO;
       console.log("getUser:", await m.getUser({ key }));
       const r = await m.listOpenPRs({ key, workspace: ws, repo });
       console.log("listOpenPRs("+repo+"):", r.error || (r.prs.length+" open PRs"));
@@ -83,9 +82,10 @@ done · ⛔ blocked, needs a human.
     })'
   ```
 
-  Expect: getUser prints a real uuid (not `{error:...}`), a PR count, and a comment count on the
-  first PR. Tell me: did getUser return a uuid (Bearer identity works)? Did the PR list and the
-  comment fetch both succeed?
+  Expect: getUser prints a real uuid (not `{error:...}`), a PR count, and a comment count on a PR.
+  Tell me: did getUser return a uuid (Bearer identity works for the access token)? Did the PR list
+  and comment fetch both succeed? If getUser 401s while the list works, that is the design risk in
+  DESIGN §2.6 — identity needs a different source, a decision for the user.
 
 - Items marked "hand-verified" that remain (T07 look, T09 spawn) need the user at the live cockpit
   when that task is reached; each task doc carries the exact command. (T00 verified 2026-09-04,

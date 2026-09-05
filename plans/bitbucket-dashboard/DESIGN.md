@@ -184,11 +184,20 @@ used as HTTP Basic auth: the real read-only key the user holds is an access toke
 pair, and the Basic header the design first specified was rejected by the live API with a 400,
 `Invalid Authorization header` (FINDINGS 2026-09-05).
 
+**Bearer only, confirmed with the user 2026-09-05.** A Basic `email:api-token` will 401 against
+the Bearer header and is deliberately *not* supported — auto-detecting the scheme from the key's
+shape (a colon means a pair, so use Basic) was considered and declined; the real credential is
+the workspace's access token, and a single scheme is simpler than one that guesses. A live
+diagnosis that day showed the token then in the config was in fact a personal `email:api-token`
+(Basic 200s and returns an identity; Bearer 401s) — the wrong key for this dashboard, not a
+reason to add Basic back.
+
 **"Me" must still resolve from this token** (see the next paragraph): the whole "assigned to me
 / authored by me / my threads" behaviour depends on `GET /2.0/user` returning the token owner's
-`uuid`. An earlier hand-check saw `getUser` return a real uuid (FINDINGS 2026-09-04), but that
-predates the Bearer switch, so the reopen re-verifies identity **and** the new per-PR comment
-fetch against the live token before the task is called done (T02 hand-check; §5.1).
+`uuid`. The one hand-check that saw `getUser` return a uuid (FINDINGS 2026-09-04) was via Basic
+with that personal token, so it does **not** cover the Bearer access token; whether the access
+token resolves an identity at `/2.0/user` is still unverified and must be checked before the
+reopen is called done (T02 hand-check; §5.1).
 
 **"Me" is resolved from the token**, not configured: the client calls `GET /2.0/user` once and
 keeps the returned `uuid`. So the person the dashboard is "about" is whoever the token belongs

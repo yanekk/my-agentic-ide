@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-05 | ✅ | Live auth diagnosed with the user: the token then in config is a personal `email:api-token` — Basic 200s (returns uuid + identity), Bearer 401s. User confirmed **Bearer-only** anyway (the real key is the cribl access token); auto-detect/Basic support declined. Still open: `getUser` identity unverified for the cribl **Bearer** token. |
 | 2026-09-05 | 📌 | Reopen built (T02/T04/T05): client auth→Bearer (raw token, no split); new `listPRComments` (paginated, auth/transient-split); daemon fetches comments per open PR → `raw.comments`, keeps previous on a blip; store passes them through untouched. All suites green; live Bearer hand-check pending (getUser uuid + comment fetch). |
 | 2026-09-05 | 📌 | T06: `renderDashboard` also takes a `config` arg the task doc's signature omitted — a pure renderer needs it for the unconfigured state and the `team` pick-list, neither in the cache. T07's pane forwards `store.readConfig`. Draw helpers (clip/pad/visibleLen/safeText) imported from the pure agenda-model, as cockpit-welcome does. |
 | 2026-09-05 | 📌 | T06: DESIGN 2.n's two error footnotes reconciled by breadth. Every fetched repo transient-failing → one aggregate `last updated … · offline`; a subset → a per-repo line each. The client can't tell a 404 typo from a network blip (both `transient`), so kind alone can't split them. |
