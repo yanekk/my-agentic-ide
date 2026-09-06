@@ -2711,23 +2711,26 @@ same  "...the daemon is still alive after the no-op" \
       "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
 # --- paging: many PRs overflow one page; next walks to the last and clamps (DESIGN 2.5) ---
-# 20 PRs at the pane's 40x10 geometry is 3 pages. The daemon reads `pages` from the
-# model at the live geometry and clamps a click to [1, pages], so a next past the end
-# never writes an out-of-range page (the model's own shrink->page-1 reset is separate).
+# 20 PRs at the pane's 40x10 geometry is 7 pages now that each PR is TWO lines
+# (bitbucket-dashboard-ux T03 halves the page density: 4 rows over 2 lines, less the
+# pager -> 3 PRs a page -> ceil(20/3)=7). The daemon reads `pages` from the model at the
+# live geometry and clamps a click to [1, pages], so a next past the end never writes an
+# out-of-range page (the model's own shrink->page-1 reset is separate).
 echo many > "$BBMODE"; sleep 2
 same "the overflowing tab is cached (20 PRs)" "$(bq "$S6" 'c.repos.alpha.prs.length')" "20"
 echo bb-page:next >> "$S6/cmd"; sleep 1
 same "bb-page:next advances to page 2"        "$(vq "$S6" 'v.page.toReview')" "2"
+# Walk the rest of the way to the last page (7).
+for _ in 3 4 5 6 7; do echo bb-page:next >> "$S6/cmd"; sleep 1; done
+same "bb-page:next reaches the last page (7)"  "$(vq "$S6" 'v.page.toReview')" "7"
 echo bb-page:next >> "$S6/cmd"; sleep 1
-same "bb-page:next advances to page 3"        "$(vq "$S6" 'v.page.toReview')" "3"
-echo bb-page:next >> "$S6/cmd"; sleep 1
-same "bb-page:next past the last page is clamped (stays 3)" "$(vq "$S6" 'v.page.toReview')" "3"
+same "bb-page:next past the last page is clamped (stays 7)" "$(vq "$S6" 'v.page.toReview')" "7"
 echo bb-page:prev >> "$S6/cmd"; sleep 1
-same "bb-page:prev steps back to page 2"      "$(vq "$S6" 'v.page.toReview')" "2"
+same "bb-page:prev steps back to page 6"      "$(vq "$S6" 'v.page.toReview')" "6"
 
-# Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is on page 2
-# now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back in
-# the middle of a list you switched away from.
+# Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is deep in the
+# list now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back
+# in the middle of a list you switched away from.
 echo bb-tab:mine >> "$S6/cmd"; sleep 1
 echo bb-tab:toReview >> "$S6/cmd"; sleep 1
 same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toReview')" "1"

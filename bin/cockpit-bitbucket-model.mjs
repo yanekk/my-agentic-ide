@@ -361,6 +361,48 @@ const ESC = "\x1b[";
 const dim = (s) => `${ESC}2m${s}${ESC}0m`;
 const bold = (s) => `${ESC}1m${s}${ESC}0m`;
 
+// Line-two colour helpers (DESIGN 2.7, binding), named by role against the 16-colour
+// palette so the exact shade follows the user's theme. Like dim/bold they close with
+// 0m, which resets EVERY attribute -- fine for a self-contained segment, but see
+// reopen() for why line two cannot just wrap coloured segments in one underline.
+const cyan = (s) => `${ESC}36m${s}${ESC}0m`;    // #id, the primary button, the link cue
+const green = (s) => `${ESC}32m${s}${ESC}0m`;   // additions, [NEW]
+const red = (s) => `${ESC}31m${s}${ESC}0m`;     // deletions
+const amber = (s) => `${ESC}33m${s}${ESC}0m`;   // [ACTIVE]
+const reverse = (s) => `${ESC}7m${s}${ESC}0m`;  // a press flash (a self-contained label)
+
+// U+2212 MINUS SIGN, the deletions marker (DESIGN 2.3 "+A −R"): a real minus glyph
+// paired with the "+" of additions, both one column wide.
+const MINUS = "−";
+
+// Wrap a string so an SGR attribute stays ON across every inner reset. dim/bold/the
+// colour helpers all close with 0m, which clears ALL attributes -- so a line whose
+// underline (or press-reverse) must survive past a coloured segment cannot simply be
+// wrapped once: the first inner 0m would kill it mid-line (FINDINGS 2026-09-06). This
+// re-asserts `sgr` immediately after each 0m, then closes the whole run once.
+function reopen(s, sgr) {
+  return sgr + String(s).replace(/\x1b\[0m/g, `${ESC}0m${sgr}`) + `${ESC}0m`;
+}
+
+// The three activity tags, each a coloured [LABEL] (DESIGN 2.2, 2.7). STALE is drawn
+// dim (a quiet PR reads quietly); NEW green, ACTIVE amber.
+function renderTag(name) {
+  const label = `[${name}]`;
+  if (name === "NEW") return green(label);
+  if (name === "ACTIVE") return amber(label);
+  return dim(label);   // STALE
+}
+
+// "src → dst" for line two, both names run through safeText (they are wire text). ""
+// when neither branch is known, so the whole branch group drops rather than drawing a
+// dangling arrow.
+function branchText(p) {
+  const s = safeText(p.sourceBranch ?? "");
+  const d = safeText(p.destBranch ?? "");
+  if (!s && !d) return "";
+  return `${s} → ${d}`;
+}
+
 // Left-pad to a VISIBLE width (agenda's `pad` only right-pads). Counts read as a
 // column when right-aligned, the way a table's numbers do.
 const lpad = (s, w) => " ".repeat(Math.max(0, w - visibleLen(s))) + s;
@@ -508,8 +550,9 @@ function buildTrailer(cfgRepos, cacheRepos, now, w) {
 function computeLayout(w, tab, pageRows) {
   const review = tab === "toReview";
   const btnPrimaryLabel = review ? "[Review]" : "[Address]";
-  const btnOpenLabel = "[Open]";
-  const buttonsW = visibleLen(btnPrimaryLabel) + 1 + visibleLen(btnOpenLabel);
+  // The [Open] button is gone (DESIGN 3): the whole top line but the primary button is
+  // the click-to-open target now, so line one carries only the one primary button.
+  const buttonsW = visibleLen(btnPrimaryLabel);
 
   // "repo"/"author"/"title" headers need 4/6/5 columns, so the natural widths start
   // there; a column never renders narrower than its own header.
@@ -547,8 +590,13 @@ function computeLayout(w, tab, pageRows) {
   if (titleW < MIN_TITLE_W && !dropRepo) { dropRepo = true; titleW = titleWidth(); }
   titleW = Math.max(1, titleW);
 
-  return { review, repoW, numW, authorW, apW, cmW, titleW, buttonsW,
-           dropAuthor, dropCounts, dropRepo, btnPrimaryLabel, btnOpenLabel };
+  // Where the title cell begins (1-indexed), so line two indents under it: repo (when
+  // shown) + its gap, then #id + its gap. Fixed order, so it is arithmetic, not a
+  // mid-build capture.
+  const titleX0 = 1 + (dropRepo ? 0 : repoW + GAP) + numW + GAP;
+
+  return { review, repoW, numW, authorW, apW, cmW, titleW, buttonsW, titleX0,
+           dropAuthor, dropCounts, dropRepo, btnPrimaryLabel };
 }
 
 // The dim column-header row, using the same widths as the rows so they align.
@@ -562,49 +610,139 @@ function buildHeader(L) {
   return dim(cells.join(" ".repeat(GAP)));
 }
 
-// One PR row: the fixed columns, then the two buttons whose exact x-positions are
-// tracked so a click lands on them (DESIGN 3.4 -- the verb carries slug/id, so the
-// daemon finds the PR without agreeing with the pane on row order). Every styled
-// cell is clipped to its width BEFORE padding, so `col` stays in step with what is
-// drawn; a title/repo/author is passed through safeText first, because it is text
-// from the wire and a raw newline or ESC would break the row (agenda's rule).
-function buildRow(p, L, tab) {
-  const zones = [];
-  let line = "";
+// Line ONE: the fixed columns (the open zone), then the single primary button. Two
+// hit-zones, both on this line (DESIGN 3): an OPEN zone spanning col 1 to just before
+// the button (a click anywhere but the button opens the PR, firing bb-open) and the
+// primary button's spawn verb. The verbs carry slug/id, so the daemon finds the PR
+// without agreeing with the pane on row order. Every styled cell is clipped to its
+// width BEFORE padding, so `col` stays in step with what is drawn; a title/repo/author
+// is passed through safeText first (wire text -- a raw newline or ESC would break the
+// row, agenda's rule).
+//
+// `emphasis` = { verb, state:"hover"|"press" } | null (DESIGN 3): the zone whose verb
+// matches is drawn emphasised, everything else at rest. It is a pure RENDERING input
+// -- the model never decides a button is hovered, only how it looks when told (the
+// pane reads the mouse, T04). No emphasis reproduces the rest bytes exactly.
+function buildRow(p, L, tab, emphasis) {
+  const key = `${p.repo}/${p.id}`;
+  const primaryVerb = `${tab === "toReview" ? "bb-review" : "bb-address"}:${key}`;
+  const openVerb = `bb-open:${key}`;
+  const em = emphasis && typeof emphasis === "object" ? emphasis : null;
+  const primaryState = em && em.verb === primaryVerb ? em.state : "rest";
+  const openState = em && em.verb === openVerb ? em.state : "rest";
+
+  let span = "";      // the open-zone content: every column, up to but not the button
   let col = 1;
   let first = true;
   const cell = (styled, width) => {
-    if (!first) { line += " ".repeat(GAP); col += GAP; }
+    if (!first) { span += " ".repeat(GAP); col += GAP; }
     first = false;
-    line += pad(styled, width);
+    span += pad(styled, width);
     col += width;
   };
 
   if (!L.dropRepo) cell(dim(clip(safeText(p.repo), L.repoW)), L.repoW);
-  cell(clip(`#${p.id}`, L.numW), L.numW);
-  cell(clip(safeText(p.title), L.titleW), L.titleW);
+  cell(cyan(clip(`#${p.id}`, L.numW)), L.numW);
+  // Title: default text, or the cyan-underline link cue while the open zone is hovered
+  // (DESIGN 2.7). titleText carries no inner reset, so the cue survives trivially.
+  const titleText = clip(safeText(p.title), L.titleW);
+  cell(openState === "hover" ? `${ESC}4m${ESC}36m${titleText}${ESC}0m` : titleText, L.titleW);
   if (!L.dropAuthor) cell(dim(clip(safeText(p.author?.nickname ?? ""), L.authorW)), L.authorW);
   if (!L.dropCounts) {
     cell(lpad(countCell(p.approvals), L.apW), L.apW);
     cell(lpad(countCell(p.comments), L.cmW), L.cmW);
   }
 
-  // Buttons. `cell` cannot place them: their zones need the un-padded start column.
-  if (!first) { line += " ".repeat(GAP); col += GAP; }
-  const key = `${p.repo}/${p.id}`;
-  const primaryVerb = tab === "toReview" ? "bb-review" : "bb-address";
-  let x0 = col;
-  line += bold(L.btnPrimaryLabel);
-  col += visibleLen(L.btnPrimaryLabel);
-  zones.push({ verb: `${primaryVerb}:${key}`, x0, x1: col - 1 });
-  line += " ";
-  col += 1;
-  x0 = col;
-  line += bold(L.btnOpenLabel);
-  col += visibleLen(L.btnOpenLabel);
-  zones.push({ verb: `bb-open:${key}`, x0, x1: col - 1 });
+  // The gap before the button belongs to the open zone: clicking that blank still
+  // opens the PR (DESIGN 3, "the whole line but the button").
+  span += " ".repeat(GAP);
+  const openX1 = col + GAP - 1;
+  const primaryX0 = col + GAP;
 
-  return { line, zones };
+  // Press reverse-videos the whole open span (which holds coloured segments, so the
+  // reverse is re-asserted after each reset); hover is the title cue placed above.
+  const openStr = openState === "press" ? reopen(span, `${ESC}7m`) : span;
+
+  const label = L.btnPrimaryLabel;
+  const btn =
+    primaryState === "press" ? reverse(label)                    // reverse flash
+    : primaryState === "hover" ? `${ESC}1m${ESC}36m${label}${ESC}0m` // bright + fill
+    : cyan(label);                                               // rest
+  const primaryX1 = primaryX0 + visibleLen(label) - 1;
+
+  return {
+    line: openStr + btn,
+    zones: [
+      { verb: openVerb, x0: 1, x1: openX1 },
+      { verb: primaryVerb, x0: primaryX0, x1: primaryX1 },
+    ],
+  };
+}
+
+// Line TWO, indented under the title (DESIGN 2, 2.1-2.3, 2.6, 2.7). Left, joined by a
+// dim " · ": the activity tags (a space-separated group), the age, the branch → target.
+// Right, flush to the edge: the changed-file count and the +A −R pair. A drop order
+// frees space as the pane narrows -- branch first, then +A −R, then N files -- always
+// keeping the age and the tags. The whole line is underlined so it reads as the row
+// separator (a hairline at no vertical cost, DESIGN 2.6); reopen() keeps the underline
+// alive across the coloured segments' resets. Carries NO hit-zones. Pure: `now` is a
+// parameter, and the tags/age are pure functions of the PR and it.
+function buildLineTwo(p, L, w, now) {
+  const indent = Math.max(0, (L.titleX0 || 1) - 1);
+
+  const tags = activityTags(p, now);
+  const tagPiece = tags.length
+    ? { w: visibleLen(tags.map((t) => `[${t}]`).join(" ")), styled: tags.map(renderTag).join(" ") }
+    : null;
+  const age = ageLabel(p.createdAtMs, now);
+  const agePiece = age ? { w: visibleLen(age), styled: dim(age) } : null;
+  const br = branchText(p);
+  let branchPiece = br ? { w: visibleLen(br), styled: dim(br) } : null;
+
+  // The diff items exist only when the PR was fetched (DESIGN 2.4): a null `diff` draws
+  // nothing here, never a "0 files" -- an absent fetch must not read as an empty PR.
+  let filesPiece = null;
+  let pmPiece = null;
+  if (p.diff) {
+    const files = `${p.diff.files} files`;
+    filesPiece = { w: visibleLen(files), styled: dim(files) };
+    const plus = `+${p.diff.added}`;
+    const minus = `${MINUS}${p.diff.removed}`;
+    pmPiece = { w: visibleLen(`${plus} ${minus}`), styled: `${green(plus)} ${red(minus)}` };
+  }
+
+  const SEPW = 3;    // dim " · " between the left groups
+  const RSEP = 2;    // two spaces between the right diff items
+  const MIDGAP = 2;  // the minimum blank gap between the left block and the right diff
+  const leftWidth = (l) => l.reduce((a, x) => a + x.w, 0) + SEPW * Math.max(0, l.length - 1);
+  const rightWidth = (r) => r.reduce((a, x) => a + x.w, 0) + RSEP * Math.max(0, r.length - 1);
+
+  // Drop order (DESIGN 2): branch, then the +A −R pair, then the file count; age and
+  // the tags never drop (the user's first ask). Each dropped item frees its space.
+  while (true) {
+    const left = [tagPiece, agePiece, branchPiece].filter(Boolean);
+    const right = [filesPiece, pmPiece].filter(Boolean);
+    const rw = rightWidth(right);
+    if (indent + leftWidth(left) + (rw ? MIDGAP + rw : 0) <= w) break;
+    if (branchPiece) { branchPiece = null; continue; }
+    if (pmPiece) { pmPiece = null; continue; }
+    if (filesPiece) { filesPiece = null; continue; }
+    break;   // only age + tags left; the final clip guards a still-too-narrow pane
+  }
+
+  const left = [tagPiece, agePiece, branchPiece].filter(Boolean);
+  const right = [filesPiece, pmPiece].filter(Boolean);
+  const lw = leftWidth(left);
+  const rw = rightWidth(right);
+
+  let content = " ".repeat(indent) + left.map((x) => x.styled).join(dim(" · "));
+  if (rw) {
+    const gap = Math.max(MIDGAP, w - indent - lw - rw);
+    content += " ".repeat(gap) + right.map((x) => x.styled).join("  ");
+  }
+  const vis = visibleLen(content);
+  if (vis < w) content += " ".repeat(w - vis);   // pad so the hairline runs full width
+  return reopen(content, `${ESC}4m`);
 }
 
 /**
@@ -622,13 +760,18 @@ function buildRow(p, L, tab) {
  * without it -- so it is added here and the pane (T07) forwards it; only the
  * PRESENCE of the key is ever read, never its value, and it is never drawn.
  *
+ * `emphasis` = { verb, state:"hover"|"press" } | null (DESIGN 3): the hit-zone whose
+ * verb matches draws emphasised (the primary button, or the open zone), everything
+ * else at rest. The pane reads the mouse and repaints (T04); the model only decides
+ * how a target LOOKS when told. Absent, the output is byte-identical to the rest state.
+ *
  * Returns EXACTLY `rows` lines, each at most `width` visible columns, matching the
  * agenda's contract: more corrupts what is drawn below, fewer leaves stale paint.
  *
  * State order (DESIGN 2.n): unconfigured -> whole-dashboard auth (expired) ->
  * the active tab's table with its empty state, per-repo/offline footnotes and pager.
  */
-export function renderDashboard({ width, rows, cache, view, now, config } = {}) {
+export function renderDashboard({ width, rows, cache, view, now, config, emphasis } = {}) {
   const w = Math.max(1, Math.floor(width) || 0);
   const n = Math.max(0, Math.floor(rows) || 0);
 
@@ -703,13 +846,15 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
     // A one-line "checked, all clear" beats an empty table reading as broken (2.n).
     push(dim(tab === "mine" ? "nothing of yours open" : "nothing waiting on you"));
   } else {
-    // Budget: tabs (1) + header (1) reserved above the rows; the pager, only when
-    // the list overflows one page, costs one more row.
+    // Budget: tabs (1) + header (1) reserved above the rows; the pager, only when the
+    // list overflows one page, costs one more row. Each PR is now TWO lines (DESIGN 2),
+    // so the remaining lines / 2 (floored, min 1) is PRs-per-page; paginate still takes
+    // and returns a PR count.
     const avail = Math.max(0, n - 2 - trailer.length);
-    let perPage = Math.max(1, avail);
+    let perPage = Math.max(1, Math.floor(avail / 2));
     let paged = paginate(list, { page, perPage });
     if (paged.pages > 1) {
-      perPage = Math.max(1, avail - 1);
+      perPage = Math.max(1, Math.floor((avail - 1) / 2));
       paged = paginate(list, { page, perPage });
     }
     const pager = paged.pages > 1;
@@ -718,9 +863,10 @@ export function renderDashboard({ width, rows, cache, view, now, config } = {}) 
     const L = computeLayout(w, tab, paged.rows);
     push(buildHeader(L));
     for (const p of paged.rows) {
-      const r = buildRow(p, L, tab);
+      const r = buildRow(p, L, tab, emphasis);
       push(r.line);
-      zonesAt(r.zones);
+      zonesAt(r.zones);        // both zones stamp line one's y, just pushed
+      push(buildLineTwo(p, L, w, now));
     }
     if (pager) {
       const pg = buildPager(paged.page, paged.pages, w);
