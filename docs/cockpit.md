@@ -595,18 +595,21 @@ at full width exactly as before; the dashboard is a resting screen, nothing abou
 changes.
 
 ```
-┌───────────────────────────────────────────────┬──────────────┐
-│  To review  ·  Mine                            │ NOTES     4  │
-│  ───────────────────────────────────────────── │ ──────────── │
-│  proj   #128  fix the retry backoff   alice ✓2 │ 5c4f 2h rebas│
-│  proj   #131  tidy the config loader  bob   ·  │ ──────────── │
-│  api    #47   bump the client         carol ✎3 │ TODAY · Wed  │
-│           [Review] [Open]                       │ ▌ NOW standup│
-│  ‹ prev · 1/2 · next ›                          │ … +2 · agenda│
-└───────────────────────────────────────────────┴──────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  To review  ·  Mine                                        │
+│  ────────────────────────────────────────────────────────  │
+│  proj  #128  fix the retry backoff       alice ✓2 [Review] │
+│    NEW · 2h · fix/retry → main             3 files +48 −12 │
+│────────────────────────────────────────────────────────────│
+│  api   #47   bump the client             carol ✎3 [Review] │
+│    STALE · Aug 20 · bump/client → main    9 files +210 −4  │
+│  ‹ prev · 1/2 · next ›                                     │
+└────────────────────────────────────────────────────────────┘
 ```
 
-It is a **launchpad, not a PR client**. It answers "what needs me" and hands the work to an
+Each PR is **two lines** with a dim rule between rows; the whole top line but the primary
+button opens the PR (there is no `[Open]` button). The right ~25% still holds NOTES over AGENDA,
+dropped from this sketch. It is a **launchpad, not a PR client**. It answers "what needs me" and hands the work to an
 agent; it never comments, approves, merges or edits a PR itself. Every fetch is read-only and
 the client has no method that mutates BitBucket, so it cannot damage anything even by mistake.
 
@@ -618,14 +621,49 @@ tab is remembered for the session.
 - **To review** — open PRs that concern you as a reviewer: ones where you are a requested
   reviewer, plus ones authored by anyone on your `bitbucket-team` pick-list (so a colleague who
   never assigns you still surfaces). Drafts, and any PR you have already approved, are excluded.
-  Columns: repo slug, PR number, title, author, approval count, comment count, **[Review]**, **[Open]**.
-- **Mine** — open PRs you authored, including your own drafts. Same columns without the author
+  Line one: repo slug, PR number, title, author, approval count, comment count, **[Review]**.
+- **Mine** — open PRs you authored, including your own drafts. Same line one without the author
   (it is always you), and **[Address]** in place of Review.
 
-**Titles are one line, truncated with an ellipsis** — never word-wrapped. A single-line row is
-what makes every row the same height, which lets a page be a fixed count of rows and a click's
-target row a trivial function of its y. The full title is one click away via Open. A zero
-approval or comment count is drawn as a dim `·`, not `0`, so a row that has feedback stands out.
+**Titles are one line, truncated with an ellipsis** — never word-wrapped. A fixed row height is
+what lets a page be a fixed count of rows and a click's target row a trivial function of its y. A
+zero approval or comment count is drawn as a dim `·`, not `0`, so a row that has feedback stands
+out.
+
+### Line two — age, activity, branch and diff size
+
+Under the title, indented, sits a second line the parent plan did not have. Left to right, `·`
+between the groups: any **activity tags**, then the **age**, then **branch → target**; pushed to
+the right, the **changed-file count** and **lines added / removed**. When the pane is too narrow
+the line sheds items in a fixed **drop order** — branch first (it is context), then the +/- detail,
+then the file count — always keeping the age and the tags, the two things asked for first. Nothing
+wraps.
+
+- **Age** is time since the PR was opened (`created_on`): `Nm` under an hour (so a fresh PR is not
+  `0h`), `Nh` under a day, `Nd` under a week, then a calendar date `Mon DD`, because past a week the
+  exact day count stops meaning anything.
+- **Tags**, drawn first and in this order, each a pure test of the PR and the single `now` the pane
+  already reads once per paint:
+  - **`[NEW]`** — opened in the last 24h. Green.
+  - **`[ACTIVE]`** — **3 or more** comments in the last 24h (any comment, inline or general — an
+    activity signal, not the unresolved-thread sort). Amber.
+  - **`[STALE]`** — no activity for **more than 14 days** (from `updated_on`, last activity, not
+    birth). Dark grey, at the separator's weight. Excludes the other two by construction; NEW and
+    ACTIVE can co-occur.
+- **Branch → target** — `source.branch.name → destination.branch.name`, clipped not wrapped. Free:
+  both names are already in the PR list response.
+- **Changed files and lines** — `N files  +A −R`, a dim file count and a green/red signed pair. These
+  are **not** in the list response; they come from a per-PR diffstat fetch (below).
+
+**Colours are pinned to the prototype** (binding, so the build matches what was seen), named by
+role against the terminal's 16-colour palette so the shade follows your theme: green additions and
+`[NEW]`, red deletions, amber `[ACTIVE]`, dark-grey `[STALE]`, cyan `#id` and the primary button,
+dim for age, branch, file count and the `·` separators.
+
+**Rows are separated by a dedicated dim `────` line** between consecutive PRs — foreground palette
+index 8 (bright black), a calm dark hairline, drawn between PRs only and never after the last on a
+page. Each PR is therefore three lines (line one, line two, the rule), so a page holds `floor((avail
++ 1) / 3)` PRs — the density cost the user accepted for the cleaner read.
 
 ### The sort — by unresolved threads, not recency
 
@@ -654,11 +692,18 @@ it would break the rule the diff-slot swap depends on.
 The daemon fetches on the agenda's three triggers — every minute, on return to the fleet list,
 and once at startup. A refresh is **one GET per watched repo** (following `next` past 50 open
 PRs — cribl has 739, ~15 pages), plus one `GET /2.0/user` the first time to resolve "me" from
-the token, plus **one comment GET per PR that concerns you**. That last is bounded by
-`model.concernsMe`, classify's own membership predicate: the daemon runs it on each raw PR and
-reads comments only for the handful that will actually show, so even at 739 open PRs the comment
+the token, plus **one comment GET and one diffstat GET per PR that concerns you**. Both per-PR
+calls are bounded by `model.concernsMe`, classify's own membership predicate: the daemon runs it
+on each raw PR and reads only for the handful that will actually show, so even at 739 open PRs the
 budget stays a handful per repo rather than one call per open PR. `concernsMe` is shared between
 the fetch and the display so a PR is never fetched-but-hidden or shown-but-unfetched.
+
+The **diffstat** (`GET …/pullrequests/{id}/diffstat`) is what supplies the changed-file and line
+counts — they are not in the list response. The daemon sums each PR's entries with the pure
+`summarizeDiffstat` and caches only the triple `{ files, added, removed }`, so the cache stays
+small and a repaint never re-sums hundreds of entries. A **transient fetch failure keeps the last
+good counts** (like the comment loop), so the numbers do not blink out on a passing network
+hiccup; only a PR with no prior summary at all draws no counts (never a misleading zero).
 
 The pane cannot scroll, so overflow is **paged**, not folded: a clickable
 `‹ prev · 1/3 · next ›` under the table. Every row's buttons stay reachable, which is the whole
@@ -677,9 +722,12 @@ carries the repo slug and PR id (`bb-open:{slug}/{id}`) so the daemon finds the 
 without the pane and daemon having to agree on row order. The pure model maps a click's (x, y) to
 a verb through `verbAt` over the hit-zones a render produces.
 
-- **Open** launches the PR's web page — `spawn("/usr/bin/open", [htmlUrl], { detached })`, the
-  URL taken from the PR's `links.html.href`. `BITBUCKET_BROWSER` overrides the opener so a test
-  launches no browser. Open works even for a repo that is not cloned locally: it uses the web URL.
+- **Open** is no longer a button. The **whole top line except the primary button** is the open
+  zone — one hit-zone from the start of the line to just before `[Review]`/`[Address]`, so a click
+  on the number, title, author or counts all fire `bb-open` and launch the PR's web page —
+  `spawn("/usr/bin/open", [htmlUrl], { detached })`, the URL from the PR's `links.html.href`.
+  `BITBUCKET_BROWSER` overrides the opener so a test launches no browser. Open works even for a repo
+  that is not cloned locally: it uses the web URL.
 - **Review** / **Address** start a new cockpit agent already working in that PR's repository,
   with a minimal directive — `Review Bitbucket PR {url}` or `Address the review comments on
   Bitbucket PR {url}`, issued against `@{slug}`. The agent is expected to have its own BitBucket
@@ -706,6 +754,22 @@ The spawn types `@{slug}` and relies on `{projectsRoot}/{slug}` existing; a miss
 differently-named clone lands the agent nowhere useful (it starts, finds no repo, and says so —
 harmless and killable). This is a documented limit, not a pre-flight check, the same accepted cost
 as the stray click.
+
+### The button reactions — press, and why not hover
+
+The open zone and the primary button both **flash on press**: a left-button press over either
+target inverts it for a beat (reverse video), confirming the click registered, then rests. It is a
+fixed short flash rather than press-until-release, because a `[Review]`/`[Address]` press spawns an
+agent and the exact release may not arrive at this pane cleanly. The flash is a pure rendering
+variant — the model draws the pressed target from an optional `{ verb, state }` emphasis input, so
+every look is a millisecond test; only the mouse reading in `cockpit-welcome.mjs` is impure. The
+verb fires unconditionally before the flash, so the feedback never gates the action.
+
+**Hover was dropped.** The plan intended the open zone to light like a link on hover, but WezTerm
+delivers mouse **motion** only to the *focused* pane, and the dashboard sits in the fleet list while
+focus is usually elsewhere — so the unfocused pane receives no motion and hover is impossible, not
+merely flickery (proven by a throwaway spike, confirmed by hand 2026-09-06). The press flash is the
+sole button reaction. The pane asks the terminal for presses only (`?1000h`), never motion.
 
 ### Configuration, through `config`
 
@@ -762,6 +826,7 @@ checked-in file would land in the very diff an agent is reviewed on.
 ```
 bitbucket-key, bitbucket-workspace, bitbucket-repos, bitbucket-team   one file each, written by config
 bitbucket-cache.json   { version, meUuid, repos: { "<slug>": { fetchedAt, prs, error } } }  — daemon writes, pane reads
+                       each shown pr carries a diffstat triple { files, added, removed } (kept on a transient fail)
 bitbucket-view.json    { version, tab, page: { toReview, mine } }                           — daemon writes, pane reads
 ```
 
@@ -781,14 +846,18 @@ view like any other.
 
 ### The pure/shell boundary
 
-Same shape as the agenda. `cockpit-bitbucket-model.mjs` is **pure** — it normalizes a raw PR,
-classifies into tabs, sorts, paginates, renders the lines and computes the click hit-zones, taking
+Same shape as the agenda. `cockpit-bitbucket-model.mjs` is **pure** — it normalizes a raw PR
+(now also parsing `created_on`, the comment timestamps and the cached diffstat triple, all as
+milliseconds), classifies into tabs, sorts, derives the age and the NEW/ACTIVE/STALE tags from the
+`now` that flows through the render path, sums a diffstat with `summarizeDiffstat`, paginates,
+renders the two-line rows with the pressed-state emphasis, and computes the click hit-zones, taking
 `now` and `width` as parameters with no clock, network or I/O. `spikes/bitbucket-test/run.sh` greps
 it for `node:fs`/`node:http`/`node:https`/`node:child_process`/`fetch(`/`Date.now(`/a
 zero-argument `new Date()`/`process.env` and fails on a hit — the same check the agenda model is
 held to. If it fails, the fix is to move the code, never to relax the check.
-`cockpit-bitbucket-client.mjs` (Bearer auth, GET only, `getUser`/`listOpenPRs`/`listPRComments`,
-endpoints built from a base origin so a test can re-point them at a loopback stub) and
+`cockpit-bitbucket-client.mjs` (Bearer auth, GET only,
+`getUser`/`listOpenPRs`/`listPRComments`/`listPRDiffstat`, endpoints built from a base origin so a
+test can re-point them at a loopback stub) and
 `cockpit-bitbucket-store.mjs` (reads the four settings, atomically reads/writes the two JSON files)
 are the shell side, alongside the additions to `cockpitd.mjs`, `cockpit-welcome.mjs` and
 `cockpit-config.mjs`.

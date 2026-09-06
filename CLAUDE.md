@@ -182,8 +182,8 @@ bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
 bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic writes
 bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
 bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
-bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, paginate, render, hit-zones
-bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments
+bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, age+NEW/ACTIVE/STALE tags, summarizeDiffstat, paginate, two-line render + press emphasis, hit-zones
+bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments, listPRDiffstat
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
