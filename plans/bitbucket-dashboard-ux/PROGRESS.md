@@ -11,9 +11,9 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 **Plan reviewed:** 2026-09-06 — 2 decisions with the user; verification-table task refs and 3
 implementer clarifications fixed.
 
-**Status:** in progress — T00 ✅; T01 ✅; T02 ✅; T03 ✅; T04 🔍.
+**Status:** in progress — T00 ✅; T01 ✅; T02 ✅; T03 ✅; T04 ✅. Only T06 (docs) left.
 **Last updated:** 2026-09-06
-**Next `pir-work` will:** review T04. Live hand-check done 2026-09-06 (flash + two-line rows + all three tags, see FINDINGS); code review still pending.
+**Next `pir-work` will:** implement T06 (docs: CLAUDE.md, docs/cockpit.md, truths table). Deps T01–T04 all ✅; T05 was dropped. Note the separator became a dedicated dim line and STALE went grey (post-T04 user tweaks — DESIGN/FINDINGS).
 
 ## Tasks
 
@@ -25,12 +25,12 @@ done · ⛔ blocked, needs a human · ❌ dropped, not built.
 | T00 | Hover-feasibility spike (motion to the unfocused pane) | — | ✅ | Review clean. Hand-verified 2026-09-06: motion reaches only the FOCUSED pane → T05 dropped. Probe deleted, tree clean. |
 | T01 | Data: listPRDiffstat + summarizeDiffstat + daemon fetch + cache triple | — | ✅ | Review clean. Client mirrors listPRComments; summarizeDiffstat pure/total; daemon fetches concernsMe only, caches triple, keeps last on transient fail. Live hand-verified 2026-09-06 (60 files +4964 −244). Suite 523. |
 | T02 | Pure model: created_on + comment times, diff/branch, ageLabel, activityTags | T01 | ✅ | Review clean. created_on/comment/diffstat traced end-to-end; purity green; NEW age≥0 correct. |
-| T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ✅ | Review clean. render 235/235. Deviations OK: `#id` cyan; underline SGR-4-only; minus=U+2212 (glyph one-col → T04 live); cockpit-test 7 pages. |
-| T04 | Pane: press-flash feedback | T03 | 🔍 | Pane wiring only; model's `emphasis` (T03) was already complete. `render()` threads `pressEmphasis` into `dashboardColumn`; `onDashClick` flashes for 120ms only on `bb-review:`/`bb-address:`/`bb-open:` verbs, timer `unref`'d. Verb still fires unchanged. No new unit test (impure — live-only, DESIGN 6.1). Suite 523 green. Live hand-verified 2026-09-06 (flash + rows + all tags). |
+| T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ✅ | Review clean; two-line rows + emphasis states traced, render green. Separator later reworked to a dedicated dim line (FINDINGS). |
+| T04 | Pane: press-flash feedback | T03 | ✅ | Review clean, no fix commit. Verb fires unconditionally before the flash (effect unchanged); FLASHES prefixes don't collide with bb-tab/bb-page; timer unref'd + cleared on re-click, self-heals within 120ms even after a non-flashing click or a spawn-park. Press render defended by T03 tests. Live hand-verified 2026-09-06. Suite green (523). |
 | T05 | Pane: hover highlight | T00, T03 | ❌ | DROPPED 2026-09-06 (T00 + user): motion reaches only the focused pane, so the unfocused dashboard pane can never hover. Not built. See FINDINGS. |
 | T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T04 | ⬜ | Truths row only if the spike earned one. Note T05 was dropped. |
 
-**Review queue:** T04 (implemented 2026-09-06, awaiting review).
+**Review queue:** (empty — T06 next to implement).
 
 ## Open for the plan review / the user
 
