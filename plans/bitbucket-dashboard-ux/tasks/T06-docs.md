@@ -18,7 +18,8 @@ describes the dashboard, and a truths-table row if the spike earned one.
   per shown PR.
 - `docs/cockpit.md` — the dashboard section: the two-line row and its drop order, the three tags with
   thresholds (NEW <24h, ACTIVE ≥3 comments/24h, STALE >14d), the branch and diff-size items, the
-  diffstat fetch bounded to shown PRs, the row separator, the press feedback, and the hover outcome.
+  pinned colours (DESIGN §2.7), the diffstat fetch bounded to shown PRs, the row separator, the press
+  feedback, and the hover outcome.
 - `CLAUDE.md` truths table — **only if** T00 produced a durable, expensive-to-rediscover fact (e.g.
   "WezTerm does / does not report `?1003h` motion to an unfocused pane"). Thirty rows is the ceiling:
   adding one means retiring one. If the finding already lives in FINDINGS and a code comment, it does

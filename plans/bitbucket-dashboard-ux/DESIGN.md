@@ -95,8 +95,7 @@ Also on line two, added at the user's request (2026-09-05):
   `sourceBranch`/`destBranch`; only the drawing is new. A long branch name is clipped, not wrapped.
 - **Changed files and lines added / removed** — `N files  +A −R`. These are **not** in the PR list
   response; BitBucket carries them only on a separate per-PR **diffstat** endpoint (§2.4). Drawn as
-  a small file count and a signed pair; the `+A` and `−R` may be coloured to read at a glance, the
-  exact styling settled when the row is drawn.
+  a dim file count and a signed pair coloured per §2.7 (`+A` green, `−R` red).
 
 ### 2.4 The diffstat call — the one added cost
 
@@ -129,6 +128,27 @@ underline trailing spaces (WezTerm does), so an underlined full-width line two r
 under the PR while still being the row it already occupies. It costs no vertical space. Whether the
 last row on a page carries the underline is the renderer's choice, fixed and tested either way (a rule
 just above the pager is harmless).
+
+### 2.7 Colours — pinned to the prototype
+
+The colours are **binding** (user, 2026-09-05), taken from the prototype so the build matches what
+was seen. They are named by **role against the terminal's 16-colour palette**, not as hex — the exact
+shade follows the user's theme, only the role is fixed. This is additive to the model's existing
+`dim` (SGR 2) and `bold` (SGR 1) helpers; T03 adds small colour helpers and a test asserting the
+right SGR code wraps each element.
+
+| Element | Colour |
+|---|---|
+| Additions `+A`, the `[NEW]` tag | **green** (SGR 32) — the universal "added / fresh" |
+| Deletions `−R` | **red** (SGR 31) |
+| `[ACTIVE]` tag | **amber / yellow** (SGR 33) |
+| `[STALE]` tag | **grey** (dim) — a quiet PR reads quietly |
+| PR number `#id`, the primary button `[Review]`/`[Address]` | **cyan** (SGR 36) — the dashboard's action accent, matching the existing tab/pager accent |
+| age, branch, `N files`, the `·` separators, the row-separator underline | **dim** (SGR 2) — context, not signal |
+| title | **default** text; on open-zone hover it brightens with a cyan underline (the link cue, §3), and reverse-videos with the line on press |
+
+A tag is drawn as its coloured label (`NEW`, `ACTIVE`, `STALE`); whether it also gets a faint
+box/background is the renderer's cosmetic call, but the label colour above is fixed.
 
 ## 3. Opening a PR, and the reactions
 
@@ -282,6 +302,10 @@ All dates 2026-09-05 unless noted.
 - **The open zone reacts like a link** (§3): hover lights the row and underlines the title, press
   flashes it. User's choice (2026-09-05) that the open affordance be discoverable, not just the
   button.
+- **Colours are pinned to the prototype** (§2.7). User's choice (2026-09-05) to make what they saw
+  binding rather than re-decided at build time: green additions / `[NEW]`, red deletions, amber
+  `[ACTIVE]`, grey `[STALE]`, cyan `#id` and the primary button, dim for context. Named by palette
+  role, so the exact shade still follows the terminal theme.
 - **Press feedback is a fixed short flash, built regardless of the spike; hover is spike-gated.**
   The press is certain (the pane already gets the click); hover depends on motion delivery to an
   unfocused pane, which is unproven. The user pre-accepted press-only as the floor.

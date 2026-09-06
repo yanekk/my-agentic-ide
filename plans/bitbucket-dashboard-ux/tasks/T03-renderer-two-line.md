@@ -40,6 +40,10 @@ renderDashboard({ width, rows, cache, view, now, config,
 - **Row separator** (DESIGN §2.6): a **dim underline on each PR's second line**, drawing a full-width
   hairline between PRs without a dedicated row. It shares line two's row, so it costs no vertical
   space. Pick whether the last row on a page draws it and test that choice.
+- **Colours** (DESIGN §2.7, binding): `+A` green (SGR 32), `−R` red (31), `[NEW]` green, `[ACTIVE]`
+  amber (33), `[STALE]` grey/dim, `#id` and the primary button cyan (36); age, branch, file count,
+  `·` separators and the underline dim (2); title default. Add small colour helpers beside the
+  existing `dim`/`bold`; each element's SGR code is asserted in a test.
 - **Two lines per row** for the pagination budget: tabs (1) + header (1) reserved; pager (1 more)
   only when the list overflows; the remaining lines / 2, floored, min 1, is PRs-per-page. `paginate`
   is unchanged (pass it the PR count).
@@ -79,6 +83,8 @@ renderDashboard({ width, rows, cache, view, now, config,
 - Emphasis: `press` on the button reverse-videos the button and on the open zone reverse-videos the
   line-one span; `hover` applies each target's hover style; an off-page emphasis verb is a no-op; no
   emphasis reproduces the no-emphasis bytes for a fixed fixture.
+- Colours (DESIGN §2.7): `+A` carries the green SGR code and `−R` the red; `[NEW]` green, `[ACTIVE]`
+  amber, `[STALE]` grey/dim; `#id` and the primary button cyan; age/branch/file-count/separators dim.
 - Empty / unconfigured / expired states unchanged (one line each).
 
 ## Notes
