@@ -93,3 +93,15 @@ Keep line one's `computeLayout` intact — the two-line change is additive. Do n
 (DESIGN §2.5, §8). The underline separator relies on terminals underlining trailing spaces (WezTerm
 does); the test asserts the SGR underline wraps the line, not how a terminal paints it. Emphasis is a
 rendering concern only: the model decides how a button looks when told, never when it is hovered.
+
+**Two traps the existing helpers set** (plan review 2026-09-06):
+- The `dim`/`bold` helpers (and the new colour helpers) close with `${ESC}0m`, which resets **all**
+  attributes. So you cannot draw line two by wrapping the whole string in one underline and putting
+  coloured segments inside — the first inner `0m` kills the underline mid-line. Either re-open the
+  underline after each reset, close inner segments with `${ESC}24m`-style attribute-specific offs
+  rather than `0m`, or apply the underline as the last layer per segment. The test that "the SGR
+  underline wraps the line" must check the underline actually survives to the end, not just that a
+  `4m` appears somewhere.
+- Join only the **non-empty** left groups with ` · ` (tags, age, branch). `ageLabel` returns `""` for
+  an unparseable/absent `created_on`; a naive join would then draw a dangling `tags ·  · branch`. Add
+  a test: a PR whose age is `""` produces no doubled or leading separator.

@@ -44,9 +44,15 @@ export function ageLabel(createdAtMs, now) -> string
 export function activityTags(pr, now) -> string[]
 ```
 
-Use plain millisecond constants; no date library. Format `Mon DD` deterministically from the parsed
-date so a test asserts an exact string without depending on the machine timezone in a way the test
-cannot pin (pass fixed timestamps).
+Use plain millisecond constants; no date library. Format `Mon DD` in the **machine's local
+timezone** (plan review 2026-09-06) — the day the user perceives the PR was opened, matching every
+other local time the cockpit shows — using local `Date` accessors (`getMonth`/`getDate`), never UTC
+accessors, which would read a day off near midnight. Deriving a calendar day from a millisecond
+instant always depends on a timezone (this project has hit exactly this bug before — parent CLAUDE.md
+truths table, "an offset-less `dateTime` is not in the machine's zone"), so the date test **pins
+`TZ`** (e.g. runs under a fixed `TZ` and asserts the `Mon DD` for that zone) rather than asserting a
+string the machine's zone could shift. `ageLabel` reads no clock — `now` is a parameter — so this is
+formatting, not a purity leak.
 
 ## Done when
 

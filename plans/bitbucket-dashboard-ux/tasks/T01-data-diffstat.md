@@ -36,9 +36,15 @@ export function summarizeDiffstat(entries) -> { files, added, removed }
 ```
 
 The daemon attaches the summary to the cached PR entry, e.g. `raw.diffstatSummary = { files, added,
-removed }`, computed with `summarizeDiffstat`. A PR whose diffstat fetch failed or was not attempted
-carries **no** `diffstatSummary` (not a zeroed one), so T02/T03 can tell "0 files changed" from "not
-fetched" (DESIGN §2.4).
+removed }`, computed with `summarizeDiffstat`. A PR that has **never** been successfully fetched (or
+does not concern the user) carries **no** `diffstatSummary` (not a zeroed one), so T02/T03 can tell
+"0 files changed" from "not fetched" (DESIGN §2.4).
+
+**On a transient fetch failure, keep the PR's previous summary** (user decision, plan review
+2026-09-06), mirroring the comment loop's `prevComments` fallback exactly: a concerning PR whose
+diffstat GET errors this refresh keeps the triple it last had, so a network blip does not blink the
+counts out and back. Only a PR that has no prior summary at all shows nothing. Add a `prevDiffstat(id)`
+lookup beside the existing `prevComments(id)` in the shown-PR loop.
 
 ## Done when
 
@@ -46,7 +52,8 @@ fetched" (DESIGN §2.4).
   classifying errors like the sibling calls (401/403 → auth, else transient).
 - `summarizeDiffstat` returns the right triple, tolerant of missing fields and an empty list.
 - The daemon fetches the diffstat for exactly the shown PRs (those `concernsMe`), no more, and caches
-  the summary; a PR that does not concern the user gets no diffstat call.
+  the summary; a PR that does not concern the user gets no diffstat call. A concerning PR whose
+  diffstat GET fails keeps its **previous** summary (via `prevDiffstat`), not a dropped/zeroed one.
 - The read-only grep in `run.sh` still passes (no mutating verb in the client); the origin seam still
   passes (no non-loopback origin named in a test).
 - The full test command is green and quiet on pass.
@@ -59,7 +66,8 @@ fetched" (DESIGN §2.4).
   `lines_added`/`lines_removed` counted as 0; empty list → all zeros.
 - Daemon: given a cache of open PRs where some concern the user and some do not, only the concerning
   ones get a diffstat call and a cached summary (assert against a stubbed client, as the comment
-  fetch is tested).
+  fetch is tested). A concerning PR whose stubbed diffstat call errors keeps its previous summary
+  from the prior cache (the `prevDiffstat` fallback), not a missing one.
 
 ## Hand-off to the user
 

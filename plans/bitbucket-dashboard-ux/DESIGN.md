@@ -108,9 +108,11 @@ show — so even at cribl's 739 open PRs the cost stays a few calls per repo, no
 
 The summing is a **pure** function (`summarizeDiffstat`, §5), so the daemon stores only the three
 numbers `{ files, added, removed }` in the cache, not the per-file list: the cache stays small and
-the repaint never re-sums hundreds of entries. A PR whose diffstat has not been fetched (offline, or
-it does not concern you) shows no counts rather than a zero, so an absent fetch never reads as "an
-empty PR".
+the repaint never re-sums hundreds of entries. A PR that has never been fetched (it does not concern
+you) shows no counts rather than a zero, so an absent fetch never reads as "an empty PR". **A
+transient fetch failure keeps the last good counts** (user, plan review 2026-09-06), the same way the
+comment fetch keeps its last comments on a blip (parent §2.9): the counts do not blink out and back on
+a passing network hiccup. Only a PR with no prior summary at all draws nothing.
 
 ### 2.5 What line two does not hold
 
@@ -218,9 +220,10 @@ counts are proven from fixtures.
 The **new network call** is in `cockpit-bitbucket-client.mjs` — a `listPRDiffstat` beside the
 existing `listPRComments`, GET-only, paginated the same way, so the read-only-by-construction grep
 still passes. The **daemon** (`cockpitd.mjs`) fetches it for the same shown PRs it already fetches
-comments for, calls the pure `summarizeDiffstat`, and caches the triple on the PR entry. The
-**store**/cache shape carries three extra numbers per shown PR — small, and covered by the existing
-atomic-write path (no new file, no lock change).
+comments for, calls the pure `summarizeDiffstat`, and caches the triple on the PR entry — keeping the
+PR's previous triple on a transient failure, exactly as the comment loop keeps its prior comments
+(§2.4). The **store**/cache shape carries three extra numbers per shown PR — small, and covered by the
+existing atomic-write path (no new file, no lock change).
 
 The mouse wiring (press in T04, hover in T05) is impure and lives in `cockpit-welcome.mjs`, the same
 file that already reads presses and appends verbs. It starts no process and opens no socket; it only
@@ -250,8 +253,8 @@ non-loopback origin). See the agenda suite for how to turn verbose output back o
 |---|---|
 | Whether WezTerm reports mouse **motion** to the unfocused dashboard pane, and whether a repaint-on-hover is smooth | Motion delivery and flicker are only real in the running mux at a real width (T00) |
 | The live `diffstat` call authenticates and returns the file/line counts for a real PR | Needs the user's private token and workspace; read-only (T01) |
-| The two-line rows read well and stay aligned in a live pane | Rendering is only real in WezTerm at a real width (T02) |
-| The press flash is visible and lands on the right button when clicked live | Mouse timing and coordinates are only real in the running mux (T03) |
+| The two-line rows read well and stay aligned in a live pane | Rendering is only real in WezTerm at a real width; the renderer is T03 but its output is only seen live once the pane redraws, so it is hand-checked at T04's rebuild (the first task that runs live) |
+| The press flash is visible and lands on the right button when clicked live | Mouse timing and coordinates are only real in the running mux (T04) |
 | The hover highlight tracks the pointer and does not flicker | Same — only real in the running mux (T05, if built) |
 
 ### 6.2 Seatbelts
