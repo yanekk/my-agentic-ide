@@ -75,6 +75,19 @@ export function normalizePR(raw, { meUuid = "", repo = "" } = {}) {
     // classify and FINDINGS). uuid is stable, for the authored-by-me test.
     author: { uuid: String(author.uuid ?? ""), nickname: String(author.nickname ?? "") },
     updatedOn: String(r.updated_on ?? ""),
+    // created_on drives the age (2.1) and [NEW] (2.2). Kept as both the raw string
+    // and the parsed instant: Date.parse of a string is NOT a clock read, so purity
+    // holds (DESIGN 5). An absent field parses to NaN, which every downstream reader
+    // (ageLabel, activityTags) treats as "no age" rather than throwing.
+    createdOn: String(r.created_on ?? ""),
+    createdAtMs: Date.parse(r.created_on),
+    // Each comment's timestamp, for the [ACTIVE] "3+ comments in 24h" count (2.2).
+    // The comments are already attached for the unresolved-thread sort, so this is
+    // free -- it reduces data in the cache, no extra call. An unparseable stamp is
+    // dropped rather than carried as NaN, so the count only ever sees real times.
+    commentTimesMs: comments
+      .map((c) => Date.parse(c && c.created_on))
+      .filter((t) => Number.isFinite(t)),
     approvals,
     approvedByMe,
     comments: Number.isFinite(r.comment_count) ? r.comment_count : 0,
@@ -86,7 +99,89 @@ export function normalizePR(raw, { meUuid = "", repo = "" } = {}) {
     htmlUrl: String(r?.links?.html?.href ?? ""),
     sourceBranch: String(r?.source?.branch?.name ?? ""),
     destBranch: String(r?.destination?.branch?.name ?? ""),
+    // The diffstat triple the daemon summed and cached on the PR (T01, DESIGN 2.4),
+    // passed straight through. `null` when the PR was never fetched (an unshown PR
+    // carries no summary) -- deliberately NOT a zeroed object, so T03 can tell an
+    // empty diff ("0 files") from an unfetched one (draw nothing).
+    diff:
+      r.diffstatSummary && typeof r.diffstatSummary === "object"
+        ? {
+            files: Number(r.diffstatSummary.files) || 0,
+            added: Number(r.diffstatSummary.added) || 0,
+            removed: Number(r.diffstatSummary.removed) || 0,
+          }
+        : null,
   };
+}
+
+// --- age and activity tags --------------------------------------------------
+// The second row's time signals (DESIGN 2.1, 2.2). Both are pure functions of a PR
+// and `now`: the model never reaches for a clock, so the NEW/ACTIVE/STALE judgement
+// and the age string are proven from fixtures in milliseconds. Plain millisecond
+// constants, no date library.
+
+const MINUTE = 60000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Time since a PR was opened (DESIGN 2.1):
+ *   <60m -> "Nm"   (a just-opened PR must not read as 0h)
+ *   <24h -> "Nh"
+ *   <7d  -> "Nd"
+ *   >=7d -> "Mon DD"   (past a week the day count stops meaning anything)
+ *   NaN or future -> ""
+ *
+ * `now` is a parameter -- nothing here reads a clock. The "Mon DD" form is the day
+ * in the MACHINE's local zone (getMonth/getDate, never the UTC accessors), matching
+ * every other local time the cockpit shows: deriving a calendar day from an instant
+ * always depends on a zone, and the user reasons about the day they perceive the PR
+ * opened. (Parent CLAUDE.md truths table: an offset-less instant is not in the
+ * machine's zone -- so the test pins TZ rather than asserting a shiftable string.)
+ */
+export function ageLabel(createdAtMs, now) {
+  const age = now - createdAtMs;
+  if (!Number.isFinite(age) || age < 0) return "";   // NaN (absent) or future
+  if (age < HOUR) return `${Math.floor(age / MINUTE)}m`;
+  if (age < DAY) return `${Math.floor(age / HOUR)}h`;
+  if (age < WEEK) return `${Math.floor(age / DAY)}d`;
+  const dt = new Date(createdAtMs);                   // argument form: not a clock read
+  return `${MONTHS[dt.getMonth()]} ${dt.getDate()}`;
+}
+
+/**
+ * The activity tags that apply, in draw order NEW, ACTIVE, STALE (DESIGN 2.2). Bare
+ * names -- the renderer (T03) adds the brackets and colour. A pure function of the
+ * PR and `now`.
+ *
+ *   NEW    : opened within the last 24h. A future or absent created_on is not "opened
+ *            within the last 24h", so it does not qualify (matches ageLabel).
+ *   ACTIVE : 3+ comments within [now-24h, now], inclusive at both ends. Any comment
+ *            counts (2.2) -- commentTimesMs is every comment, not the thread filter.
+ *   STALE  : no activity for more than 14d, read off updated_on (silence, not birth).
+ *
+ * In practice only NEW and ACTIVE co-occur; STALE excludes them by construction (a
+ * PR touched in the last day is neither silent for two weeks nor quiet).
+ */
+export function activityTags(pr, now) {
+  const tags = [];
+  const p = pr || {};
+
+  const age = now - p.createdAtMs;
+  if (Number.isFinite(age) && age >= 0 && age < DAY) tags.push("NEW");
+
+  const from = now - DAY;
+  const recent = (Array.isArray(p.commentTimesMs) ? p.commentTimesMs : [])
+    .filter((t) => t >= from && t <= now).length;
+  if (recent >= 3) tags.push("ACTIVE");
+
+  const updated = Date.parse(p.updatedOn);
+  if (Number.isFinite(updated) && now - updated > 14 * DAY) tags.push("STALE");
+
+  return tags;
 }
 
 // --- comment-thread accessors ----------------------------------------------

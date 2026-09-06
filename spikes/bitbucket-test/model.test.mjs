@@ -4,7 +4,7 @@
 // network, no state dir touched. The bash run.sh separately greps the module for
 // anything impure.
 
-import { normalizePR, classify, concernsMe, paginate, summarizeDiffstat } from "../../bin/cockpit-bitbucket-model.mjs";
+import { normalizePR, classify, concernsMe, paginate, summarizeDiffstat, ageLabel, activityTags } from "../../bin/cockpit-bitbucket-model.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A raw BitBucket PR, only the fields the model reads. The comments array is what
@@ -14,11 +14,13 @@ function rawPR({
   title = "a title",
   authorUuid = "{author}",
   authorNick = "someone",
+  created = "2020-01-01T00:00:00.000000+00:00",
   updated = "2020-01-01T00:00:00.000000+00:00",
   participants,
   reviewers,
   commentCount = 0,
   comments = [],
+  diffstatSummary,
   draft = false,
   repoName = "web",
 } = {}) {
@@ -26,6 +28,7 @@ function rawPR({
     id,
     title,
     author: { uuid: authorUuid, nickname: authorNick },
+    created_on: created,
     updated_on: updated,
     comment_count: commentCount,
     comments,
@@ -37,6 +40,10 @@ function rawPR({
   // Left undefined when a case wants to prove tolerance of a missing array.
   if (participants !== undefined) pr.participants = participants;
   if (reviewers !== undefined) pr.reviewers = reviewers;
+  // Absent by default: an unfetched PR carries no diffstat (DESIGN 2.4). A case that
+  // wants the triple passes it; the field then rides on the raw PR exactly as the
+  // daemon stores it (T01).
+  if (diffstatSummary !== undefined) pr.diffstatSummary = diffstatSummary;
   return pr;
 }
 
@@ -45,6 +52,8 @@ const inlineOpen = (uuid) => ({ inline: { path: "a.js" }, user: { uuid }, resolu
 const inlineResolved = (uuid) => ({ inline: { path: "a.js" }, user: { uuid }, resolution: { type: "x" } });
 const general = (uuid) => ({ user: { uuid } }); // no `inline` -> never counts
 const reply = (uuid) => ({ inline: { path: "a.js" }, user: { uuid }, parent: { id: 99 } }); // a reply, not a root
+// A comment carrying only a timestamp, for the commentTimesMs / [ACTIVE] cases.
+const commentAt = (iso) => ({ user: { uuid: "{c}" }, created_on: iso });
 
 // A normalized PR built directly, for the classify/sort/paginate cases (they take
 // the model's output, not raw). Only the fields those functions read.
@@ -143,6 +152,43 @@ function main() {
     eq("no participants -> approvals 0", n.approvals, 0);
     ok("no participants -> approvedByMe false", n.approvedByMe === false);
     eq("no reviewers -> []", n.reviewers, []);
+  }
+
+  section("normalizePR: created_on, comment times and the diffstat triple (T02)");
+  {
+    const raw = rawPR({
+      created: "2021-05-05T10:00:00.000000+00:00",
+      comments: [
+        commentAt("2021-05-05T11:00:00.000000+00:00"),
+        commentAt("2021-05-06T09:30:00.000000+00:00"),
+      ],
+      diffstatSummary: { files: 3, added: 15, removed: 9 },
+    });
+    const n = normalizePR(raw, { meUuid: ME });
+    eq("createdOn is the raw string", n.createdOn, "2021-05-05T10:00:00.000000+00:00");
+    eq("createdAtMs is Date.parse of it", n.createdAtMs, Date.parse("2021-05-05T10:00:00.000000+00:00"));
+    eq("commentTimesMs parses each comment's created_on", n.commentTimesMs, [
+      Date.parse("2021-05-05T11:00:00.000000+00:00"),
+      Date.parse("2021-05-06T09:30:00.000000+00:00"),
+    ]);
+    eq("diff passes the cached triple through", n.diff, { files: 3, added: 15, removed: 9 });
+  }
+
+  section("normalizePR: absent created_on/diffstat and a garbage comment time");
+  {
+    // A never-fetched PR carries no diffstatSummary; created_on absent -> NaN, not a throw.
+    const raw = rawPR({
+      comments: [commentAt("not-a-date"), commentAt("2021-05-05T11:00:00.000000+00:00")],
+    });
+    delete raw.created_on;
+    const n = normalizePR(raw, { meUuid: ME });
+    ok("missing created_on -> createdAtMs NaN", Number.isNaN(n.createdAtMs));
+    eq("createdOn empty string when absent", n.createdOn, "");
+    eq("unparseable comment time is dropped", n.commentTimesMs, [
+      Date.parse("2021-05-05T11:00:00.000000+00:00"),
+    ]);
+    // Absent summary -> null, distinguishable from an empty diff; never {0,0,0}.
+    eq("no diffstat -> diff is null (not a zeroed object)", n.diff, null);
   }
 
   section("classify: a PR I review lands in toReview; one I authored lands in mine");
@@ -320,6 +366,82 @@ function main() {
     const nul = summarizeDiffstat(null);
     eq("null -> zero files", nul.files, 0);
     eq("null -> zero added", nul.added, 0);
+  }
+
+  // Millisecond constants for the age/tag cases, matching the model's own.
+  const MIN = 60000, HR = 60 * MIN, DAY = 24 * HR;
+
+  section("ageLabel: the four forms at their boundaries, NaN and future");
+  {
+    const now = Date.parse("2020-08-27T16:00:00.000Z");
+    eq("0m", ageLabel(now, now), "0m");
+    eq("59m stays minutes", ageLabel(now - 59 * MIN, now), "59m");
+    eq("60m rolls to 1h", ageLabel(now - 60 * MIN, now), "1h");
+    eq("23h stays hours", ageLabel(now - 23 * HR, now), "23h");
+    eq("24h rolls to 1d", ageLabel(now - 24 * HR, now), "1d");
+    eq("6d stays days", ageLabel(now - 6 * DAY, now), "6d");
+    eq("NaN (absent created_on) -> ''", ageLabel(NaN, now), "");
+    eq("future -> ''", ageLabel(now + HR, now), "");
+  }
+
+  section("ageLabel: >=7d is a Mon DD date, read in the machine's local zone (TZ pinned)");
+  {
+    // Deriving a calendar day from an instant always depends on a timezone (parent
+    // CLAUDE.md truths table). Pin a NON-UTC zone and use an instant near midnight
+    // UTC, so a UTC-accessor bug would read a day off: the assertion only holds if
+    // ageLabel uses LOCAL getMonth/getDate.
+    process.env.TZ = "America/New_York";
+    const now = Date.parse("2020-08-27T16:00:00.000Z");     // Aug 27 12:00 in NY
+    eq("exactly 7d ago -> the date form", ageLabel(now - 7 * DAY, now), "Aug 20");
+    // 02:00Z is the previous evening (22:00) in NY: local day 19, UTC day 20.
+    const nearMidnight = Date.parse("2020-08-20T02:00:00.000Z");
+    eq("a multi-week PR near midnight UTC -> the LOCAL day", ageLabel(nearMidnight, now), "Aug 19");
+  }
+
+  section("activityTags: NEW only, ACTIVE at the 3-comment threshold, STALE only");
+  {
+    const now = Date.parse("2020-08-27T16:00:00.000Z");
+    const recent = (n) => Array.from({ length: n }, (_, i) => now - i * HR); // n comments in the last few hours
+    const naTimes = [];
+
+    // NEW only: opened 2h ago, no recent comments, updated just now.
+    eq("NEW only", activityTags({ createdAtMs: now - 2 * HR, commentTimesMs: naTimes, updatedOn: new Date(now).toISOString() }, now), ["NEW"]);
+
+    // ACTIVE needs 3+; created long ago and recently updated so neither NEW nor STALE.
+    const oldCreated = now - 30 * DAY;
+    const freshUpdated = new Date(now - 1 * HR).toISOString();
+    eq("exactly 3 recent comments -> ACTIVE", activityTags({ createdAtMs: oldCreated, commentTimesMs: recent(3), updatedOn: freshUpdated }, now), ["ACTIVE"]);
+    eq("exactly 2 recent comments -> not ACTIVE", activityTags({ createdAtMs: oldCreated, commentTimesMs: recent(2), updatedOn: freshUpdated }, now), []);
+
+    // STALE only: created and last updated 20 days ago, no recent comments.
+    const staleUpdated = new Date(now - 20 * DAY).toISOString();
+    eq("STALE only", activityTags({ createdAtMs: now - 20 * DAY, commentTimesMs: naTimes, updatedOn: staleUpdated }, now), ["STALE"]);
+  }
+
+  section("activityTags: NEW+ACTIVE co-occur; the 24h comment boundary; the none case");
+  {
+    const now = Date.parse("2020-08-27T16:00:00.000Z");
+    // A brand-new PR already buzzing: opened 3h ago with 3 recent comments.
+    eq("NEW and ACTIVE together, in order", activityTags({ createdAtMs: now - 3 * HR, commentTimesMs: [now - 1 * HR, now - 2 * HR, now - 3 * HR], updatedOn: new Date(now).toISOString() }, now), ["NEW", "ACTIVE"]);
+
+    // A comment exactly 24h old sits ON the inclusive [now-24h, now] boundary and counts.
+    const boundary = [now - DAY, now - 1 * HR, now - 2 * HR];   // three, one exactly 24h old
+    eq("a comment exactly 24h old counts (inclusive window)", activityTags({ createdAtMs: now - 30 * DAY, commentTimesMs: boundary, updatedOn: new Date(now - 1 * HR).toISOString() }, now), ["ACTIVE"]);
+    // One tick older than 24h falls outside, dropping the count to 2 -> not ACTIVE.
+    const justOutside = [now - DAY - 1, now - 1 * HR, now - 2 * HR];
+    eq("a comment 24h+1ms old is outside the window", activityTags({ createdAtMs: now - 30 * DAY, commentTimesMs: justOutside, updatedOn: new Date(now - 1 * HR).toISOString() }, now), []);
+
+    // None: middle-aged PR, quiet but not stale, no recent comments.
+    eq("no tags", activityTags({ createdAtMs: now - 5 * DAY, commentTimesMs: [now - 5 * DAY], updatedOn: new Date(now - 5 * DAY).toISOString() }, now), []);
+  }
+
+  section("activityTags tolerates a missing/garbage PR without throwing");
+  {
+    const now = Date.parse("2020-08-27T16:00:00.000Z");
+    eq("no fields -> no tags", activityTags({}, now), []);
+    eq("undefined pr -> no tags", activityTags(undefined, now), []);
+    eq("NaN createdAtMs is not NEW, garbage updatedOn is not STALE",
+      activityTags({ createdAtMs: NaN, commentTimesMs: [], updatedOn: "nope" }, now), []);
   }
 
   done();
