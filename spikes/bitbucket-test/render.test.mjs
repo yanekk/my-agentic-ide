@@ -552,7 +552,8 @@ function main() {
     const between = o2.lines[a + 2];   // line one, line two, then the rule
     eq("the rule sits on the line between the two PRs' blocks", a + 3, b);
     ok("the between-PR rule is a full-width `────`", /^─+$/.test(plain(between)) && plain(between).length === 90);
-    ok("the between-PR rule is dim (SGR 2), not the bright default", between.includes(`${ESC}2m`));
+    ok("the between-PR rule is a dark grey (fg palette index 8), not the bright default",
+      between.includes(`${ESC}38;5;8m`));
     for (let k = b + 2; k < o2.lines.length; k++)
       ok(`line ${k} after the last PR is not a rule`, !/^─+$/.test(plain(o2.lines[k])));
   }

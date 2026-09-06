@@ -746,12 +746,17 @@ function buildLineTwo(p, L, w, now) {
   return content;
 }
 
-// The dedicated row separator (DESIGN 2.6, revised): a dim full-width `────`, matching
-// the notes/agenda rules in the same pane (cockpit-welcome). Drawn BETWEEN consecutive
-// PRs only -- never after the last on a page, where it would read as a stray line above
-// the pager. Carries no hit-zone. `─` is one column wide, so w of them is exactly w.
+// The dedicated row separator (DESIGN 2.6, revised): a full-width `────` drawn BETWEEN
+// consecutive PRs only -- never after the last on a page, where it would read as a stray
+// line above the pager. Carries no hit-zone. `─` is one column wide, so w of them is
+// exactly w.
+//
+// Coloured with FOREGROUND palette index 8 (bright black / grey), not `dim`: the user
+// found the dim default-foreground line too light and asked for it darker (2026-09-06).
+// Index 8 is a distinctly darker grey on standard themes and still follows the theme (it
+// is the palette's grey). Kept a dedicated helper so the exact shade is one line to tune.
 export function rowSeparator(w) {
-  return dim("─".repeat(Math.max(0, w)));
+  return `${ESC}38;5;8m${"─".repeat(Math.max(0, w))}${ESC}0m`;
 }
 
 /**

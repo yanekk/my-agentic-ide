@@ -123,11 +123,12 @@ refinement, not built here.
 
 ### 2.6 The row separator
 
-A grey line separates one PR from the next. It is drawn as a **dedicated dim `────` row between
-consecutive PRs** — a full-width rule on its own line, matching the notes/agenda rules in the same
-pane, coloured dim (SGR 2) so it reads as a calm hairline, not a bright one. It is drawn **between**
-PRs only, never after the last on a page, where it would sit above the pager or the trailing blanks
-as a stray line.
+A grey line separates one PR from the next. It is drawn as a **dedicated `────` row between
+consecutive PRs** — a full-width rule on its own line. It is coloured with **foreground palette
+index 8 (bright black / grey)** so it reads as a calm dark hairline; it is drawn **between** PRs
+only, never after the last on a page, where it would sit above the pager or the trailing blanks as a
+stray line. (It was first `dim` (SGR 2) off the default foreground; the user found that too light and
+asked for it darker, 2026-09-06 — index 8 is a distinctly darker grey and still follows the theme.)
 
 **History (why it is this way):** the separator was first specified as *not* a dedicated line
 (2026-09-05) and built as an underline on each PR's second line — a hairline at no vertical cost. On
@@ -154,7 +155,7 @@ right SGR code wraps each element.
 | `[STALE]` tag | **grey** (dim) — a quiet PR reads quietly |
 | PR number `#id`, the primary button `[Review]`/`[Address]` | **cyan** (SGR 36) — the dashboard's action accent, matching the existing tab/pager accent |
 | age, branch, `N files`, the `·` separators | **dim** (SGR 2) — context, not signal |
-| the row-separator `────` line | **grey** (dim, SGR 2) — a dedicated rule between PRs, a calm hairline not a bright one (§2.6) |
+| the row-separator `────` line | **dark grey** — foreground palette index 8 (bright black), a dedicated rule between PRs, a calm dark hairline (§2.6) |
 | title | **default** text; on open-zone hover it brightens with a cyan underline (the link cue, §3), and reverse-videos with the line on press |
 
 A tag is drawn as its coloured label (`NEW`, `ACTIVE`, `STALE`); whether it also gets a faint
