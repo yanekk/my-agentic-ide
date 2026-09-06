@@ -8,6 +8,7 @@ was seen working for real), and any term someone would grep for — a flag, an e
 
 | Date | What the build taught |
 |---|---|
+| 2026-09-06 | Hand-verified (user, T01 live call): `listPRDiffstat` + `summarizeDiffstat` on real cribl/sdet-tools#91 → 60 files, +4964, −244, matched BitBucket's PR page. Confirms real diffstat entries carry `lines_added`/`lines_removed` as assumed; field names are right. |
 | 2026-09-06 | Review (T00): cockpit-test's `an auth failure classifies as auth` (agenda seam, ~line 2203) is timing-flaky — it samples state after `sleep 3` and can read `<error>`. Failed once, passed clean on rerun (510 checks). Unrelated to this plan; retry before treating a red suite as a regression. |
 | 2026-09-06 | Hand-verified (user, T00 spike): WezTerm delivers mouse motion only to the FOCUSED pane — an unfocused pane gets none, and a focused pane logs garbage when the pointer is over another pane. The dashboard pane is unfocused at the fleet list, so hover cannot work: **T05 drops; press feedback (T04) stands.** `?1003h`/`?1006h` probe deleted. |
 | 2026-09-06 | The model's `dim`/`bold` helpers close with `\x1b[0m`, resetting **all** SGR attributes. So line two's dim underline cannot just wrap coloured segments — the first inner `0m` kills it mid-line. Re-open the underline after each reset, or close inner segments with `\x1b[24m`. (T03.) |
