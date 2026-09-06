@@ -11,9 +11,9 @@ message. Whoever writes a cell also fixes the over-budget cell they walk past.
 **Plan reviewed:** 2026-09-06 — 2 decisions with the user; verification-table task refs and 3
 implementer clarifications fixed.
 
-**Status:** in progress — T00–T04 ✅; T05 dropped; T06 🔍 (awaiting review). T06 is the last task.
+**Status:** complete — T00–T04 ✅, T06 ✅; T05 dropped. Every task reviewed clean.
 **Last updated:** 2026-09-06
-**Next `pir-work` will:** review T06 (docs). It is the last task — once its review is clean the plan is complete. Reviewer: check the docs match what shipped, and weigh the truths-table call (T06 left it unchanged; see its Notes and the flag to the user).
+**Next `pir-work` will:** nothing — the plan is complete. All tasks are ✅ or dropped.
 
 ## Tasks
 
@@ -26,11 +26,11 @@ done · ⛔ blocked, needs a human · ❌ dropped, not built.
 | T01 | Data: listPRDiffstat + summarizeDiffstat + daemon fetch + cache triple | — | ✅ | Review clean. Client mirrors listPRComments; summarizeDiffstat pure/total; daemon fetches concernsMe only, caches triple, keeps last on transient fail. Live hand-verified 2026-09-06 (60 files +4964 −244). Suite 523. |
 | T02 | Pure model: created_on + comment times, diff/branch, ageLabel, activityTags | T01 | ✅ | Review clean. created_on/comment/diffstat traced end-to-end; purity green; NEW age≥0 correct. |
 | T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ✅ | Review clean; two-line rows + emphasis states traced, render green. Separator later reworked to a dedicated dim line (FINDINGS). |
-| T04 | Pane: press-flash feedback | T03 | ✅ | Review clean, no fix commit. Verb fires unconditionally before the flash (effect unchanged); FLASHES prefixes don't collide with bb-tab/bb-page; timer unref'd + cleared on re-click, self-heals within 120ms even after a non-flashing click or a spawn-park. Press render defended by T03 tests. Live hand-verified 2026-09-06. Suite green (523). |
+| T04 | Pane: press-flash feedback | T03 | ✅ | Review clean. Verb fires before the flash; timer self-heals within 120ms. Live hand-verified 2026-09-06. |
 | T05 | Pane: hover highlight | T00, T03 | ❌ | DROPPED 2026-09-06 (T00 + user): motion reaches only the focused pane, so the unfocused dashboard pane can never hover. Not built. See FINDINGS. |
-| T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T04 | 🔍 | Docs only; suite green (523). docs/cockpit.md dashboard section: two-line rows, tags+thresholds, age scale, branch, diffstat fetch, dedicated separator, press feedback, hover dropped. CLAUDE.md model/client one-liners + cache note. Deviations: no CLAUDE.md dashboard prose paragraph exists (parent kept it lean) — updated one-liners not a paragraph; truths table left unchanged (T00 fact guards no live code, lives in DESIGN §4/FINDINGS) — flagged to user. |
+| T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T04 | ✅ | Review checked every doc claim against the code — thresholds (NEW<24h, ACTIVE≥3/24h, STALE>14d), age scale, separator (fg idx 8), summarizeDiffstat, listPRDiffstat, floor((avail+1)/3), ?1000h mouse — all accurate. Both flagged deviations accepted (no CLAUDE.md dashboard paragraph ever existed; truths row unchanged, fact lives in DESIGN §4/FINDINGS). Fixed one miss: bitbucket suite one-liner still read (312), bumped to 468. Suite green. |
 
-**Review queue:** T06 (docs) — next to review.
+**Review queue:** empty — every task reviewed. Plan complete.
 
 ## Open for the plan review / the user
 
