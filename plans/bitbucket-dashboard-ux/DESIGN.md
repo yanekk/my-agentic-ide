@@ -152,7 +152,7 @@ right SGR code wraps each element.
 | Additions `+A`, the `[NEW]` tag | **green** (SGR 32) — the universal "added / fresh" |
 | Deletions `−R` | **red** (SGR 31) |
 | `[ACTIVE]` tag | **amber / yellow** (SGR 33) |
-| `[STALE]` tag | **grey** (dim) — a quiet PR reads quietly |
+| `[STALE]` tag | **dark grey** — foreground palette index 8, the same grey as the row separator (§2.6), so a quiet PR's tag reads at the hairline's weight (user, 2026-09-06) |
 | PR number `#id`, the primary button `[Review]`/`[Address]` | **cyan** (SGR 36) — the dashboard's action accent, matching the existing tab/pager accent |
 | age, branch, `N files`, the `·` separators | **dim** (SGR 2) — context, not signal |
 | the row-separator `────` line | **dark grey** — foreground palette index 8 (bright black), a dedicated rule between PRs, a calm dark hairline (§2.6) |

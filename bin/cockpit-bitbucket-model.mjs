@@ -370,6 +370,10 @@ const green = (s) => `${ESC}32m${s}${ESC}0m`;   // additions, [NEW]
 const red = (s) => `${ESC}31m${s}${ESC}0m`;     // deletions
 const amber = (s) => `${ESC}33m${s}${ESC}0m`;   // [ACTIVE]
 const reverse = (s) => `${ESC}7m${s}${ESC}0m`;  // a press flash (a self-contained label)
+// Foreground palette index 8 (bright black): a dark grey that follows the theme. The
+// SAME colour is used for the [STALE] chip and the row-separator rule, so a quiet PR's
+// tag reads at the exact weight of the hairline beneath it (user, 2026-09-06).
+const grey = (s) => `${ESC}38;5;8m${s}${ESC}0m`;
 
 // U+2212 MINUS SIGN, the deletions marker (DESIGN 2.3 "+A −R"): a real minus glyph
 // paired with the "+" of additions, both one column wide.
@@ -384,13 +388,14 @@ function reopen(s, sgr) {
   return sgr + String(s).replace(/\x1b\[0m/g, `${ESC}0m${sgr}`) + `${ESC}0m`;
 }
 
-// The three activity tags, each a coloured [LABEL] (DESIGN 2.2, 2.7). STALE is drawn
-// dim (a quiet PR reads quietly); NEW green, ACTIVE amber.
+// The three activity tags, each a coloured [LABEL] (DESIGN 2.2, 2.7). STALE is drawn in
+// the same grey as the row separator (a quiet PR reads quietly, at the hairline's weight);
+// NEW green, ACTIVE amber.
 function renderTag(name) {
   const label = `[${name}]`;
   if (name === "NEW") return green(label);
   if (name === "ACTIVE") return amber(label);
-  return dim(label);   // STALE
+  return grey(label);   // STALE -- same grey as rowSeparator
 }
 
 // "src → dst" for line two, both names run through safeText (they are wire text). ""
@@ -751,12 +756,12 @@ function buildLineTwo(p, L, w, now) {
 // line above the pager. Carries no hit-zone. `─` is one column wide, so w of them is
 // exactly w.
 //
-// Coloured with FOREGROUND palette index 8 (bright black / grey), not `dim`: the user
-// found the dim default-foreground line too light and asked for it darker (2026-09-06).
-// Index 8 is a distinctly darker grey on standard themes and still follows the theme (it
-// is the palette's grey). Kept a dedicated helper so the exact shade is one line to tune.
+// Coloured with the shared `grey` helper (FOREGROUND palette index 8, bright black), not
+// `dim`: the user found the dim default-foreground line too light and asked for it darker
+// (2026-09-06). Index 8 is a distinctly darker grey on standard themes and still follows
+// the theme. Sharing `grey` with the [STALE] chip keeps the two exactly the same shade.
 export function rowSeparator(w) {
-  return `${ESC}38;5;8m${"─".repeat(Math.max(0, w))}${ESC}0m`;
+  return grey("─".repeat(Math.max(0, w)));
 }
 
 /**

@@ -677,13 +677,14 @@ function main() {
     ok("the branch is dim (2)", l2.includes(`${ESC}2mfeat/x → main`));
     ok("the file count is dim (2)", l2.includes(`${ESC}2m3 files`));
 
-    // [STALE] is grey/dim, on its own PR (STALE excludes NEW/ACTIVE by construction).
+    // [STALE] is the same dark grey as the row separator (fg palette index 8), on its own
+    // PR (STALE excludes NEW/ACTIVE by construction).
     const stale = raw({
       id: 101, reviewers: [{ uuid: ME }], authorUuid: "{o}",
       created: iso(NOW - 30 * DAY), updated: iso(NOW - 20 * DAY),
     });
     const so = renderDashboard({ width: 120, rows: 8, cache: cacheOf([stale]), view: view(), now: NOW, config: cfg() });
-    ok("[STALE] is dim (2)", lineTwoOf(so.lines, "#101").includes(`${ESC}2m[STALE]`));
+    ok("[STALE] is dark grey (fg index 8), matching the separator", lineTwoOf(so.lines, "#101").includes(`${ESC}38;5;8m[STALE]`));
   }
 
   done();
