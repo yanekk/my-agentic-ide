@@ -11,9 +11,11 @@ describes the dashboard, and a truths-table row if the spike earned one.
 ## Files
 
 - `CLAUDE.md` — the BitBucket dashboard paragraph and the affected one-liners: a PR row is now two
-  lines (line two holds age, NEW/ACTIVE/STALE tags, branch → target, changed-file count and lines
-  +/-, with a dim hairline separating rows); the buttons react on press (and hover, if built); the
-  client gains `listPRDiffstat` and the daemon fetches a diffstat per shown PR.
+  lines (line two holds NEW/ACTIVE/STALE tags, age, branch → target, then changed-file count and
+  lines +/-, `·` between the left groups, a dim hairline separating rows); the `[Open]` button is
+  gone — the whole top line but the primary button opens the PR; the open zone and the button react
+  on press (and hover, if built); the client gains `listPRDiffstat` and the daemon fetches a diffstat
+  per shown PR.
 - `docs/cockpit.md` — the dashboard section: the two-line row and its drop order, the three tags with
   thresholds (NEW <24h, ACTIVE ≥3 comments/24h, STALE >14d), the branch and diff-size items, the
   diffstat fetch bounded to shown PRs, the row separator, the press feedback, and the hover outcome.

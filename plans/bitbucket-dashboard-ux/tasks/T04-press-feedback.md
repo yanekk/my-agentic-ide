@@ -4,10 +4,11 @@
 
 ## Goal
 
-When a left button is pressed over a `[Review]`/`[Address]`/`[Open]` (or a tab/pager) button, flash
-that button in the press style for a beat, so the click has visible confirmation before the daemon
-acts. The pane already receives the press that fires the verb (DESIGN §3), so this is one extra
-repaint — no new reporting mode, no dependency on the T00 spike.
+When a left press lands on any clickable target — the primary `[Review]`/`[Address]` button, the
+**open zone** (line one but the button), or a tab/pager button — flash that target in the press style
+for a beat, so the click has visible confirmation before the daemon acts. The pane already receives
+the press that fires the verb (DESIGN §3), so this is one extra repaint — no new reporting mode, no
+dependency on the T00 spike.
 
 ## Files
 
@@ -17,9 +18,9 @@ repaint — no new reporting mode, no dependency on the T00 spike.
 ## Interface / behaviour
 
 - On the left-press (`M`, the event that already calls `onDashClick`): after appending the verb, look
-  up the hit zone; if it is a button zone, set `pressEmphasis = { verb, state: "press" }`, call
-  `render()` (which passes `emphasis` to `renderDashboard`), and start a ~120ms timer that clears it
-  and re-renders.
+  up the hit zone; if it hit any zone (button or open zone), set `pressEmphasis = { verb, state:
+  "press" }`, call `render()` (which passes `emphasis` to `renderDashboard`), and start a ~120ms timer
+  that clears it and re-renders.
 - The verb still fires exactly as today — the flash is purely visual and must not change what the
   click does, when, or how many times.
 - A press that hits no zone sets no emphasis.
@@ -46,11 +47,12 @@ on a timer" so there is nothing further to unit-test here.
 ```
 Needs you — I cannot see this from here:
 
-  Rebuild the cockpit window and, at the fleet list, click a PR's [Open] button.
+  Rebuild the cockpit window and, at the fleet list, click a PR's title (or number) to open it,
+  then separately click its [Review]/[Address] button.
 
-Expect: the button flashes (inverts) for an instant as you click, then returns to normal;
-        the PR still opens.
-Tell me: does the flash show, and land on the button you clicked?
+Expect: the clicked target flashes (inverts) for an instant, then returns to normal; the title
+        click opens the PR, the button click spawns the agent.
+Tell me: does the flash show, and land on what you clicked (line vs button)?
 ```
 
 ## Notes

@@ -25,7 +25,7 @@ done · ⛔ blocked, needs a human.
 | T00 | Hover-feasibility spike (motion to the unfocused pane) | — | ⬜ | Throwaway. Gates T05. Hands-on: only real in live WezTerm. |
 | T01 | Data: listPRDiffstat + summarizeDiffstat + daemon fetch + cache triple | — | ⬜ | One GET per shown PR, bounded by concernsMe. Read-only. Hands-on for the live call. |
 | T02 | Pure model: created_on + comment times, diff/branch, ageLabel, activityTags | T01 | ⬜ | NEW <24h, ACTIVE ≥3 comments/24h, STALE >14d. diff=null when unfetched. |
-| T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ⬜ | Heavy. Underline separator (no extra line); reworks layout/pagination/hit-zone y. |
+| T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ⬜ | Heavy. Open button dropped → line-one open zone (bb-open); line two tags·age·branch; underline separator; reworks layout/pagination/hit-zones. |
 | T04 | Pane: press-flash feedback | T03 | ⬜ | Built regardless of the spike. Hands-on for the live flash. |
 | T05 | Pane: hover highlight | T00, T03 | ⬜ | GATED on T00 + user. May become "not built". |
 | T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T05 | ⬜ | Truths row only if the spike earned one. |

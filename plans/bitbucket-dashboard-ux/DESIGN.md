@@ -9,32 +9,39 @@ works; this document covers only what changes.
 ## 1. Purpose
 
 The dashboard lists the PRs that concern you, one per row, with `[Review]`/`[Address]` and
-`[Open]` buttons. Two gaps, both raised by the user:
+`[Open]` buttons. Three gaps, all raised by the user:
 
 1. A single line per PR wastes the room a PR row could use. Extend each row to **two lines** so a
    PR can also show, on the second line: **how old it is**, **whether it is new or busy right now**,
    its **branch → target branch**, its **changed-file count**, and its **lines added / removed**.
-2. The buttons are drawn once and never react to the pointer. Give them a **hover** and a
-   **press** appearance so a click has visible feedback before the agent spawns.
+2. Opening a PR costs its own button when the whole top line could do it. **Drop the `[Open]`
+   button** and make the **whole top line, except the primary button, open the PR** on a click.
+3. The clickable things are drawn once and never react to the pointer. Give the open zone and the
+   primary button a **hover** and a **press** appearance so a click has visible feedback.
 
 Success: every shown PR carries an age, its branch and its diff size, and — when they apply —
-activity tags; the buttons visibly respond to hover (if the terminal allows it — §4) and to a
-press; the automated suite stays green; and it is confirmed by hand in a live cockpit that the rows
-read well and the buttons react.
+activity tags; clicking the top line opens the PR; the open zone and the button visibly respond to
+hover (if the terminal allows it — §4) and to a press; the automated suite stays green; and it is
+confirmed by hand in a live cockpit that the rows read well and the clicks react.
 
 ## 2. What each row shows
 
-A PR is now **two lines**. Line one is unchanged from the parent plan: repository, `#id`, title,
-author (To review only), the ✓/✎ counts, and the two buttons. Line two is new, indented under the
-title, and holds — left to right — the age, any activity tags, the branch → target branch, the
-changed-file count, and the lines added / removed. The buttons stay on line one, so a click's
-target is still the row's first line and the hit-zone math changes only in which line number it
-stamps.
+A PR is now **two lines**. Line one keeps the parent plan's columns — repository, `#id`, title,
+author (To review only), the ✓/✎ counts — but its buttons change (2026-09-05, §3): the **`[Open]`
+button is gone**, replaced by making the **whole top line except the primary button** the
+click-to-open target; only the one primary button (`[Review]` on To review, `[Address]` on Mine)
+remains. Line two is new, indented under the title, and holds — left to right — any activity tags,
+then the age, then the branch → target branch, and, pushed to the right, the changed-file count and
+the lines added / removed. The primary button stays on line one, so its click target is still the
+row's first line.
 
-Line two can outgrow a narrow pane, so it has a **drop order**, mirroring line one's: when the
-width runs out, the branch drops first (it is context, not a metric), then the added/removed detail,
-then the file count, always keeping the age and the tags — the two things the user asked for first.
-Each dropped item frees its space; nothing wraps.
+The three **left-hand items on line two are separated by `·`** (between groups: the tags stay a
+space-separated group, then `·`, the age, `·`, the branch). The diff size sits apart on the right.
+
+Line two can outgrow a narrow pane, so it has a **drop order**: when the width runs out, the branch
+drops first (it is context, not a metric), then the added/removed detail, then the file count,
+always keeping the age and the tags — the two things the user asked for first. Each dropped item
+frees its space; nothing wraps.
 
 Two lines per PR halves how many PRs fit a page; the pager (parent §2.5) absorbs the rest. This is
 the cost the user accepted for the extra room.
@@ -55,7 +62,8 @@ single `now` the pane already reads once per paint (parent §3.4), so it is test
 
 ### 2.2 The activity tags
 
-Zero or more small tags after the age, each a pure function of the PR and `now`:
+Zero or more small tags, drawn first on line two (before the age), each a pure function of the PR
+and `now`:
 
 - **`[NEW]`** — opened within the last 24 hours (`now - created_on < 24h`). The PR that just landed
   and you have not seen.
@@ -122,24 +130,37 @@ under the PR while still being the row it already occupies. It costs no vertical
 last row on a page carries the underline is the renderer's choice, fixed and tested either way (a rule
 just above the pager is harmless).
 
-## 3. The buttons reacting
+## 3. Opening a PR, and the reactions
 
-Two visual states beyond the resting button, each a pure rendering variant so the appearance is
-tested without a live pane, and each wired to the mouse in the pane (impure) separately:
+There are now **two** clickable things on line one, and both react to the mouse:
 
-- **Press** — on a left-button press over a button, that button inverts for a beat (reverse video:
-  solid fill, text knocked out), confirming the click registered. This is certain to be buildable:
-  the pane already receives the press that fires the verb, so the flash is one extra repaint. It is
-  a fixed short flash rather than press-until-release, because a `[Review]`/`[Address]` press
-  spawns an agent and the exact release may not arrive at this pane cleanly.
-- **Hover** — while the pointer rests over a button, that button brightens and fills faintly, so the
-  target is unmistakable. Whether this can work at all is an open technical question (§4).
+- The **open zone** — the whole top line except the primary button. Clicking it opens the PR in the
+  browser (the parent plan's `bb-open:{repo}/{id}` verb, now fired from the line rather than a
+  dedicated `[Open]` button, which is removed). It is a single hit-zone spanning line one from the
+  start to just before the button, so a click on the number, title, author or counts all open the
+  PR (decided with the user 2026-09-05: the whole line but the button, over title+number only).
+- The **primary button** — `[Review]` (To review) or `[Address]` (Mine). Clicking it spawns the
+  agent, exactly as before.
+
+Both get the same two visual states beyond rest, each a pure rendering variant so the appearance is
+tested without a live pane, each wired to the mouse in the pane (impure):
+
+- **Press** — on a left-button press over the open zone or the button, that target inverts for a beat
+  (reverse video), confirming the click registered. Certain to be buildable: the pane already
+  receives the press that fires the verb, so the flash is one extra repaint. A fixed short flash
+  rather than press-until-release, because a `[Review]`/`[Address]` press spawns an agent and the
+  exact release may not arrive at this pane cleanly.
+- **Hover** — while the pointer rests over the open zone, the row lights and the title underlines, so
+  it reads as a link; over the button, the button brightens and fills. Whether hover can work at all
+  is an open technical question (§4). The user chose (2026-09-05) that the open zone reacts like a
+  link, not just the button.
 
 The pure renderer gains one optional input, the emphasis `{ verb, state }` where state is `hover`
-or `press`; the button whose hit-zone verb matches is drawn in that state, every other button at
-rest. The pane decides the emphasis from the mouse and repaints. Keeping the *appearance* in the
-pure model and only the *mouse reading* in the pane means every look is a millisecond test and only
-the "does the terminal deliver the events" question is left for a person.
+or `press`; the hit-zone whose verb matches (a button's spawn verb or the open zone's `bb-open`
+verb) is drawn in that state, everything else at rest. The pane decides the emphasis from the mouse
+and repaints. Keeping the *appearance* in the pure model and only the *mouse reading* in the pane
+means every look is a millisecond test and only the "does the terminal deliver the events" question
+is left for a person.
 
 ## 4. The hover question — a spike gates it
 
@@ -251,6 +272,16 @@ All dates 2026-09-05 unless noted.
   and tags were the first ask, so they never drop; the branch is context and drops first (§2.2).
 - **Rows are separated by an underline on line two, not a dedicated `────` row** (§2.6). User's
   explicit request (2026-09-05): a visible separator that costs no vertical space.
+- **The `[Open]` button is dropped; the whole top line but the primary button opens the PR** (§3).
+  User's request (2026-09-05). The open zone spans line one from the start to just before the button
+  — the whole line but the button, chosen over title+number only, for a forgiving target — and fires
+  the existing `bb-open` verb.
+- **Line two order is tags · age · branch, then the diff on the right, `·` between the left groups**
+  (§2, §2.2). User's request (2026-09-05): age moved to just after the tags; tags stay a
+  space-separated group; the `·` separates groups, not individual tags.
+- **The open zone reacts like a link** (§3): hover lights the row and underlines the title, press
+  flashes it. User's choice (2026-09-05) that the open affordance be discoverable, not just the
+  button.
 - **Press feedback is a fixed short flash, built regardless of the spike; hover is spike-gated.**
   The press is certain (the pane already gets the click); hover depends on motion delivery to an
   unfocused pane, which is unproven. The user pre-accepted press-only as the floor.

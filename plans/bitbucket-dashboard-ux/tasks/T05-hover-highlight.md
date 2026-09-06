@@ -4,11 +4,12 @@
 
 ## Goal
 
-While the pointer rests over a button, draw that button in the hover style so the target is
-unmistakable. **This task is conditional on T00's outcome and the user's call** (DESIGN §4): build it
-only if the spike showed WezTerm delivers motion to the unfocused pane and a repaint-on-hover is
-acceptable. If not, this task becomes a one-line record in FINDINGS that hover was dropped, the press
-feedback (T04) standing as the button reaction, and the plan proceeds to T06.
+While the pointer rests over a clickable target, draw it in the hover style — the primary button
+brightens and fills; the **open zone** lights the line and underlines the title, so it reads as a
+link (DESIGN §3). **This task is conditional on T00's outcome and the user's call** (DESIGN §4):
+build it only if the spike showed WezTerm delivers motion to the unfocused pane and a
+repaint-on-hover is acceptable. If not, this task becomes a one-line record in FINDINGS that hover
+was dropped, the press feedback (T04) standing as the reaction, and the plan proceeds to T06.
 
 ## Precondition
 
@@ -49,12 +50,12 @@ motion wiring and the no-flicker throttle are the impure part a person checks.
 ```
 Needs you — I cannot see this from here:
 
-  Rebuild the cockpit window and, at the fleet list, move the mouse over a PR's buttons
-  WITHOUT clicking.
+  Rebuild the cockpit window and, at the fleet list, move the mouse over a PR's title and over
+  its [Review]/[Address] button WITHOUT clicking.
 
-Expect: each button highlights as the pointer is over it, and un-highlights as it leaves,
-        with no flicker of the rest of the pane.
-Tell me: does the highlight track the pointer cleanly?
+Expect: the row lights and the title underlines when the pointer is over the line; the button
+        highlights when over it; each un-highlights as the pointer leaves, no flicker of the rest.
+Tell me: does the highlight track the pointer cleanly across the line and the button?
 ```
 
 ## Notes
