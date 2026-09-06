@@ -545,7 +545,7 @@ function main() {
     zonesInBounds("drop-order-tiny", tiny, 16, 6);
   }
 
-  section("the row separator is a dim underline that spans line two and adds no line");
+  section("the row separator is a grey underline that spans line two and adds no line");
   {
     const pr = raw({
       id: 70, reviewers: [{ uuid: ME }], authorUuid: "{o}", title: "sep",
@@ -556,6 +556,8 @@ function main() {
     const i = rowIndex(out.lines, "#70");
     const l2 = out.lines[i + 1];
     ok("line two carries an underline (a 4m appears)", l2.includes(`${ESC}4m`));
+    ok("the underline is coloured grey (palette index 8), not the bright default fg",
+      l2.includes(`${ESC}58;5;8m`));
     ok("the underline holds under every visible glyph, past the coloured segments",
       underlineHoldsThroughout(l2));
     ok("line two draws no PR number (it is the second line, not a new row)", !plain(l2).includes("#70"));

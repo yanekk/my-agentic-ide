@@ -123,13 +123,19 @@ refinement, not built here.
 
 ### 2.6 The row separator
 
-A dim hairline separates one PR from the next, as the prototype showed. The user asked for it
+A grey hairline separates one PR from the next, as the prototype showed. The user asked for it
 explicitly to **not** be a dedicated line (2026-09-05) — a `────` row would halve the PR density
-again for pure decoration. So it is drawn as a **dim underline on each PR's second line**: terminals
+again for pure decoration. So it is drawn as an **underline on each PR's second line**: terminals
 underline trailing spaces (WezTerm does), so an underlined full-width line two reads as a hairline
 under the PR while still being the row it already occupies. It costs no vertical space. Whether the
 last row on a page carries the underline is the renderer's choice, fixed and tested either way (a rule
 just above the pager is harmless).
+
+The underline's **colour** is set explicitly to palette index 8 (grey / bright-black) with SGR 58,
+because an underline glyph otherwise takes the *foreground* colour — under the plain padding that is
+the default foreground, a bright white line the user rejected (2026-09-06). SGR 58 recolours the rule
+alone, leaving the coloured text above it untouched, and index 8 still follows the theme. A dedicated
+`────` row was reconfirmed as the rejected alternative (its per-PR vertical cost is the reason).
 
 ### 2.7 Colours — pinned to the prototype
 
@@ -146,7 +152,8 @@ right SGR code wraps each element.
 | `[ACTIVE]` tag | **amber / yellow** (SGR 33) |
 | `[STALE]` tag | **grey** (dim) — a quiet PR reads quietly |
 | PR number `#id`, the primary button `[Review]`/`[Address]` | **cyan** (SGR 36) — the dashboard's action accent, matching the existing tab/pager accent |
-| age, branch, `N files`, the `·` separators, the row-separator underline | **dim** (SGR 2) — context, not signal |
+| age, branch, `N files`, the `·` separators | **dim** (SGR 2) — context, not signal |
+| the row-separator underline | **grey** — SGR 58 sets the underline colour to palette index 8 (bright-black), so the rule is a calm hairline, not the bright default foreground (§2.6) |
 | title | **default** text; on open-zone hover it brightens with a cyan underline (the link cue, §3), and reverse-videos with the line on press |
 
 A tag is drawn as its coloured label (`NEW`, `ACTIVE`, `STALE`); whether it also gets a faint

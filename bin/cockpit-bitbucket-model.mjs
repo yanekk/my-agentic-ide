@@ -742,7 +742,13 @@ function buildLineTwo(p, L, w, now) {
   }
   const vis = visibleLen(content);
   if (vis < w) content += " ".repeat(w - vis);   // pad so the hairline runs full width
-  return reopen(content, `${ESC}4m`);
+  // The underline is the row separator (DESIGN 2.6). Its glyph takes the FOREGROUND
+  // colour, so under the plain padding/gaps that is the default foreground -- a bright
+  // white line. SGR 58 sets the underline's own colour: palette index 8 (bright black /
+  // grey), so the hairline reads as a calm dark-grey rule and still follows the theme,
+  // while the coloured text above it (tags, diff numbers) is untouched. WezTerm supports
+  // coloured underlines; the host is always WezTerm (CLAUDE.md).
+  return reopen(content, `${ESC}4m${ESC}58;5;8m`);
 }
 
 /**
