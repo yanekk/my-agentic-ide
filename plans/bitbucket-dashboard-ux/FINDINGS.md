@@ -8,6 +8,7 @@ was seen working for real), and any term someone would grep for — a flag, an e
 
 | Date | What the build taught |
 |---|---|
+| 2026-09-06 | Review (T00): cockpit-test's `an auth failure classifies as auth` (agenda seam, ~line 2203) is timing-flaky — it samples state after `sleep 3` and can read `<error>`. Failed once, passed clean on rerun (510 checks). Unrelated to this plan; retry before treating a red suite as a regression. |
 | 2026-09-06 | Hand-verified (user, T00 spike): WezTerm delivers mouse motion only to the FOCUSED pane — an unfocused pane gets none, and a focused pane logs garbage when the pointer is over another pane. The dashboard pane is unfocused at the fleet list, so hover cannot work: **T05 drops; press feedback (T04) stands.** `?1003h`/`?1006h` probe deleted. |
 | 2026-09-06 | The model's `dim`/`bold` helpers close with `\x1b[0m`, resetting **all** SGR attributes. So line two's dim underline cannot just wrap coloured segments — the first inner `0m` kills it mid-line. Re-open the underline after each reset, or close inner segments with `\x1b[24m`. (T03.) |
 | 2026-09-05 | Design revised with the user: `[Open]` button dropped — the whole top line but the primary button opens the PR (fires the existing `bb-open` verb) and reacts like a link (hover lights the row + underlines the title, press flashes). Line two reordered to `tags · age · branch → target` with `·` between groups (tags stay a space-separated group); diff stays right. |
