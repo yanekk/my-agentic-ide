@@ -32,8 +32,8 @@ import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google
 // The BitBucket dashboard's client (the only thing here that opens a socket to
 // BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
 // aliased because the agenda store already owns those names.
-import { getUser, listOpenPRs, listPRComments } from "./cockpit-bitbucket-client.mjs";
-import { normalizePR, concernsMe, renderDashboard } from "./cockpit-bitbucket-model.mjs";
+import { getUser, listOpenPRs, listPRComments, listPRDiffstat } from "./cockpit-bitbucket-client.mjs";
+import { normalizePR, concernsMe, summarizeDiffstat, renderDashboard } from "./cockpit-bitbucket-model.mjs";
 import {
   isConfigured,
   readCache as readBBCache,
@@ -2982,22 +2982,43 @@ async function refreshPRs(reason) {
           const c = prevById.get(id)?.comments;
           return Array.isArray(c) ? c : [];
         };
+        // The diffstat's last-good triple, kept on a transient failure exactly as the
+        // comments are (DESIGN 2.4): a network blip must not blink the file/line counts
+        // out and back. Absent (a PR never fetched, or one with no prior triple) is
+        // `undefined`, which serialises to no `diffstatSummary` field at all -- so
+        // T02/T03 still tell "0 files changed" from "not fetched".
+        const prevDiffstat = (id) => prevById.get(id)?.diffstatSummary;
         let commentGets = 0;
+        let diffstatGets = 0;
         for (const pr of res.prs) {
           const norm = normalizePR(pr, { meUuid: cache.meUuid, repo: slug });
           if (!concernsMe(norm, { meUuid: cache.meUuid, team: cfg.team })) {
             pr.comments = prevComments(pr.id);   // not shown -> no read; keep any it had
-            continue;
+            continue;                            // and no diffstatSummary: an unshown PR carries none (DESIGN 2.4)
           }
           const cr = await listPRComments({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
           pr.comments = cr.error ? prevComments(pr.id) : cr.comments;
           if (!cr.error) commentGets++;
+          // One diffstat GET per shown PR too (DESIGN 2.4), the same shape and budget
+          // as the comment read: fetched, summed by the pure summarizeDiffstat, and the
+          // triple cached on the PR entry -- never the per-file list, so the repaint
+          // stays cheap. A transient failure keeps the last good triple (prevDiffstat);
+          // a PR with no prior triple is simply left with no summary rather than a
+          // zeroed one, so an absent fetch never reads as "an empty PR".
+          const dr = await listPRDiffstat({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
+          if (dr.error) {
+            const keep = prevDiffstat(pr.id);
+            if (keep) pr.diffstatSummary = keep;
+          } else {
+            pr.diffstatSummary = summarizeDiffstat(dr.diffstat);
+            diffstatGets++;
+          }
         }
         cache.repos[slug] = { fetchedAt: now, prs: res.prs, error: null };
-        // The comment-fetch count makes the per-minute call volume visible in the log
-        // (DESIGN 2.9): if a real workspace ever makes the budget tight, this is what
-        // shows it -- a count only, never a title or author.
-        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs, ${commentGets} comment fetches`);
+        // The fetch counts make the per-minute call volume visible in the log (DESIGN
+        // 2.9): if a real workspace ever makes the budget tight, this is what shows it
+        // -- counts only, never a title or author.
+        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs, ${commentGets} comment fetches, ${diffstatGets} diffstat fetches`);
       }
     }
 

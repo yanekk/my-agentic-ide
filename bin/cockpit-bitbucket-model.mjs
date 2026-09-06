@@ -108,6 +108,39 @@ function commentAuthorUuid(c) {
   return String((c && c.user && c.user.uuid) ?? "");
 }
 
+// --- diffstat summary -------------------------------------------------------
+
+/**
+ * Reduce a PR's raw diffstat entries (a `values[]` list from the client, DESIGN 2.4)
+ * to the three numbers the second row shows:
+ *
+ *   files   = the number of changed files (entries.length)
+ *   added   = the sum of every entry's lines_added
+ *   removed = the sum of every entry's lines_removed
+ *
+ * PURE, like everything in this file: no clock, no I/O. The daemon calls this once
+ * per shown PR and caches only the triple, so the 2s repaint never re-sums hundreds
+ * of entries (DESIGN 2.4, 5).
+ *
+ * Tolerant of a ragged entry: a missing, null or non-numeric lines_added/lines_removed
+ * counts as 0 (a pure-rename entry legitimately carries neither), and a non-array or
+ * empty input returns all zeros. This is the "0 files changed" value; a PR that was
+ * never FETCHED carries no summary at all (the daemon leaves the field absent, DESIGN
+ * 2.4), which is how T02/T03 tell an empty diff from an unfetched one.
+ */
+export function summarizeDiffstat(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  let added = 0;
+  let removed = 0;
+  for (const e of list) {
+    const a = Number(e && e.lines_added);
+    const r = Number(e && e.lines_removed);
+    if (Number.isFinite(a)) added += a;
+    if (Number.isFinite(r)) removed += r;
+  }
+  return { files: list.length, added, removed };
+}
+
 // --- classify ---------------------------------------------------------------
 
 /**

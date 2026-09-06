@@ -6,7 +6,7 @@
 // names the loopback stub, and greps the client to prove it has no mutating verb.
 
 import http from "node:http";
-import { getUser, listOpenPRs, listPRComments } from "../../bin/cockpit-bitbucket-client.mjs";
+import { getUser, listOpenPRs, listPRComments, listPRDiffstat } from "../../bin/cockpit-bitbucket-client.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A loopback stub. `stub.respond(req, n)` decides each reply (n is the 1-based
@@ -150,6 +150,51 @@ async function main() {
     const r = await listPRComments({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
     eq("a dropped socket -> transient", r.error && r.error.kind, "transient");
     await stub.close();
+  }
+
+  section("listPRDiffstat hits the PR's diffstat endpoint and paginates");
+  {
+    const stub = await startStub();
+    stub.respond = (req, n) => {
+      if (n === 1) return { status: 200, body: { values: [{ lines_added: 1 }, { lines_added: 2 }], next: `${stub.origin}/d2` } };
+      return { status: 200, body: { values: [{ lines_added: 3 }] } }; // no next -> stop
+    };
+
+    const r = await listPRDiffstat({ key: "tok", workspace: "acme", repo: "web", prId: 7, origin: stub.origin });
+    const u = new URL(stub.requests[0].url, stub.origin);
+    eq("the path is the PR's diffstat collection", u.pathname, "/2.0/repositories/acme/web/pullrequests/7/diffstat");
+    eq("every page is concatenated in order", r.diffstat.map((d) => d.lines_added), [1, 2, 3]);
+    eq("it stopped when `next` was absent", stub.requests.length, 2);
+    ok("the bearer header is re-sent on every page", stub.requests.every((q) => /^Bearer tok$/.test(q.headers.authorization || "")));
+
+    await stub.close();
+  }
+
+  section("listPRDiffstat classifies auth and transient like the other calls");
+  {
+    for (const [status, kind] of [[401, "auth"], [403, "auth"], [500, "transient"]]) {
+      const stub = await startStub();
+      stub.respond = () => ({ status, body: { type: "error" } });
+      const r = await listPRDiffstat({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
+      eq(`diffstat ${status} -> ${kind}`, r.error && r.error.kind, kind);
+      await stub.close();
+    }
+    // A dropped socket and an unparseable 200 are both transient, not a dead
+    // credential -- the same reasoning as listPRComments.
+    {
+      const stub = await startStub();
+      stub.respond = () => "drop";
+      const d = await listPRDiffstat({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
+      eq("a dropped socket -> transient", d.error && d.error.kind, "transient");
+      await stub.close();
+    }
+    {
+      const stub = await startStub();
+      stub.respond = () => ({ status: 200, body: "{ not json" });
+      const g = await listPRDiffstat({ key: "tok", workspace: "w", repo: "r", prId: 1, origin: stub.origin });
+      eq("a garbage 200 -> transient", g.error && g.error.kind, "transient");
+      await stub.close();
+    }
   }
 
   section("401 and 403 both classify as auth");

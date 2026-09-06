@@ -1,9 +1,10 @@
 // cockpit-bitbucket-client -- the only thing in the dashboard that opens a socket
-// to BitBucket Cloud (DESIGN 3.1, 3.2). Three calls, all GET:
+// to BitBucket Cloud (DESIGN 3.1, 3.2). Four calls, all GET:
 //
 //   getUser        GET /2.0/user                         -> who the token belongs to
 //   listOpenPRs    GET .../pullrequests?state=OPEN        -> one repo's open PRs, all pages
 //   listPRComments GET .../pullrequests/{id}/comments     -> one PR's comments, all pages
+//   listPRDiffstat GET .../pullrequests/{id}/diffstat     -> one PR's changed files, all pages
 //
 // It fetches and paginates; it does not decide what a PR MEANS. Normalising a raw
 // PR into a row, classifying it into a tab, sorting and paging are the pure model's
@@ -216,6 +217,45 @@ export async function listPRComments({ key, workspace, repo, prId, origin } = {}
       url = typeof data.next === "string" ? data.next : "";
     }
     return { comments };
+  } catch (e) {
+    return { error: { kind: e.kind || "transient" } };
+  }
+}
+
+function prDiffstatUrl(origin, workspace, repo, prId) {
+  const u = new URL(
+    `${baseOrigin(origin)}/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${encodeURIComponent(prId)}/diffstat`,
+  );
+  // The changed-file count and the added/removed line totals (DESIGN 2.4) live only
+  // on this per-PR endpoint -- the cheap list call does not carry them -- so each
+  // shown PR costs one GET here, the same bounded shape as the comment fetch. One
+  // entry per changed file; pagelen 100 (the endpoint's max) keeps a huge PR to as
+  // few pages as possible. No field expansion: `lines_added` and `lines_removed` are
+  // in the default diffstat entry, which is all the model sums.
+  u.searchParams.set("pagelen", "100");
+  return u.toString();
+}
+
+/**
+ * One pull request's diffstat, every page, raw (DESIGN 2.4). One entry per changed
+ * file, each carrying `lines_added`/`lines_removed`; the model's pure
+ * `summarizeDiffstat` reduces them to the `{ files, added, removed }` triple the row
+ * shows. The client only fetches and paginates, handing each `values[]` entry
+ * through untouched, exactly as listPRComments does. `prId` is a PR's numeric id
+ * from the list call.
+ *
+ * -> { diffstat: RawDiffstatEntry[] }  |  { error: { kind } }
+ */
+export async function listPRDiffstat({ key, workspace, repo, prId, origin } = {}) {
+  try {
+    const diffstat = [];
+    let url = prDiffstatUrl(origin, workspace, repo, prId);
+    for (let page = 0; url && page < MAX_PAGES; page++) {
+      const data = await getJson(url, key);
+      if (Array.isArray(data.values)) diffstat.push(...data.values);
+      url = typeof data.next === "string" ? data.next : "";
+    }
+    return { diffstat };
   } catch (e) {
     return { error: { kind: e.kind || "transient" } };
   }

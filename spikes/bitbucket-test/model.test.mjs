@@ -4,7 +4,7 @@
 // network, no state dir touched. The bash run.sh separately greps the module for
 // anything impure.
 
-import { normalizePR, classify, concernsMe, paginate } from "../../bin/cockpit-bitbucket-model.mjs";
+import { normalizePR, classify, concernsMe, paginate, summarizeDiffstat } from "../../bin/cockpit-bitbucket-model.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A raw BitBucket PR, only the fields the model reads. The comments array is what
@@ -269,6 +269,57 @@ function main() {
     const r = paginate([1, 2], { page: 3, perPage: 2 });
     eq("clamped to page 1", r.page, 1);
     eq("shows page 1's rows", r.rows, [1, 2]);
+  }
+
+  section("summarizeDiffstat sums files, added and removed across entries");
+  {
+    const r = summarizeDiffstat([
+      { lines_added: 10, lines_removed: 2 },
+      { lines_added: 5, lines_removed: 0 },
+      { lines_added: 0, lines_removed: 7 },
+    ]);
+    eq("files is the entry count", r.files, 3);
+    eq("added is the sum of lines_added", r.added, 15);
+    eq("removed is the sum of lines_removed", r.removed, 9);
+  }
+
+  section("summarizeDiffstat: a file with only additions or only deletions");
+  {
+    // A new file is all additions; a deleted file is all deletions. Each still counts
+    // as one changed file.
+    const r = summarizeDiffstat([{ lines_added: 40 }, { lines_removed: 12 }]);
+    eq("two files", r.files, 2);
+    eq("their additions", r.added, 40);
+    eq("their deletions", r.removed, 12);
+  }
+
+  section("summarizeDiffstat: missing / non-numeric line counts are treated as 0");
+  {
+    // A pure-rename entry carries neither line field (DESIGN 2.4); null, undefined
+    // and a non-numeric value must not turn the total into NaN.
+    const r = summarizeDiffstat([
+      {},                                             // neither field
+      { lines_added: null, lines_removed: undefined },
+      { lines_added: "x", lines_removed: "y" },
+      { lines_added: 3, lines_removed: 4 },
+    ]);
+    eq("four changed files", r.files, 4);
+    eq("only the numeric addition counts", r.added, 3);
+    eq("only the numeric deletion counts", r.removed, 4);
+  }
+
+  section("summarizeDiffstat: an empty or missing list is all zeros");
+  {
+    const empty = summarizeDiffstat([]);
+    eq("empty -> zero files", empty.files, 0);
+    eq("empty -> zero added", empty.added, 0);
+    eq("empty -> zero removed", empty.removed, 0);
+    // A non-array (never fetched, garbage) collapses to the same zero triple rather
+    // than throwing -- the daemon leaves the field absent for "not fetched", but the
+    // reducer itself must be total.
+    const nul = summarizeDiffstat(null);
+    eq("null -> zero files", nul.files, 0);
+    eq("null -> zero added", nul.added, 0);
   }
 
   done();

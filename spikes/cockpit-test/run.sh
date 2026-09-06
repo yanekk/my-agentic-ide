@@ -2380,6 +2380,13 @@ const MANY = { values: Array.from({ length: 20 }, (_, i) => ({
 // (DESIGN 2.3). The daemon fetches this per open PR (decision A, DESIGN 2.9) and
 // attaches it to the raw PR as `.comments`.
 const COMMENTS = { values: [{ id: 100, inline: { path: "a.js" }, user: { uuid: "ME-UUID" }, content: { raw: "x" } }] };
+// One PR's diffstat: two changed files, +10 -3 in total (DESIGN 2.4). The daemon
+// fetches this per SHOWN PR, sums it with the pure summarizeDiffstat, and caches only
+// the { files, added, removed } triple on the raw PR as `.diffstatSummary`.
+const DIFFSTAT = { values: [
+  { status: "modified", lines_added: 7, lines_removed: 3 },
+  { status: "added",    lines_added: 3, lines_removed: 0 },
+] };
 const server = http.createServer((req, res) => {
   // Logged DECODED so an assertion looks for a plain `+` and `?state=OPEN` rather
   // than hunting %2B/%3D through a query string.
@@ -2397,6 +2404,15 @@ const server = http.createServer((req, res) => {
   if (/\/pullrequests\/\d+\/comments/.test(req.url)) {
     if (m === "net" || m === "comment-net") return req.socket.destroy();  // -> transient
     return json(res, 200, COMMENTS);
+  }
+  // The per-PR diffstat GET, also answered BEFORE the repo-list branch: its path
+  // (/pullrequests/{id}/diffstat) still matches the pullrequests regex, so without
+  // this it would be served a PR-list body. `diffstat-net` drops only the diffstat
+  // call, so a repo whose LIST and COMMENTS succeed still exercises "keep the PR's
+  // previous diffstat summary" (DESIGN 2.4).
+  if (/\/pullrequests\/\d+\/diffstat/.test(req.url)) {
+    if (m === "net" || m === "diffstat-net") return req.socket.destroy();  // -> transient
+    return json(res, 200, DIFFSTAT);
   }
   const repo = decodeURIComponent((req.url.match(/\/repositories\/[^/]+\/([^/]+)\/pullrequests/) || [])[1] || "");
   if (m === "net") return req.socket.destroy();          // dropped socket -> transient
@@ -2488,6 +2504,16 @@ check "the concerning PR's comments are fetched"   "/pullrequests/7/comments" "$
 same  "...and attached to the raw PR for the sort" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 check "...the log counts the comment fetches"      "alpha ok, 1 prs, 1 comment fetches" "$A4/daemon.log"
 
+# The same shown PR also costs one diffstat GET (DESIGN 2.4), summed by the pure
+# summarizeDiffstat and cached as the { files, added, removed } triple on the raw PR.
+# Only the triple is stored, never the per-file list, so the repaint never re-sums.
+check "the concerning PR's diffstat is fetched"    "/pullrequests/7/diffstat" "$BBHITS"
+same  "...and the summed triple is cached: files"  "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.files')" "2"
+same  "...added"                                    "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.added')" "10"
+same  "...removed"                                  "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
+same  "...only the triple, not the per-file list"  "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.values')" "undefined"
+check "...the log counts the diffstat fetches"      "1 comment fetches, 1 diffstat fetches" "$A4/daemon.log"
+
 # Only PRs that concern me cost a comment read (DESIGN 2.3, 2.9; FINDINGS 2026-09-05).
 # two-prs adds #8, which I neither review nor authored: it is cached raw but must NOT
 # trigger a comment GET, so a repo with hundreds of open PRs still costs a read only
@@ -2499,7 +2525,12 @@ same  "both raw PRs are cached"                    "$(bq "$S4" 'c.repos.alpha.pr
 check "the PR I review still gets a comment read"  "/pullrequests/7/comments" "$BBHITS"
 same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/comments' "$BBHITS")" "0"
 same  "...and it carries an empty comments array"  "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).comments.length')" "0"
-check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches" "$A4/daemon.log"
+# A non-concerning PR costs no diffstat call either, and carries NO summary at all --
+# not a zeroed one -- so the pure model can tell "not fetched" from "0 files" (DESIGN 2.4).
+check "the PR I review still gets a diffstat read" "/pullrequests/7/diffstat" "$BBHITS"
+same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/diffstat' "$BBHITS")" "0"
+same  "...and it carries no diffstatSummary"       "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).diffstatSummary')" "undefined"
+check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches, 1 diffstat fetches" "$A4/daemon.log"
 echo ok > "$BBMODE"
 sleep 2
 same  "back to one PR when the extra one closes"   "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
@@ -2543,6 +2574,18 @@ echo comment-net > "$BBMODE"
 sleep 2
 same "a dropped comment fetch keeps the PR's previous comments" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 same "...and the repo itself stays a success"                   "$(bq "$S4" 'c.repos.alpha.error')" "null"
+echo ok > "$BBMODE"
+
+# A diffstat fetch that fails while its PR LIST succeeds keeps that PR's previous
+# summary triple (the same "keep last", DESIGN 2.4), so a blip does not blink the
+# file/line counts out and back. The prior tick cached { files:2, added:10, removed:3 };
+# a dropped diffstat call this tick must leave that triple intact, not zero or drop it.
+echo diffstat-net > "$BBMODE"
+sleep 2
+same "a dropped diffstat fetch keeps the PR's previous summary: files"   "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.files')" "2"
+same "...added"                                                          "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.added')" "10"
+same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
+same "...and the repo itself stays a success"                            "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
 
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
