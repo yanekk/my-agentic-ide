@@ -740,15 +740,18 @@ function buildLineTwo(p, L, w, now) {
     const gap = Math.max(MIDGAP, w - indent - lw - rw);
     content += " ".repeat(gap) + right.map((x) => x.styled).join("  ");
   }
-  const vis = visibleLen(content);
-  if (vis < w) content += " ".repeat(w - vis);   // pad so the hairline runs full width
-  // The underline is the row separator (DESIGN 2.6). Its glyph takes the FOREGROUND
-  // colour, so under the plain padding/gaps that is the default foreground -- a bright
-  // white line. SGR 58 sets the underline's own colour: palette index 8 (bright black /
-  // grey), so the hairline reads as a calm dark-grey rule and still follows the theme,
-  // while the coloured text above it (tags, diff numbers) is untouched. WezTerm supports
-  // coloured underlines; the host is always WezTerm (CLAUDE.md).
-  return reopen(content, `${ESC}4m${ESC}58;5;8m`);
+  // No underline here: the row separator is a dedicated dim `────` line drawn BETWEEN
+  // PRs by renderDashboard (DESIGN 2.6, revised 2026-09-06). Line two is plain content
+  // -- its coloured segments each self-close, so it needs no full-width padding either.
+  return content;
+}
+
+// The dedicated row separator (DESIGN 2.6, revised): a dim full-width `────`, matching
+// the notes/agenda rules in the same pane (cockpit-welcome). Drawn BETWEEN consecutive
+// PRs only -- never after the last on a page, where it would read as a stray line above
+// the pager. Carries no hit-zone. `─` is one column wide, so w of them is exactly w.
+export function rowSeparator(w) {
+  return dim("─".repeat(Math.max(0, w)));
 }
 
 /**
@@ -853,14 +856,16 @@ export function renderDashboard({ width, rows, cache, view, now, config, emphasi
     push(dim(tab === "mine" ? "nothing of yours open" : "nothing waiting on you"));
   } else {
     // Budget: tabs (1) + header (1) reserved above the rows; the pager, only when the
-    // list overflows one page, costs one more row. Each PR is now TWO lines (DESIGN 2),
-    // so the remaining lines / 2 (floored, min 1) is PRs-per-page; paginate still takes
-    // and returns a PR count.
+    // list overflows one page, costs one more row. Each PR is TWO lines (DESIGN 2) plus a
+    // dedicated `────` separator BETWEEN consecutive PRs (DESIGN 2.6, revised 2026-09-06):
+    // k PRs cost 2k + (k-1) = 3k - 1 lines, so the largest k with 3k - 1 <= avail is
+    // floor((avail + 1) / 3). paginate still takes and returns a PR count.
+    const perPageFor = (a) => Math.max(1, Math.floor((a + 1) / 3));
     const avail = Math.max(0, n - 2 - trailer.length);
-    let perPage = Math.max(1, Math.floor(avail / 2));
+    let perPage = perPageFor(avail);
     let paged = paginate(list, { page, perPage });
     if (paged.pages > 1) {
-      perPage = Math.max(1, Math.floor((avail - 1) / 2));
+      perPage = perPageFor(avail - 1);
       paged = paginate(list, { page, perPage });
     }
     const pager = paged.pages > 1;
@@ -868,12 +873,15 @@ export function renderDashboard({ width, rows, cache, view, now, config, emphasi
 
     const L = computeLayout(w, tab, paged.rows);
     push(buildHeader(L));
-    for (const p of paged.rows) {
+    paged.rows.forEach((p, idx) => {
       const r = buildRow(p, L, tab, emphasis);
       push(r.line);
       zonesAt(r.zones);        // both zones stamp line one's y, just pushed
       push(buildLineTwo(p, L, w, now));
-    }
+      // A rule between PRs only -- not after the last, where it would sit above the pager
+      // or the trailing blanks as a stray line (DESIGN 2.6, revised).
+      if (idx < paged.rows.length - 1) push(rowSeparator(w));
+    });
     if (pager) {
       const pg = buildPager(paged.page, paged.pages, w);
       push(pg.line);

@@ -123,19 +123,20 @@ refinement, not built here.
 
 ### 2.6 The row separator
 
-A grey hairline separates one PR from the next, as the prototype showed. The user asked for it
-explicitly to **not** be a dedicated line (2026-09-05) — a `────` row would halve the PR density
-again for pure decoration. So it is drawn as an **underline on each PR's second line**: terminals
-underline trailing spaces (WezTerm does), so an underlined full-width line two reads as a hairline
-under the PR while still being the row it already occupies. It costs no vertical space. Whether the
-last row on a page carries the underline is the renderer's choice, fixed and tested either way (a rule
-just above the pager is harmless).
+A grey line separates one PR from the next. It is drawn as a **dedicated dim `────` row between
+consecutive PRs** — a full-width rule on its own line, matching the notes/agenda rules in the same
+pane, coloured dim (SGR 2) so it reads as a calm hairline, not a bright one. It is drawn **between**
+PRs only, never after the last on a page, where it would sit above the pager or the trailing blanks
+as a stray line.
 
-The underline's **colour** is set explicitly to palette index 8 (grey / bright-black) with SGR 58,
-because an underline glyph otherwise takes the *foreground* colour — under the plain padding that is
-the default foreground, a bright white line the user rejected (2026-09-06). SGR 58 recolours the rule
-alone, leaving the coloured text above it untouched, and index 8 still follows the theme. A dedicated
-`────` row was reconfirmed as the rejected alternative (its per-PR vertical cost is the reason).
+**History (why it is this way):** the separator was first specified as *not* a dedicated line
+(2026-09-05) and built as an underline on each PR's second line — a hairline at no vertical cost. On
+the T04 live rebuild the user found the underline too bright (it takes the foreground colour under
+the plain padding); a recolour to grey via SGR 58 was tried, then the user chose the **dedicated
+`────` line** instead (2026-09-06). The cost is one vertical row per PR: each PR is now three lines
+(line one, line two, the rule), so a page holds fewer PRs — accepted by the user for the cleaner read.
+Per-page maths: k PRs cost `3k − 1` lines (the last has no trailing rule), so the largest k with
+`3k − 1 ≤ avail` is `floor((avail + 1) / 3)`.
 
 ### 2.7 Colours — pinned to the prototype
 
@@ -153,7 +154,7 @@ right SGR code wraps each element.
 | `[STALE]` tag | **grey** (dim) — a quiet PR reads quietly |
 | PR number `#id`, the primary button `[Review]`/`[Address]` | **cyan** (SGR 36) — the dashboard's action accent, matching the existing tab/pager accent |
 | age, branch, `N files`, the `·` separators | **dim** (SGR 2) — context, not signal |
-| the row-separator underline | **grey** — SGR 58 sets the underline colour to palette index 8 (bright-black), so the rule is a calm hairline, not the bright default foreground (§2.6) |
+| the row-separator `────` line | **grey** (dim, SGR 2) — a dedicated rule between PRs, a calm hairline not a bright one (§2.6) |
 | title | **default** text; on open-zone hover it brightens with a cyan underline (the link cue, §3), and reverse-videos with the line on press |
 
 A tag is drawn as its coloured label (`NEW`, `ACTIVE`, `STALE`); whether it also gets a faint
@@ -306,8 +307,9 @@ All dates 2026-09-05 unless noted.
   and the repaint cheap.
 - **Line two has a drop order: branch, then +/-, then file count, keeping age and tags.** The age
   and tags were the first ask, so they never drop; the branch is context and drops first (§2.2).
-- **Rows are separated by an underline on line two, not a dedicated `────` row** (§2.6). User's
-  explicit request (2026-09-05): a visible separator that costs no vertical space.
+- **Rows are separated by a dedicated dim `────` row between PRs** (§2.6). Revised 2026-09-06: first
+  built as a line-two underline (no vertical cost), the user then chose the dedicated line, accepting
+  one extra row per PR for the cleaner read.
 - **The `[Open]` button is dropped; the whole top line but the primary button opens the PR** (§3).
   User's request (2026-09-05). The open zone spans line one from the start to just before the button
   — the whole line but the button, chosen over title+number only, for a forgiving target — and fires

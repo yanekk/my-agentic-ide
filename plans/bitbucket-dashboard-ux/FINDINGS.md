@@ -8,6 +8,8 @@ was seen working for real), and any term someone would grep for — a flag, an e
 
 | Date | What the build taught |
 |---|---|
+| 2026-09-06 | Separator switched from a line-two underline to a dedicated dim `────` row between PRs (user). Each PR is now 3 lines; per-page = `floor((avail+1)/3)`. Daemon paging fixture (20 PRs, 40x10) is 10 pages, was 7. |
+| 2026-09-06 | notes-test §11 (`a replaced bitbucket cache` repaints via the dir watch) is timing-flaky: a 1200ms `fs.watch` deadline. Failed once under concurrent load, passed isolated and on a clean rerun. Retry before treating red as a regression. |
 | 2026-09-06 | Hand-verified (user, T04 live rebuild): press-flash works — clicked target inverts then rests, title opens PR, button spawns. Two-line rows read well: age, STALE, branch→target, diff, hairline aligned. NEW/ACTIVE seen by temporarily dropping thresholds (`age < DAY`, `recent >= 3`), then reverted, uncommitted. |
 | 2026-09-06 | T03 two-line rows halve page density, so cockpit-test's daemon paging-clamp fixture (20 PRs, 40x10 pane) is now 7 pages, not 3: `bb-page:next` walks to 7 and clamps. Updated those assertions — a model density change, not a daemon change. |
 | 2026-09-06 | Hand-verified (user, T01 live call): `listPRDiffstat` + `summarizeDiffstat` on real cribl/sdet-tools#91 → 60 files, +4964, −244, matched BitBucket's PR page. Confirms real diffstat entries carry `lines_added`/`lines_removed` as assumed; field names are right. |

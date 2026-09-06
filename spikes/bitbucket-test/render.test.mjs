@@ -87,29 +87,6 @@ function visibleAt(line, x0, x1) {
   return out;
 }
 
-// Whether the SGR underline attribute (4) is active over EVERY visible column of a
-// line. This is the real separator check (DESIGN 2.6, FINDINGS 2026-09-06): the model's
-// helpers close with 0m, which clears underline, so a naive single wrap would go dark
-// after the first coloured segment. Walk the SGR state and demand underline never lapses
-// under a visible glyph.
-function underlineHoldsThroughout(line) {
-  let underline = false;
-  for (let i = 0; i < line.length; ) {
-    const esc = /^\x1b\[([0-9;]*)m/.exec(line.slice(i));
-    if (esc) {
-      const codes = esc[1] === "" ? [0] : esc[1].split(";").map(Number);
-      for (const c of codes) {
-        if (c === 0 || c === 24) underline = false;
-        else if (c === 4) underline = true;
-      }
-      i += esc[0].length;
-      continue;
-    }
-    if (!underline) return false;   // a visible glyph with no underline under it
-    i++;
-  }
-  return true;
-}
 
 const rowWith = (lines, needle) => lines.find((l) => plain(l).includes(needle));
 const rowIndex = (lines, needle) => lines.findIndex((l) => plain(l).includes(needle));
@@ -316,12 +293,14 @@ function main() {
     contracts("overflow", out, 90, 7);
     zonesInBounds("overflow", out, 90, 7);
 
-    // Two lines per row -> two PRs a page here; page 2 shows the 3rd, not the 1st.
+    // Two lines per row + a between-PR rule -> one PR a page here (a 7-row pane holds
+    // tabs+header+2 lines+pager=5, but a second PR needs a rule and overflows); page 2
+    // shows the 2nd, not the 1st.
     const p2 = renderDashboard({
       width: 90, rows: 7, cache: cacheOf(prs),
       view: view({ page: { toReview: 2, mine: 1 } }), now: NOW, config: cfg(),
     });
-    ok("page 2 shows the 3rd PR", !!rowWith(p2.lines, "#3"));
+    ok("page 2 shows the 2nd PR", !!rowWith(p2.lines, "#2"));
     ok("page 2 has dropped the 1st PR", !rowWith(p2.lines, "#1"));
   }
 
@@ -545,8 +524,10 @@ function main() {
     zonesInBounds("drop-order-tiny", tiny, 16, 6);
   }
 
-  section("the row separator is a grey underline that spans line two and adds no line");
+  section("the row separator is a dedicated dim `────` line drawn between PRs (DESIGN 2.6, revised)");
   {
+    // One PR: no separator at all (between-only), so it still occupies exactly line one
+    // then line two, then blanks -- tabs (1) + header (1) + line one + line two.
     const pr = raw({
       id: 70, reviewers: [{ uuid: ME }], authorUuid: "{o}", title: "sep",
       created: iso(NOW - 3 * HOUR), sourceBranch: "feat/x", destBranch: "main",
@@ -555,33 +536,43 @@ function main() {
     const out = renderDashboard({ width: 90, rows: 8, cache: cacheOf([pr]), view: view(), now: NOW, config: cfg() });
     const i = rowIndex(out.lines, "#70");
     const l2 = out.lines[i + 1];
-    ok("line two carries an underline (a 4m appears)", l2.includes(`${ESC}4m`));
-    ok("the underline is coloured grey (palette index 8), not the bright default fg",
-      l2.includes(`${ESC}58;5;8m`));
-    ok("the underline holds under every visible glyph, past the coloured segments",
-      underlineHoldsThroughout(l2));
+    ok("line two no longer carries an underline (the rule is a dedicated line now)", !l2.includes(`${ESC}4m`));
     ok("line two draws no PR number (it is the second line, not a new row)", !plain(l2).includes("#70"));
-    // Exactly two lines for one PR: tabs (1) + header (1) + line one (1) + line two (1),
-    // then blanks. The separator steals no vertical room.
     eq("one PR occupies line one then line two, nothing more", i, 2);   // 0:tabs 1:header 2:l1 3:l2
-    for (let k = 4; k < out.lines.length; k++) eq(`line ${k} is blank padding`, plain(out.lines[k]), "");
+    for (let k = 4; k < out.lines.length; k++) eq(`line ${k} is blank padding (no rule after a lone PR)`, plain(out.lines[k]), "");
+
+    // Two PRs: a dim full-width `────` sits BETWEEN them, and not after the last.
+    const two = [
+      raw({ id: 71, reviewers: [{ uuid: ME }], authorUuid: "{o}", title: "a", created: iso(NOW - 3 * HOUR) }),
+      raw({ id: 72, reviewers: [{ uuid: ME }], authorUuid: "{o}", title: "b", created: iso(NOW - 3 * HOUR) }),
+    ];
+    const o2 = renderDashboard({ width: 90, rows: 10, cache: cacheOf(two), view: view(), now: NOW, config: cfg() });
+    const a = rowIndex(o2.lines, "#71");
+    const b = rowIndex(o2.lines, "#72");
+    const between = o2.lines[a + 2];   // line one, line two, then the rule
+    eq("the rule sits on the line between the two PRs' blocks", a + 3, b);
+    ok("the between-PR rule is a full-width `────`", /^─+$/.test(plain(between)) && plain(between).length === 90);
+    ok("the between-PR rule is dim (SGR 2), not the bright default", between.includes(`${ESC}2m`));
+    for (let k = b + 2; k < o2.lines.length; k++)
+      ok(`line ${k} after the last PR is not a rule`, !/^─+$/.test(plain(o2.lines[k])));
   }
 
-  section("pagination: two-line rows halve the page; the pager steals exactly one line");
+  section("pagination: two-line rows + a between-PR rule; the pager steals exactly one line");
   {
     const prs = [];
     for (let i = 1; i <= 20; i++) prs.push(raw({ id: i, reviewers: [{ uuid: ME }], authorUuid: "{o}" }));
-    // rows 12 -> avail 10 -> 5 PRs, but overflow adds a pager -> avail-1=9 -> 4 PRs/page.
+    // rows 12 -> avail 10 -> floor((10+1)/3)=3 PRs; overflow adds a pager -> avail-1=9 ->
+    // floor((9+1)/3)=3 PRs/page. 3 PRs = 6 lines + 2 rules = 8, + tabs/header/pager = 11 <= 12.
     const out = renderDashboard({ width: 90, rows: 12, cache: cacheOf(prs), view: view(), now: NOW, config: cfg() });
     const shown = out.lines.filter((l) => /#\d/.test(plain(l))).length;
-    eq("four two-line PRs fit a 12-row pane with a pager", shown, 4);
+    eq("three PRs fit a 12-row pane with a pager and the between-PR rules", shown, 3);
     ok("a pager is drawn", out.lines.some((l) => /\d\/\d/.test(plain(l))));
-    eq("five pages of twenty", out.pages, 5);
+    eq("seven pages of twenty", out.pages, 7);
     contracts("pagination-20", out, 90, 12);
 
-    // Page 2 shows PRs 5..8.
+    // Page 2 shows PRs 4..6.
     const p2 = renderDashboard({ width: 90, rows: 12, cache: cacheOf(prs), view: view({ page: { toReview: 2, mine: 1 } }), now: NOW, config: cfg() });
-    ok("page 2 opens at #5", !!rowWith(p2.lines, "#5"));
+    ok("page 2 opens at #4", !!rowWith(p2.lines, "#4"));
     ok("page 2 has dropped #1", !rowWith(p2.lines, "#1"));
 
     // A remembered page far past the shrunk end falls back to page 1.
