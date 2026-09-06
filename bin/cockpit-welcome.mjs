@@ -211,12 +211,12 @@ function rightColumn(width, rows, now) {
 // (DESIGN 2.n). The store's reads already return the empty/default shape on a
 // corrupt or absent file rather than throwing, so a corrupt cache draws the
 // empty/unconfigured view; the catch is for everything nobody thought of.
-function dashboardColumn(width, rows, now) {
+function dashboardColumn(width, rows, now, emphasis) {
   try {
     const config = readBBConfig();
     const cache = readBBCache();
     const view = readBBView();
-    const { lines, hitZones } = renderDashboard({ width, rows, cache, view, now, config });
+    const { lines, hitZones } = renderDashboard({ width, rows, cache, view, now, config, emphasis });
     return { lines, hitZones };
   } catch {
     return { lines: Array.from({ length: rows }, () => ""), hitZones: [] };
@@ -231,6 +231,14 @@ function dashboardColumn(width, rows, now) {
 // every paint, so a click is always mapped against exactly what is on screen -- the
 // same reason the strip rebuilds its zones each render. Empty until the first paint.
 let lastHitZones = [];
+
+// The transient press flash (T04). A left press on the primary button or the open zone
+// sets this to { verb, state:"press" } and starts a ~120ms timer that clears it; the next
+// render draws only that zone inverted (DESIGN 3, the model's `emphasis` input). Null at
+// rest, so a paint with no recent press reproduces the model's rest bytes exactly. The
+// verb still fired on the click -- this is purely the visible confirmation.
+let pressEmphasis = null;
+let pressTimer = null;
 
 function render() {
   const cols = process.stdout.columns || 80;
@@ -252,11 +260,11 @@ function render() {
 
   const lines = [];
   if (!split) {
-    const dash = dashboardColumn(cols, rows, now);
+    const dash = dashboardColumn(cols, rows, now, pressEmphasis);
     lastHitZones = dash.hitZones;
     for (let r = 0; r < rows; r++) lines.push(clip(dash.lines[r] ?? "", cols));
   } else {
-    const dash = dashboardColumn(leftW, rows, now);
+    const dash = dashboardColumn(leftW, rows, now, pressEmphasis);
     lastHitZones = dash.hitZones;
     const right = rightColumn(rightW, rows, now);
     for (let r = 0; r < rows; r++) {
@@ -280,10 +288,32 @@ function render() {
 // A left-click at pane-local (x, y): look up the verb of the zone it hit (null if
 // none) and hand it to the daemon. A click that lands on no zone -- the header, a
 // blank row, the notes/agenda column -- emits nothing.
+// The two zones that flash on a press (DESIGN 3, T04): the primary spawn button and the
+// open zone. A tab or pager press fires its verb but does not flash -- the renderer defines
+// a press appearance only for these two (T03), so emphasising anything else would be a state
+// the model cannot draw.
+const FLASHES = (verb) =>
+  verb.startsWith("bb-review:") || verb.startsWith("bb-address:") || verb.startsWith("bb-open:");
+const FLASH_MS = 120;      // long enough to see, short enough that a Review press that
+                           // spawns an agent (release may not reach this pane) still clears.
+
 function onDashClick(x, y) {
   const verb = verbAt(lastHitZones, x, y);
   if (!verb) return;
+  // The verb fires exactly as before -- the flash below is purely visual and changes
+  // nothing about what the click does or when.
   try { fs.appendFileSync(CMD_FILE, `${verb}\n`); } catch { /* daemon re-reads on the next click */ }
+
+  if (!FLASHES(verb)) return;
+  pressEmphasis = { verb, state: "press" };
+  render();
+  if (pressTimer) clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => {
+    pressEmphasis = null;
+    pressTimer = null;
+    render();
+  }, FLASH_MS);
+  pressTimer.unref?.();     // a pending flash timer must not hold the process open on quit
 }
 
 // Turn on mouse reporting and forward left-button presses to onDashClick(x, y), both
