@@ -1,6 +1,6 @@
 # T06 — Docs: CLAUDE.md, cockpit.md, truths table
 
-**Phase D · depends on T01, T02, T03, T04, T05 · light**
+**Phase D · depends on T01, T02, T03, T04 · light** (T05 was dropped — motion is not delivered to the unfocused pane; FINDINGS 2026-09-06)
 
 ## Goal
 

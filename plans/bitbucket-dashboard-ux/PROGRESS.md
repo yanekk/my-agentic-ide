@@ -18,7 +18,7 @@ implementer clarifications fixed.
 ## Tasks
 
 Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review · ✅ reviewed and
-done · ⛔ blocked, needs a human.
+done · ⛔ blocked, needs a human · ❌ dropped, not built.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
@@ -27,15 +27,15 @@ done · ⛔ blocked, needs a human.
 | T02 | Pure model: created_on + comment times, diff/branch, ageLabel, activityTags | T01 | ⬜ | NEW <24h, ACTIVE ≥3 comments/24h, STALE >14d. diff=null when unfetched. |
 | T03 | Pure renderer: two-line rows, drop order, separator, emphasis states | T02 | ⬜ | Heavy. Open button dropped → line-one open zone (bb-open); line two tags·age·branch; underline separator; reworks layout/pagination/hit-zones. |
 | T04 | Pane: press-flash feedback | T03 | ⬜ | Built regardless of the spike. Flash only the open zone + primary button (not tabs/pager). First live rebuild → also hand-check the two-line rows read well. |
-| T05 | Pane: hover highlight | T00, T03 | ⬜ | T00 spike says hover CANNOT work (motion never reaches the unfocused pane). Recommendation is to DROP this task; awaiting user's formal call. |
-| T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T05 | ⬜ | Truths row only if the spike earned one. |
+| T05 | Pane: hover highlight | T00, T03 | ❌ | DROPPED 2026-09-06 (T00 + user): motion reaches only the focused pane, so the unfocused dashboard pane can never hover. Not built. See FINDINGS. |
+| T06 | Docs: CLAUDE.md, docs/cockpit.md, truths table | T01–T04 | ⬜ | Truths row only if the spike earned one. Note T05 was dropped. |
 
 **Review queue:** T00.
 
 ## Open for the plan review / the user
 
-- **T05 is conditional** (DESIGN §4). The plan-review need not resolve it — T00 does, at build time,
-  with the user. Everything up to T04 is unconditional.
+- **T05 is resolved: dropped** (2026-09-06). T00 proved motion never reaches the unfocused pane, and
+  the user confirmed the drop. Everything up to T04 is unconditional and unaffected.
 - **The diffstat cost is settled — build it** (DESIGN §2.4, §7; FINDINGS 2026-09-05): the user
   accepted the one-GET-per-shown-PR cost, so T01 stays and the file/line counts are built. Plan review
   2026-09-06 confirmed this against the recorded acceptance (the earlier "may still drop" was stale).

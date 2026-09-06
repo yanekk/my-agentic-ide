@@ -27,28 +27,28 @@ hand-verified.
 | T02 | Pure model: `created_on`/comment times, `diff`/branch on the row, `ageLabel`, `activityTags` | B | T01 | medium |
 | T03 | Pure renderer: two-line rows, drop order, row separator, hit-zone y, button hover/press variants | B | T02 | heavy |
 | T04 | Pane: press feedback (flash the pressed button) | C | T03 | medium |
-| T05 | Pane: hover highlight — **gated on T00 and the user's call** | C | T00, T03 | medium |
-| T06 | Docs: CLAUDE.md, `docs/cockpit.md`, truths table | D | T01, T02, T03, T04, T05 | light |
+| T05 | Pane: hover highlight — **DROPPED (T00 + user, 2026-09-06): motion never reaches the unfocused pane; not built** | C | T00, T03 | — |
+| T06 | Docs: CLAUDE.md, `docs/cockpit.md`, truths table | D | T01, T02, T03, T04 | light |
 
 ## Dependency graph
 
 ```
-T00 ─────────────────────────┐
-                             ├─→ T05 ─┐
-T01 → T02 → T03 ┬────────────┘        ├─→ T06
-                └─→ T04 ──────────────┘
+T00 → (T05 dropped — motion not delivered to the unfocused pane)
+
+T01 → T02 → T03 ┬──────────→ T06
+                └─→ T04 ─────┘
 ```
 
 ## Critical path
 
-T01 → T02 → T03 → T04 → T06 is the path that always runs. T00 → T05 runs in parallel and rejoins at
-T06; if the spike kills hover, T05 becomes a one-line "not built, see FINDINGS" and T06 still closes
-the plan.
+T01 → T02 → T03 → T04 → T06 is the path that runs. T00 answered its one question (hover cannot work)
+and T05 is not built; T06 closes the plan.
 
 ## Open decisions
 
-- **T05's existence.** Settled by T00's outcome and the user (DESIGN §4). Everything up to T04 is
-  unconditional; T05 is the only task that may not be built.
+- **T05's existence.** Settled: dropped by T00's outcome and the user (2026-09-06, DESIGN §4;
+  FINDINGS). Motion is delivered only to the focused pane, so hover to the unfocused dashboard pane
+  is impossible. Everything up to T04 is unconditional and unaffected.
 - **The diffstat cost.** One extra GET per shown PR (DESIGN §2.4). Accepted as the same bounded
   pattern as the parent's comment fetch; flagged to the user, who may still drop the file/line counts
   and keep only the free branch line — which would delete T01 and trim T02/T03.

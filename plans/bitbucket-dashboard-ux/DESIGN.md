@@ -204,6 +204,12 @@ is smooth. Its outcome, plus the user's call, decides T05:
 
 The press feedback (T04) does not depend on the spike and is built regardless.
 
+**Resolved (2026-09-06): the second branch. T05 is dropped.** The spike found that WezTerm delivers
+mouse motion only to the *focused* pane — the unfocused dashboard pane receives none (and a focused
+pane logs garbage coordinates when the pointer is over another pane). Hover to the unfocused pane is
+therefore impossible, not merely flickery, so no throttle would rescue it. The user confirmed the
+drop; the press feedback (T04) stands as the sole button reaction. See FINDINGS 2026-09-06.
+
 ## 5. Architecture — nothing crosses the boundary that did not already
 
 The pure/impure split is the parent plan's and is unchanged. Age, the tags and the diffstat

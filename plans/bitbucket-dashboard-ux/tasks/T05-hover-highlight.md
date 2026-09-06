@@ -1,6 +1,12 @@
 # T05 — Pane: hover highlight
 
-**Phase C · depends on T00, T03 · medium · GATED — may not be built**
+**Phase C · depends on T00, T03 · ❌ DROPPED, NOT BUILT (2026-09-06)**
+
+> **This task is dropped.** The T00 spike found that WezTerm delivers mouse motion only to the
+> **focused** pane; the dashboard pane sits unfocused in the fleet list, so it receives no motion
+> and hover cannot work (FINDINGS 2026-09-06, DESIGN §4). The user confirmed the drop. The press
+> feedback of T04 stands as the button reaction. The rest of this file is the original spec, kept
+> for the record only.
 
 ## Goal
 
