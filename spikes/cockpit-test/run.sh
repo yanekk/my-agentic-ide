@@ -1137,7 +1137,7 @@ check  "the VIEWER was split off the browser's right at 80%" \
 before "...only once the browser held the whole slot (80% of half a slot is not 80%)" \
        "move-pane-to-new-tab --pane-id $DP" "--right --percent 80 --pane-id $BR" "$CALLS"
 check  "broot launched, with the cockpit's verb file FIRST in the --conf chain" \
-                                                  "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
+                                                  "broot --git-ignored --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
 check  "micro launched read-only, with NO file argument and no review file" \
                                                   "$MICRO_LAUNCH"'\n' "$CALLS"
 # DESIGN 7: micro's default draws the tab bar light on light, so three open tabs
@@ -1228,7 +1228,7 @@ same   "the browser was never called a shell"     "$(countof "browse browser pan
 same   "...nor was the viewer"                    "$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")" "$SHELLV"
 refute "nothing was typed into the browser"       "send-text --pane-id $BR" "$CALLS"
 refute "...nor into the viewer"                   "send-text --pane-id $VW" "$CALLS"
-refute "broot was NOT retyped into its own filter box" "broot --conf" "$CALLS"
+refute "broot was NOT retyped into its own filter box" "broot --git-ignored --conf" "$CALLS"
 refute "...nor micro over a live one"             "micro -readonly" "$CALLS"
 : > "$T/psfg"                             # back to the stub's default for what follows
 retitle "$BR" broot
@@ -1306,7 +1306,7 @@ check  "the quit browser is reported as a shell"  "browse browser pane $BR for a
 check  "...and broot was reinstated in that pane" "the browse browser was quit in abc12345; reinstated it in pane $BR" "$T/daemon.log"
 check  "...typed into the browser's own pane"     "send-text --pane-id $BR" "$CALLS"
 check  "...with the cockpit's verb file first in the --conf chain" \
-                                                  "broot --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
+                                                  "broot --git-ignored --conf \"$ROOT/bin/cockpit-browse-verbs.hjson" "$CALLS"
 refute "the healthy viewer was not typed into"    "send-text --pane-id $VW" "$CALLS"
 check  "...and its tab list is untouched"         "bin/still-open.mjs" "$T/state/viewer-tabs.json"
 refute "no pane was killed"                       "kill-pane" "$CALLS"
@@ -1399,7 +1399,7 @@ echo "== 11c'''''. (five primes) a half is running if ANY of its foreground grou
 #
 # `foregroundComm` takes the LAST of them, so the answer was `node`: a live broot
 # read as a quit shell, and with no frame to overrule it (and a title of `cd`, see
-# 11b') the 1s healer typed `cd <wt> && broot --conf ...` into the running broot.
+# 11b') the 1s healer typed `cd <wt> && broot --git-ignored --conf ...` into the running broot.
 #
 # So the question is not WHICH process is in front but WHETHER ANY of them is
 # broot/micro/revdiff. That is the whole of T13, and this section is the only thing
@@ -1423,7 +1423,7 @@ same   "a broot with a child in its group is not a shell" \
 same   "...nor is a micro with one"               "$(countof "browse viewer pane $VW for abc12345: shell" "$T/daemon.log")" "$SHELLV"
 refute "nothing was typed into the browser mid-push" "send-text --pane-id $BR" "$CALLS"
 refute "...nor into the viewer"                   "send-text --pane-id $VW" "$CALLS"
-refute "broot's launch command never reached its own filter box" "broot --conf" "$CALLS"
+refute "broot's launch command never reached its own filter box" "broot --git-ignored --conf" "$CALLS"
 refute "...nor micro over a live one"             "micro -readonly" "$CALLS"
 
 # The other direction, which any-of must NOT weaken: a group holding no program
@@ -1521,7 +1521,7 @@ check "back in browse"                            '"diffMode":"browse"' "$T/stat
 # an empty tab bar and broot back at the top of the tree every time.
 same   "the SAME browser came back, not a new one" "$BR2" "$BR"
 same   "...and the same viewer beside it"          "$VW2" "$VW"
-refute "broot was not relaunched"                  "broot --conf" "$CALLS"
+refute "broot was not relaunched"                  "broot --git-ignored --conf" "$CALLS"
 refute "nor micro"                                 "micro -readonly true" "$CALLS"
 refute "and nothing at all was typed into the browser" "send-text --pane-id $BR2" "$CALLS"
 refute "...nor into the viewer"                    "send-text --pane-id $VW2" "$CALLS"
@@ -1581,7 +1581,7 @@ echo "second agent" > "$FLEETSTATE"
 nap 4
 check  "the other agent opens in the uncommitted default" \
                                                   '"diffMode":"uncommitted"' "$T/state/terminals.json"
-refute "no browser was launched for it"           "broot --conf" "$CALLS"
+refute "no browser was launched for it"           "broot --git-ignored --conf" "$CALLS"
 # Switching away is the case browse is passed through most often of all, so it is
 # the one that must not cost the tabs either.
 check  "the browsing agent's browser was PARKED on the way out" \
@@ -1605,7 +1605,7 @@ same  "the same browser came back to the slot"      "$(pane_key diff)" "$BRS"
 same  "...and the same viewer"                      "$(pane_key viewer)" "$VWS"
 check "...moved, not respawned"                     "--move-pane-id $BRS" "$CALLS"
 check "...with the viewer split off it at 80%"      "--right --percent 80 --pane-id $BRS --move-pane-id $VWS" "$CALLS"
-refute "neither half was relaunched"                "broot --conf" "$CALLS"
+refute "neither half was relaunched"                "broot --git-ignored --conf" "$CALLS"
 refute "...nor micro"                               "micro -readonly true" "$CALLS"
 check "panes.json names a viewer again"             '"viewerAgent":"abc12345"' "$T/state/panes.json"
 
@@ -1642,13 +1642,13 @@ nap 3
 check "clicking Browse switched, unfocused"       '"diffMode":"browse"' "$T/state/terminals.json"
 same  "...and brought the SAME browser back"      "$(pane_key diff)" "$BRC"
 same  "...and the same viewer"                    "$(pane_key viewer)" "$VWC"
-refute "...without relaunching broot"             "broot --conf" "$CALLS"
+refute "...without relaunching broot"             "broot --git-ignored --conf" "$CALLS"
 check "...publishing the viewer with it"          '"viewerAgent":"abc12345"' "$T/state/panes.json"
 
 : > "$CALLS"
 echo diff-browse >> "$T/state/cmd"        # the ALREADY-active label
 nap 3
-refute "clicking Browse again launches nothing"   "broot --conf" "$CALLS"
+refute "clicking Browse again launches nothing"   "broot --git-ignored --conf" "$CALLS"
 refute "...and disposes of nothing"               "kill-pane" "$CALLS"
 
 echo
@@ -1690,7 +1690,7 @@ nap 3
 check  "cancel reverted to browse"                '"diffMode":"browse"' "$T/state/terminals.json"
 same   "...and brought the same browser back"     "$(pane_key diff)" "$BR4"
 same   "...and the same viewer"                   "$(pane_key viewer)" "$VW4"
-refute "...without relaunching broot"             "broot --conf" "$CALLS"
+refute "...without relaunching broot"             "broot --git-ignored --conf" "$CALLS"
 check  "...publishing the viewer again"           '"viewerAgent":"abc12345"' "$T/state/panes.json"
 refute "...rather than putting a diff in the slot" "revdiff --wrap" "$CALLS"
 
@@ -1712,7 +1712,7 @@ JSON
 sleep 6
 BR5="$(pane_key diff)"
 check  "the pair followed the agent into the new worktree" "--cwd $MOVED5 --" "$CALLS"
-check  "...and broot was relaunched there"        "broot --conf" "$CALLS"
+check  "...and broot was relaunched there"        "broot --git-ignored --conf" "$CALLS"
 refute "the keyboard was NOT dragged into the new browser" \
                                                   "activate-pane --pane-id $BR5" "$CALLS"
 
@@ -1754,7 +1754,7 @@ DPB="$(pane_key diff)"                    # the second agent's revdiff, before i
 echo diff-browse >> "$T/state/cmd"
 nap 3
 BRB="$(pane_key diff)"; VWB="$(pane_key viewer)"
-check  "the second agent got a pair of ITS OWN"        "broot --conf" "$CALLS"
+check  "the second agent got a pair of ITS OWN"        "broot --git-ignored --conf" "$CALLS"
 same   "...a different browser from the first agent's" \
        "$([ "$BRB" = "$BRA" ] && echo shared || echo separate)" "separate"
 parked "...and its own revdiff parked behind it"       "$DPB"
@@ -1800,7 +1800,7 @@ check  "the slot was rebuilt"                     "rebuilt the diff slot" "$T/da
 check  "the full-width split came off the fleet pane" "--top --percent 42 --pane-id 20" "$CALLS"
 same   "the browsing agent's browser took the placeholder" "$(pane_key diff)" "$BRA"
 same   "...and its viewer came back beside it"             "$(pane_key viewer)" "$VWA"
-refute "neither half was relaunched into the rebuilt slot"  "broot --conf" "$CALLS"
+refute "neither half was relaunched into the rebuilt slot"  "broot --git-ignored --conf" "$CALLS"
 refute "...nor micro"                                       "micro -readonly true" "$CALLS"
 
 echo

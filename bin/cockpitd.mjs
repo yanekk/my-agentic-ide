@@ -660,7 +660,14 @@ function diffCommand(reviewFile, mode, ref) {
 
 /** broot, carrying the cockpit's verb file FIRST in the --conf chain (T03). */
 function browserCommand(worktree, jobId) {
-  return `cd ${JSON.stringify(worktree)} && broot --conf ${JSON.stringify(browseConfChain(os.homedir(), REPO_ROOT))}`
+  // --git-ignored: show git-ignored files by default. broot hides them out of the
+  // box (it respects .gitignore), but browse mode is a tour of the AGENT'S work,
+  // and the agent's most interesting output is often exactly what git ignores --
+  // a build/ or dist/ it just produced. Without this the folder is on disk and in
+  // `ls` but invisible in the tree. A counter-flag exists (-I), so a user who
+  // wants the old behaviour can still toggle it live with alt-i.
+  return `cd ${JSON.stringify(worktree)} && broot --git-ignored`
+       + ` --conf ${JSON.stringify(browseConfChain(os.homedir(), REPO_ROOT))}`
        + ` --listen ${browseSocket(jobId)}`;
 }
 
