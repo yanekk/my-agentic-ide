@@ -528,6 +528,28 @@ Because a session waits for me, a task should rarely *end* with that half unchec
 stays a live state for the minutes between asking and hearing back — not a way to close a
 session with the question still open.
 
+### Say the way back before you change the live world
+
+The test command reaches the code and nothing else. A deploy, a credential, a DNS record, a
+published page, a file on a real device, a resource in a cloud account — these change state
+the tests cannot see. Before an action like that, say in one plain line whether it can be
+taken back and how: "reversible — the old build redeploys in one command", or "not reversible
+— the old token is dead the moment the new one is written."
+
+**The step past a point of no return is a `what`, and `what` is mine.** Stop and ask before
+it, even in auto mode, even when the plan implied it: a rotated credential, a deleted
+resource, a thing other people can now see, a change to a device I would have to be in the
+room to undo. Naming the way back is what turns "I ran the deploy" into "the next step cannot
+be undone — confirm": the decision reaching me while it is still a decision, not a report
+after it.
+
+A reversible action you own like any other `how`: take it, tell me after in one line. It is
+only the irreversible edge that stops for me — a routine redeploy does not.
+
+**When the way back mattered, it goes in `FINDINGS.md` with the date** — the rollback that
+worked, or the step that turned out to have none. A reversibility written down once is one
+nobody rediscovers at the worst moment.
+
 ### Commit messages
 
 ```
