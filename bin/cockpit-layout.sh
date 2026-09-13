@@ -82,6 +82,19 @@ ln -sf "$HERE/cockpit-config.mjs" "$COCKPIT_BIN/config"
 # command line, splits inheriting no environment of their own.
 ln -sf "$HERE/cockpit-open.mjs" "$COCKPIT_BIN/cockpit-open"
 
+# broot's DOUBLE-CLICK is not a verb: broot handles it internally and, for a file,
+# calls the system opener -- `open` on macOS -- which pops the file in a GUI app
+# over the terminal, the very leak the verb file above prevents on Enter. So an
+# `open` shim sits on broot's PATH ahead of /usr/bin/open and reroutes it through
+# cockpit-open (bin/cockpit-browse-open.mjs). It lives in its OWN dir, NOT
+# $COCKPIT_BIN: that dir is on every cockpit terminal's and agent's PATH, and an
+# `open` there would shadow /usr/bin/open everywhere -- the `cal` landmine (DESIGN
+# 2.2). browserCommand in cockpitd.mjs is what puts this dir on broot's PATH, and
+# broot's alone.
+COCKPIT_BROWSE_BIN="$DIR/browse-bin"
+mkdir -p "$COCKPIT_BROWSE_BIN"
+ln -sf "$HERE/cockpit-browse-open.mjs" "$COCKPIT_BROWSE_BIN/open"
+
 # Exported HERE, before anything is spawned, so it reaches (a) the daemon started
 # below, which passes it on to every terminal it opens, and (b) `claude agents` at
 # the foot of this script -- so the AGENTS inherit it too and can leave notes of

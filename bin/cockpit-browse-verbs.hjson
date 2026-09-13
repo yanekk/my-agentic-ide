@@ -20,6 +20,11 @@
 # is the entire reason this file exists. A file kind we failed to name would fall
 # straight back to it.
 #
+# This file binds only ENTER. A DOUBLE-CLICK is not a verb -- broot handles it
+# internally and, for a file, calls the system `open`, bypassing everything here
+# (measured, broot 1.59 source). That route is closed separately, by an `open` shim
+# on broot's PATH: see bin/cockpit-browse-open.mjs.
+#
 # Hjson, not JSON: an unquoted value runs to the END OF THE LINE, so every field
 # must sit on its own line. `{ key: enter, apply_to: text_file }` on one line is a
 # parse error, and broot then refuses to start at all (measured, broot 1.59).

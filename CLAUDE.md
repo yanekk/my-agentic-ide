@@ -127,8 +127,11 @@ arbitrary branch/SHA → working tree (`revdiff --untracked <ref>`, the same sha
 `uncommitted` against a base you name). The fourth, `browse`, is not a diff at all
 but a **read-only tour of the agent's worktree**: it swaps the single revdiff pane
 for a two-pane pair — a `broot` file tree on the left, a read-only `micro` viewer on
-the right — where Enter pushes a text file into the viewer as a new tab (a non-text
-file opens broot's own preview instead). Like the diffs it is **parked, not killed**
+the right — where Enter (or a **double-click**) pushes a text file into the viewer
+as a new tab; on a non-text file Enter opens broot's own preview, while a
+double-click on one does nothing. broot's own double-click would hand the file to a
+macOS app in a window over the terminal, so it is rerouted through an `open` shim on
+broot's PATH (`cockpit-browse-open.mjs`). Like the diffs it is **parked, not killed**
 on a switch, so the tree position and the reader's open tabs survive the return.
 Cycling **into** `custom` pops an ASCII
 "modal" (drawn in the diff pane by `cockpit-custom-prompt.mjs`) that asks for the
@@ -187,6 +190,7 @@ bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): get
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
+bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
 spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)

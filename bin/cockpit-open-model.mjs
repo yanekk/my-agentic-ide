@@ -132,6 +132,30 @@ function normalise(p) {
   return absolute ? `/${joined}` : joined;
 }
 
+// Whether a file's leading bytes look BINARY (non-text). Used only by the
+// double-click path (cockpit-browse-open.mjs) to decide NOT to push a file into the
+// viewer: the user's ruling (2026-09-13) is that a double-clicked non-text file
+// does nothing, because a text reader showing an image's raw bytes is worse than a
+// no-op, and broot's own preview -- what Enter shows for one -- is an INTERNAL verb
+// no external opener can reach.
+//
+// The test is a NUL byte in the sample. It is what git, grep and broot's own
+// content inspection all lean on: no text encoding this project meets (UTF-8,
+// ASCII, Latin-1) contains a NUL, and virtually every binary format carries one
+// near the start. It is only a SAMPLE, so at the margin it can disagree with
+// broot's text/binary verdict on the Enter path -- a file broot calls text that
+// this calls binary simply does nothing on double-click and still opens on Enter,
+// which is a safe direction to be wrong in.
+//
+// Pure like everything else here (DESIGN 3.1): it is handed the bytes and never
+// reads them. The caller owns the filesystem read.
+export function looksBinary(bytes) {
+  const b = bytes || [];
+  const n = Math.min(b.length, 8000);
+  for (let i = 0; i < n; i++) if (b[i] === 0) return true;
+  return false;
+}
+
 function relativise(file, repoRoot) {
   const f = typeof file === "string" ? file : "";
   const root = typeof repoRoot === "string" ? repoRoot : "";

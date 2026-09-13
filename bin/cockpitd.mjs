@@ -395,6 +395,13 @@ const LOGIN_SHELL = process.env.SHELL || "/bin/zsh";
  * inherited copy would otherwise be re-added on every terminal.
  */
 const COCKPIT_BIN = path.join(DIR, "bin");
+// A dir holding ONE thing: an `open` shim that reroutes broot's double-click away
+// from /usr/bin/open and into the viewer (cockpit-browse-open.mjs). Kept OUT of
+// COCKPIT_BIN on purpose -- that one is on every cockpit terminal's and agent's
+// PATH, and an `open` there would shadow /usr/bin/open everywhere (the `cal`
+// landmine, DESIGN 2.2). browserCommand names this dir on broot's launch line and
+// nowhere else, so the shadow reaches broot alone. cockpit-layout.sh builds it.
+const COCKPIT_BROWSE_BIN = path.join(DIR, "browse-bin");
 function spawnTerminal(cwd) {
   const rest = (process.env.PATH ?? "").split(":").filter((p) => p && p !== COCKPIT_BIN);
   return ["--cwd", cwd, "--", "/usr/bin/env",
@@ -658,7 +665,16 @@ function diffCommand(reviewFile, mode, ref) {
 // the tabs and the tree position survive a trip round the cycle.
 // ---------------------------------------------------------------------------
 
-/** broot, carrying the cockpit's verb file FIRST in the --conf chain (T03). */
+/**
+ * broot, carrying the cockpit's verb file FIRST in the --conf chain (T03).
+ *
+ * PATH is prefixed with COCKPIT_BROWSE_BIN so broot's DOUBLE-CLICK, which calls the
+ * system `open` (not a verb -- see cockpit-browse-open.mjs), finds the cockpit's
+ * shim ahead of /usr/bin/open. The prefix rides the `broot` invocation itself, so
+ * it reaches broot and its children (the shim, and the cockpit-open it spawns) and
+ * NOTHING else -- the surrounding shell's PATH is untouched, and no other terminal
+ * ever sees the shadowed `open`.
+ */
 function browserCommand(worktree, jobId) {
   // --git-ignored: show git-ignored files by default. broot hides them out of the
   // box (it respects .gitignore), but browse mode is a tour of the AGENT'S work,
@@ -666,7 +682,7 @@ function browserCommand(worktree, jobId) {
   // a build/ or dist/ it just produced. Without this the folder is on disk and in
   // `ls` but invisible in the tree. A counter-flag exists (-I), so a user who
   // wants the old behaviour can still toggle it live with alt-i.
-  return `cd ${JSON.stringify(worktree)} && broot --git-ignored`
+  return `cd ${JSON.stringify(worktree)} && PATH=${JSON.stringify(COCKPIT_BROWSE_BIN)}:$PATH broot --git-ignored`
        + ` --conf ${JSON.stringify(browseConfChain(os.homedir(), REPO_ROOT))}`
        + ` --listen ${browseSocket(jobId)}`;
 }
