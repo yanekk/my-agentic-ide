@@ -1,0 +1,330 @@
+<title>Usage in the Footer</title>
+<style>
+  :root{
+    --bg:#f4f5f7;
+    --panel:#ffffff;
+    --ink:#1f2430;
+    --muted:#5b6472;
+    --faint:#8a93a3;
+    --line:#e2e5ea;
+    --accent:#4f7cff;
+    --accent-soft:#eaf0ff;
+    /* terminal palette — the footer is a real terminal strip, so it keeps one dark look in both themes */
+    --term-bg:#22262e;
+    --term-edge:#161a20;
+    --term-dim:#7a8493;
+    --term-sep:#4b5563;
+    --term-bright:#d8dee8;
+    --term-name:#f2f5fa;
+    --u-ok:#8fce7a;
+    --u-warn:#e6b862;
+    --u-crit:#e0736f;
+    --u-stale:#6a7382;
+    --u-mark:#8ea2ff;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171c;
+      --panel:#1b1f26;
+      --ink:#e7eaf0;
+      --muted:#9aa3b2;
+      --faint:#727b8a;
+      --line:#2a2f38;
+      --accent:#7d9cff;
+      --accent-soft:#232a3d;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171c;
+    --panel:#1b1f26;
+    --ink:#e7eaf0;
+    --muted:#9aa3b2;
+    --faint:#727b8a;
+    --line:#2a2f38;
+    --accent:#7d9cff;
+    --accent-soft:#232a3d;
+  }
+  *{box-sizing:border-box}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Inter",system-ui,-apple-system,sans-serif;
+    line-height:1.55;
+  }
+  .wrap{max-width:940px;margin:0 auto;padding-block:40px;padding-left:16px;padding-right:16px}
+  .eyebrow{
+    font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;margin:0 0 10px;
+  }
+  h1{
+    font-size:clamp(26px,4.5vw,38px);line-height:1.12;margin:0 0 14px;
+    letter-spacing:-.02em;text-wrap:balance;font-weight:700;
+  }
+  .lede{font-size:17px;color:var(--muted);max-width:60ch;margin:0 0 4px}
+  .note{font-size:13px;color:var(--faint);max-width:62ch;margin:14px 0 0}
+
+  /* schematic cockpit window */
+  .cockpit{
+    margin:30px 0 6px;
+    background:var(--term-bg);
+    border:1px solid var(--term-edge);
+    border-radius:12px;
+    overflow:hidden;
+    box-shadow:0 18px 44px -22px rgba(0,0,0,.5);
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .schematic{padding:10px;display:flex;flex-direction:column;gap:8px}
+  .pane{
+    border:1px dashed #3a414d;border-radius:6px;color:#525b68;
+    font-size:11px;letter-spacing:.03em;padding:9px 11px;
+    display:flex;align-items:flex-start;justify-content:space-between;
+  }
+  .pane.diff{height:74px}
+  .row{display:flex;gap:8px}
+  .row .pane{flex:1}
+  .row .pane.strip{flex:0 0 62px;align-items:stretch}
+  .pane .tag{opacity:.8}
+
+  /* the live footer strip */
+  .foot-shell{background:var(--term-edge);padding:8px}
+  .foot{
+    background:#1c2027;
+    border-top:1px solid #313846;
+    color:var(--term-bright);
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:13px;line-height:1;white-space:nowrap;
+    overflow-x:auto;overflow-y:hidden;
+    padding:11px 12px;
+    display:flex;align-items:center;gap:14px;
+    font-variant-numeric:tabular-nums;
+  }
+  .foot::-webkit-scrollbar{height:6px}
+  .foot::-webkit-scrollbar-thumb{background:#3a4250;border-radius:3px}
+  .seg-name{color:var(--term-name);font-weight:600}
+  .seg-name .cnt{color:var(--term-dim);font-weight:400}
+  .seg-keys{color:var(--term-dim)}
+  .seg-keys b{color:#aeb8c6;font-weight:600}
+  .sep{color:var(--term-sep)}
+  .seg-diff .lbl{color:var(--term-dim)}
+  .seg-diff .m{color:var(--term-dim)}
+  .seg-diff .m.on{color:#cdd6e2;text-decoration:underline;text-underline-offset:3px}
+  .spacer{flex:1 1 auto;min-width:12px}
+
+  .seg-usage{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+  .seg-usage .mark{color:var(--u-mark)}
+  .win{display:inline-flex;align-items:center;gap:5px}
+  .win .k{color:var(--term-dim)}
+  .win .v{font-weight:600}
+  .win .rs{color:var(--term-dim);font-weight:400}
+  .bars{letter-spacing:1px}
+  .u-ok{color:var(--u-ok)}
+  .u-warn{color:var(--u-warn)}
+  .u-crit{color:var(--u-crit)}
+  .stale{color:var(--u-stale)!important;font-style:italic}
+  .stale .v,.stale .k,.stale .rs,.stale .mark,.stale .bars{color:var(--u-stale)!important;font-style:italic}
+  .asof{color:var(--u-stale);font-style:italic}
+  .highlight .seg-usage{
+    background:rgba(142,162,255,.13);
+    box-shadow:0 0 0 1px rgba(142,162,255,.35);
+    border-radius:5px;padding:3px 7px;margin:-3px 0;
+  }
+  .hiddenpill{color:var(--term-dim);font-style:italic}
+
+  /* controls */
+  .controls{
+    margin:26px 0 0;display:grid;gap:16px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;
+  }
+  .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  .ctl > .lab{
+    flex:0 0 118px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;
+  }
+  .seg{display:inline-flex;flex-wrap:wrap;gap:6px}
+  button.opt{
+    font:inherit;font-size:13px;cursor:pointer;
+    background:transparent;color:var(--muted);
+    border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;transition:.14s;
+  }
+  button.opt:hover{border-color:var(--accent);color:var(--ink)}
+  button.opt[aria-pressed="true"]{
+    background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600;
+  }
+  .check{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}
+  .check input{width:16px;height:16px;accent-color:var(--accent)}
+  .statecap{
+    margin-top:2px;font-size:13px;color:var(--muted);
+    min-height:1.5em;
+  }
+  .statecap b{color:var(--ink);font-weight:600}
+
+  .legend{
+    margin:34px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
+  }
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 16px}
+  .card h3{margin:0 0 6px;font-size:14px;letter-spacing:.02em}
+  .card p{margin:0;font-size:13px;color:var(--muted)}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}
+  footer.meta{margin:34px 0 0;font-size:12px;color:var(--faint);border-top:1px solid var(--line);padding-top:16px}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<div class="wrap">
+  <p class="eyebrow">Cockpit · prototype</p>
+  <h1>Claude usage, down in the footer bar</h1>
+  <p class="lede">The always-visible bottom strip picks up your real session (5-hour) and weekly limit
+    — but only on your personal subscription. On a company work session the numbers don't exist, so the strip just shows what it shows today.</p>
+  <p class="note">This is a throwaway mock to settle the direction, not the real thing. The percentages, agent name and reset times are made up. Flip the buttons below to see each state and pick the format that feels right.</p>
+
+  <div class="cockpit" id="cockpit">
+    <div class="schematic">
+      <div class="pane diff"><span class="tag">revdiff — the attached agent's diff</span><span class="tag">uncommitted</span></div>
+      <div class="row">
+        <div class="pane"><span class="tag">claude agents (fleet)</span></div>
+        <div class="pane"><span class="tag">shell @ worktree</span></div>
+        <div class="pane strip"><span class="tag">list</span></div>
+      </div>
+    </div>
+    <div class="foot-shell">
+      <div class="foot highlight" id="foot"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="ctl">
+      <span class="lab">State</span>
+      <div class="seg" id="state">
+        <button class="opt" data-v="normal" aria-pressed="true">Normal</button>
+        <button class="opt" data-v="warning" aria-pressed="false">Getting high</button>
+        <button class="opt" data-v="critical" aria-pressed="false">Nearly out</button>
+        <button class="opt" data-v="stale" aria-pressed="false">Stale (in work sessions)</button>
+        <button class="opt" data-v="hidden" aria-pressed="false">Work session (Bedrock)</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="lab">Format</span>
+      <div class="seg" id="format">
+        <button class="opt" data-v="reset" aria-pressed="true">% + reset time</button>
+        <button class="opt" data-v="compact" aria-pressed="false">% only</button>
+        <button class="opt" data-v="bars" aria-pressed="false">Mini gauge</button>
+        <button class="opt" data-v="labeled" aria-pressed="false">Worded</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span class="lab">&nbsp;</span>
+      <label class="check"><input type="checkbox" id="hl" checked> Highlight the new bit</label>
+    </div>
+    <p class="statecap" id="cap"></p>
+  </div>
+
+  <div class="legend">
+    <div class="card">
+      <h3><span class="swatch" style="background:#8fce7a"></span>Plenty left</h3>
+      <p>Under 70% used. Reads quiet — it's not asking for attention.</p>
+    </div>
+    <div class="card">
+      <h3><span class="swatch" style="background:#e6b862"></span>Getting high</h3>
+      <p>70–89%. Amber, so it catches your eye before you're surprised by a cap.</p>
+    </div>
+    <div class="card">
+      <h3><span class="swatch" style="background:#e0736f"></span>Nearly out</h3>
+      <p>90%+. Red. Time to decide whether to push on or wait for the reset.</p>
+    </div>
+    <div class="card">
+      <h3><span class="swatch" style="background:#6a7382"></span>Stale</h3>
+      <p>Dimmed with an "as of" time when no personal session has run recently. The reset time stays right.</p>
+    </div>
+  </div>
+
+  <footer class="meta">Prototype for <b>plans/usage-limits</b> · footer layout mirrors the real cockpit strip · numbers are illustrative</footer>
+</div>
+
+<script>
+  const state = { where:"attached", state:"normal", format:"reset", hl:true };
+
+  const PRESETS = {
+    normal:   { s5:40, s7:61, stale:false },
+    warning:  { s5:52, s7:88, stale:false },
+    critical: { s5:71, s7:96, stale:false },
+    stale:    { s5:40, s7:61, stale:true  },
+    hidden:   { hidden:true }
+  };
+  const CAPS = {
+    normal:   "Both windows have room. The strip stays calm — nothing to act on.",
+    warning:  "Your <b>weekly</b> window is at 88%. Amber flags it while you can still plan around it.",
+    critical: "The <b>weekly</b> window is at 96% — red. This is the moment the bar earns its place.",
+    stale:    "You've been in work sessions for a while, so the reading is frozen at its last value and dimmed with <b>as of 14:05</b>. It only misreads if a window reset while you were away — the reset time itself stays correct.",
+    hidden:   "This is a company Bedrock session. The real numbers don't exist here, so the strip shows exactly what it shows today — <b>no usage segment at all</b>."
+  };
+
+  function cls(p){ return p>=90 ? "u-crit" : p>=70 ? "u-warn" : "u-ok"; }
+  function bars(p){ const n=Math.round(p/20); return "▓".repeat(n)+"░".repeat(5-n); }
+
+  function windowHTML(kind, pct, reset){
+    const c = cls(pct);
+    const f = state.format;
+    if(f==="bars"){
+      return `<span class="win"><span class="k">${kind}</span> <span class="bars ${c}">${bars(pct)}</span> <span class="v ${c}">${pct}%</span></span>`;
+    }
+    if(f==="labeled"){
+      const word = kind==="5h" ? "session" : "week";
+      return `<span class="win"><span class="k">${word}</span> <span class="v ${c}">${pct}%</span></span>`;
+    }
+    if(f==="compact"){
+      return `<span class="win"><span class="k">${kind}</span> <span class="v ${c}">${pct}%</span></span>`;
+    }
+    // reset
+    return `<span class="win"><span class="k">${kind}</span> <span class="v ${c}">${pct}%</span> <span class="rs">↺${reset}</span></span>`;
+  }
+
+  function usageHTML(){
+    const p = PRESETS[state.state];
+    if(p.hidden) return "";
+    const staleCls = p.stale ? " stale" : "";
+    const w5 = windowHTML("5h", p.s5, "15:00");
+    const w7 = windowHTML("7d", p.s7, "Mon 09:00");
+    const asof = p.stale ? ` <span class="asof">· as of 14:05</span>` : "";
+    return `<span class="seg-usage${staleCls}"><span class="mark">◔</span>${w5}${w7}${asof}</span>`;
+  }
+
+  function render(){
+    const foot = document.getElementById("foot");
+    foot.classList.toggle("highlight", state.hl && state.state!=="hidden");
+
+    const name = state.where==="attached"
+      ? `<span class="seg-name">payments-api / oauth-loopback <span class="cnt">· 3 terminals</span></span>`
+      : ``;
+
+    const keys = `<span class="seg-keys"><b>⌥t</b> new <span class="sep">·</span> <b>⌥[ ⌥]</b> switch <span class="sep">·</span> <b>⌥w</b> close <span class="sep">·</span> <b>O</b> send→claude <span class="sep">·</span> <b>drag</b> copy</span>`;
+
+    const diff = `<span class="seg-diff"><span class="lbl">Diff mode:</span> <span class="m on">uncommitted</span> <span class="sep">·</span> <span class="m">lastcommit</span> <span class="sep">·</span> <span class="m">custom</span> <span class="sep">·</span> <span class="m">browse</span></span>`;
+
+    const usage = usageHTML();
+    const usageSlot = usage ? usage : `<span class="hiddenpill">— no usage on this session —</span>`;
+
+    foot.innerHTML = `${name}${keys}${diff}<span class="spacer"></span>${usageSlot}`;
+    // when hidden, drop the placeholder text and just show the real footer
+    if(state.state==="hidden"){
+      foot.innerHTML = `${name}${keys}${diff}`;
+    }
+
+    document.getElementById("cap").innerHTML = CAPS[state.state];
+  }
+
+  function wire(id, key){
+    document.getElementById(id).addEventListener("click", e=>{
+      const b = e.target.closest("button.opt"); if(!b) return;
+      state[key] = b.dataset.v;
+      [...e.currentTarget.querySelectorAll("button.opt")].forEach(x=>
+        x.setAttribute("aria-pressed", x===b ? "true":"false"));
+      render();
+    });
+  }
+  wire("state","state"); wire("format","format");
+  document.getElementById("hl").addEventListener("change", e=>{ state.hl = e.target.checked; render(); });
+
+  render();
+</script>
