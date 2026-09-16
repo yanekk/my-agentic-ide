@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Runs | Depends on | State | Notes |
 |---|---|---|---|---|---|
 | T00 | Capture the real `rate_limits` stdin shape | you | — | ⬜ | Hand-verified: needs the user's live subscription. No code. Gates T02's parse and the cache shape. |
-| T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ⬜ | |
+| T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ✅ | |
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ⬜ | Carries the purity grep. Bulk of the logic and tests. |
 | T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ⬜ | |
 | T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ⬜ | Tests use a scratch dir (`COCKPIT_DIR`); the real settings.json edit is T06, human-driven. |
