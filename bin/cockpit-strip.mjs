@@ -24,6 +24,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+// The footer's usage segment reads the cache (store) and asks the pure model what
+// to draw (T05). The model returns semantic roles, never ANSI, so the colour is
+// applied here in the display layer -- and the clock (Date.now) is read here too,
+// then handed to the model as an argument (DESIGN 3.1, 3.4).
+import { readCache } from "./cockpit-usage-store.mjs";
+import { renderUsage } from "./cockpit-usage-model.mjs";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
@@ -149,6 +155,24 @@ function schedulePin() {
 let hitZones = [];
 let footerAttached = false;
 
+// --- the usage readout: the pure model's roles turned into terminal colour ---
+// The model (T02) decides WHAT to show -- percent, role, reset, staleness; the
+// strip only turns its semantic `role` into an ANSI colour here (DESIGN 2.3, 3.3).
+// STALE overrides every role colour with one dim style across the WHOLE segment --
+// the mark, both windows and the "as of" stamp -- so a frozen reading reads as
+// frozen, never as a fresh red; the approved prototype does the same (DESIGN 2.4).
+const USAGE_COLOR = { ok: `${ESC}32m`, warn: `${ESC}33m`, crit: `${ESC}31m` };
+function formatUsage(u) {
+  // A window is "5h NN% ↺<reset>"; fresh, the whole window carries its role colour;
+  // stale, it is left plain here and the whole segment is dimmed below.
+  const win = (w) => {
+    const text = `${w.key} ${w.pct}% ↺${w.reset}`;
+    return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
+  };
+  const body = `◔ ${u.windows.map(win).join("  ")}`;
+  return u.stale ? `${ESC}2m${body} · as of ${u.asOf}${ESC}0m` : body;
+}
+
 // --- the footer: one full-width line of keys, always visible ----------------
 function renderFooter() {
   const { agent, diffMode, customRef, terminals } = read();
@@ -158,49 +182,111 @@ function renderFooter() {
   const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
   // Unattached, the left slot is empty: its old "enter an agent" hint stole the
   // width a long `Custom: <branch>` needs to stay on the one footer line.
-  const left = attached
+  const nameSeg = attached
     ? `${ESC}1m${agent}${ESC}0m${ESC}2m · ${n} terminal${n === 1 ? "" : "s"}${ESC}0m`
     : "";
-  // All three modes are shown with the active one highlighted (reverse video), so
-  // the current range is legible at a glance. It doubles as the hint for ⌥[/⌥],
-  // which switch the mode when the diff pane is focused and terminals otherwise,
-  // and each label is clickable (see the mouse handler below).
-  // Custom carries the agent's base ref inline when it has one, so the reviewer
-  // can see WHAT it is diffing against without opening the prompt.
-  const label = (key) => key === "custom" && customRef ? `Custom: ${customRef}` : DIFF_MODE_LABELS[key];
-  const opt = (key) => key === active
-    ? `${ESC}7m ${label(key)} ${ESC}0m`
-    : `${ESC}2m${label(key)}${ESC}0m`;
-  const keys = [
+  // The key legend split into the primary gestures and the dim secondary ones, so
+  // the secondary group drops first when the line will not fit (DESIGN 2.2).
+  // Concatenated in this order [...PRIMARY, ...SECONDARY] they are byte-for-byte
+  // today's legend, which is what keeps a no-usage footer identical to today's.
+  const PRIMARY = [
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
     `${ESC}1m⌥w${ESC}0m close`,
     `${ESC}1mO${ESC}0m send→claude`,
+  ];
+  const SECONDARY = [
     `${ESC}2m⌥←↑↓→${ESC}0m move`,
     `${ESC}2m⌥z${ESC}0m zoom`,
     `${ESC}2mdrag${ESC}0m copy`,
-  ].join(`${ESC}2m  ·  ${ESC}0m`);
-  const lead = left ? `${left}    ` : "";
+  ];
+  const KEYSEP = `${ESC}2m  ·  ${ESC}0m`;
   // The write homes the cursor then emits a leading space, so visible column 1 is
   // that space -- fold it into `pre` so the measured label columns line up with
-  // what a mouse click reports.
-  const pre = ` ${lead}${keys}    `;
-  const modePrefix = `${ESC}2mDiff mode:${ESC}0m `;
-  const sep = `${ESC}2m | ${ESC}0m`;
-  // Build the diff segment left-to-right, recording where each label sits.
-  let col = vlen(pre) + vlen(modePrefix) + 1;   // 1-indexed column of the first label
-  let diff = modePrefix;
-  const zones = [];
-  DIFF_ORDER.forEach((key, i) => {
-    const seg = opt(key);
-    const w = vlen(seg);
-    zones.push({ key, start: col, end: col + w - 1 });
-    diff += seg;
-    col += w;
-    if (i < DIFF_ORDER.length - 1) { diff += sep; col += vlen(sep); }
-  });
+  // what a mouse click reports. `pre` is byte-for-byte today's when the full key
+  // list and the name are kept.
+  const buildPre = (keys, withName) => {
+    const lead = withName && nameSeg ? `${nameSeg}    ` : "";
+    return ` ${lead}${keys.join(KEYSEP)}${keys.length ? "    " : ""}`;
+  };
+  // All modes are shown with the active one highlighted (reverse video), so the
+  // current range is legible at a glance. It doubles as the hint for ⌥[/⌥], and
+  // each label is clickable (see the mouse handler below). Custom carries the
+  // agent's base ref inline when it has one. The hit zones are computed from the
+  // FINAL `pre`, so any trimming that shifts the labels left keeps the recorded
+  // click columns correct (DESIGN 2.2).
+  const label = (key) => key === "custom" && customRef ? `Custom: ${customRef}` : DIFF_MODE_LABELS[key];
+  const opt = (key) => key === active
+    ? `${ESC}7m ${label(key)} ${ESC}0m`
+    : `${ESC}2m${label(key)}${ESC}0m`;
+  const buildDiff = (pre) => {
+    const modePrefix = `${ESC}2mDiff mode:${ESC}0m `;
+    const sep = `${ESC}2m | ${ESC}0m`;
+    let col = vlen(pre) + vlen(modePrefix) + 1;   // 1-indexed column of the first label
+    let diff = modePrefix;
+    const zones = [];
+    DIFF_ORDER.forEach((key, i) => {
+      const seg = opt(key);
+      const w = vlen(seg);
+      zones.push({ key, start: col, end: col + w - 1 });
+      diff += seg;
+      col += w;
+      if (i < DIFF_ORDER.length - 1) { diff += sep; col += vlen(sep); }
+    });
+    return { diff, zones };
+  };
+
+  // The usage readout (DESIGN 2.2-2.4). null -> nothing to show (no reading yet,
+  // corrupt cache, or a company Bedrock session that never wrote one): the footer
+  // is byte-for-byte today's, no segment and no trimming (DESIGN 2.n, a "Done when"
+  // the suite asserts). The clock is read HERE and handed to the pure model.
+  const usage = renderUsage(readCache(), Date.now());
+  const usageSeg = usage ? formatUsage(usage) : "";
+
+  // Width for the one-row invariant: the live TTY when there is one, else COLUMNS
+  // (so a piped render with no TTY can still be given a width), else 0 = "unknown,
+  // do not trim".
+  const cols = process.stdout.columns || Number(process.env.COLUMNS) || 0;
+
+  // With a usage segment present it must survive to the far right on ONE row: the
+  // footer already runs ~150 cols before usage, so on a narrow window the whole
+  // line would wrap and break pinHeight's one-row invariant. Drop parts in this
+  // order (DESIGN 2.2) -- the dim secondary key hints, then the primary key hints,
+  // then the agent name -- never the usage readout or the diff labels. Pick the
+  // widest level that fits; a minimum one-space spacer keeps diff and usage apart.
+  let keysKept = [...PRIMARY, ...SECONDARY];
+  let nameKept = true;
+  if (usageSeg && cols > 0) {
+    const levels = [
+      { keys: [...PRIMARY, ...SECONDARY], name: true },
+      { keys: [...PRIMARY], name: true },
+      { keys: [], name: true },
+      { keys: [], name: false },
+    ];
+    let chosen = levels[levels.length - 1];
+    for (const lv of levels) {
+      const p = buildPre(lv.keys, lv.name);
+      const { diff } = buildDiff(p);
+      if (vlen(p) + vlen(diff) + 1 + vlen(usageSeg) <= cols) { chosen = lv; break; }
+    }
+    keysKept = chosen.keys;
+    nameKept = chosen.name;
+  }
+
+  const pre = buildPre(keysKept, nameKept);
+  const { diff, zones } = buildDiff(pre);
   hitZones = zones;
-  process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${ESC}K`);
+
+  if (!usageSeg) {
+    process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${ESC}K`);
+    return;
+  }
+  // Right-align the usage readout: pad so it ends at the window's right edge when
+  // the width is known, else a fixed two-space gap. Never less than one space, so
+  // the diff labels and the usage readout never touch.
+  const used = vlen(pre) + vlen(diff) + vlen(usageSeg);
+  const gap = cols > 0 ? Math.max(1, cols - used) : 2;
+  process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${" ".repeat(gap)}${usageSeg}${ESC}K`);
 }
 
 // A left-click at column `x` on the footer: if it landed on a diff-mode label,
@@ -326,7 +412,9 @@ render();
 enableMouse(FOOTER ? (x) => onFooterClick(x) : onStripClick);
 // Watch the state DIR (not the file): the daemon replaces terminals.json
 // atomically, so a file watch would go deaf after the first rename.
-try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json") render(); }); } catch {}
+// Also watch usage-cache.json (written by the tap): a fresh reading repaints the
+// footer at once, rather than waiting up to 2s for the belt-and-braces interval.
+try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json") render(); }); } catch {}
 process.stdout.on("resize", () => { render(); schedulePin(); });
 setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
 schedulePin();                                        // the pane may open already oversized
