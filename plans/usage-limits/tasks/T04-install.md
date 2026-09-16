@@ -17,7 +17,10 @@ DESIGN §2.6 (registered globally), §2.7 (chain a pre-existing statusline), §6
 ## Files
 
 - `bin/cockpit-usage-tap.mjs` (extend with `--install`/`--uninstall`).
-- `bin/install.sh` (call `cockpit-usage-tap.mjs --install`; relink like the other cockpit bins).
+- `bin/install.sh` (call `cockpit-usage-tap.mjs --install`, right where it calls
+  `cockpit-auto-name.mjs --install`). The tap is invoked by absolute path from settings.json like
+  the auto-name hook, so it needs no PATH symlink — unlike `note`/`agenda`/`config`, which
+  `cockpit-layout.sh` relinks because they must be on a cockpit shell's PATH.
 - Possibly a shared settings-merge helper if one is factored out of `cockpit-auto-name.mjs`;
   otherwise mirror its approach. Read that file's merge before writing this.
 
@@ -41,6 +44,14 @@ Where the recorded prior command lives (a small file in `~/.claude/cockpit/`, e.
 `statusline-prev`) is the implementer's call; it must survive between install and uninstall and
 be per-machine, not in the repo.
 
+This task also owns the **runtime** end of chaining — the tap's step 4 (DESIGN §2.7, T03 defers
+it here). When `statusline-prev` records a foreign command, the tap runs it with the same stdin
+and emits its stdout as the visible statusline, then taps the data on top. With no recorded
+command (the case on this machine, §7) the tap stays empty, which is all T03 tests. Keep it
+simple: read the recorded command, run it, emit its stdout; any error there falls back to empty
+output like every other tap error (T03 step 5). It is tested here with a stub prior command
+rather than left unexercised.
+
 ## Tests
 
 Mirror `spikes/auto-name-test/`'s settings-merge tests; put them in `spikes/usage-test/` or reuse
@@ -53,11 +64,14 @@ that harness.
 - [ ] With no foreign statusLine, `--uninstall` removes the key entirely.
 - [ ] A malformed settings.json → non-zero exit, file untouched.
 - [ ] The write is atomic (temp + rename), mode preserved.
+- [ ] Runtime chaining: with a stub command recorded in `statusline-prev`, the tap runs it with
+      the piped stdin and emits its stdout as the visible line, and still writes the cache on top;
+      a failing stub falls back to empty output (exit 0), not a stack.
 
 ## Done when
 
 - [ ] `--install`/`--uninstall` behave as above and are covered by passing tests.
-- [ ] `bin/install.sh` registers the tap on setup and relinks it alongside the other bins.
+- [ ] `bin/install.sh` registers the tap on setup (by absolute path, beside the auto-name hook).
 - [ ] A malformed settings.json is provably never overwritten.
 - [ ] CLAUDE.md's install description and file map mention the statusline registration and the
       new bins (this doc edit is in scope for this task).

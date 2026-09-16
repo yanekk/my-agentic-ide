@@ -13,7 +13,7 @@ no such session/weekly caps, so those numbers are meaningless there and must nev
 
 ### Success criteria
 
-- On a personal-subscription session, the footer shows `5h NN% ↺HH:MM  7d NN% ↺Ddd HH:MM`
+- On a personal-subscription session, the footer shows `◔ 5h NN% ↺HH:MM  7d NN% ↺Ddd HH:MM`
   with the real numbers, refreshed as the person works.
 - On a company Bedrock session, the footer is exactly what it is today — no usage segment.
 - The numbers are never fetched over the network by this project and never handle a token:
@@ -55,6 +55,17 @@ not today. Percentages are whole numbers.
 Chosen over a bare percentage because the reset time is the number that decides whether to
 wait (§7). The other formats mocked (percent-only, mini gauge, worded) were rejected by the
 user on 2026-09-16 against `plans/usage-limits/prototype/`.
+
+**When the line is too narrow to hold everything, the usage readout wins.** The footer is a
+single row and must never wrap (wrapping breaks the measured one-row invariant `pinHeight`
+defends). With the usage segment on the far right it would otherwise be the first thing clipped,
+so the feature would vanish on any window that is not very wide — the footer already runs ~150+
+columns before usage is added. So the drop order, tightest-space last, is: the **key-legend hints
+go first** (the dim secondary ones — move, zoom, drag — before the primary ⌥t/⌥[/⌥]/⌥w/O), then
+the agent name, and the usage readout and the diff-mode labels are kept longest. The full,
+untrimmed footer still shows whenever the window is wide enough to hold it. Chosen by the user
+2026-09-16 ("drop the shortcuts"): the reset numbers were the point of the feature, the gesture
+hints are the most expendable, and the approved prototype already trimmed move/zoom to make room.
 
 ### 2.3 Colour by how much is left
 
@@ -122,10 +133,11 @@ line, then taps the data on top (§2.n, T04). On this machine there is none toda
 - **Corrupt cache**: the footer reader treats an unparseable cache as absent and shows nothing;
   it never throws and never blanks the rest of the footer. The tap's next write repairs it.
 - **Partial data**: a window that is null or missing is simply not drawn; the other still shows.
-- **Two sessions writing at once**: the cache has one writer semantically but many possible
-  concurrent Claude sessions, so writes are atomic (temp + rename); a reader sees either the old
-  file or the new one, never a half-written one. No lock — an atomic replace is enough for a
-  last-writer-wins cache (matches the bitbucket/agenda cache convention).
+- **Two sessions writing at once**: the global tap means many concurrent Claude sessions may write
+  this cache, so each writer writes its own uniquely-named temp and renames it over the target
+  (§3.5). A reader sees either the old file or a new one, never a half-written one, and two writers
+  never share a temp to scramble. No lock — a per-writer temp plus atomic replace is enough for a
+  last-writer-wins cache.
 - **A statusline command already present**: preserved by chaining, never clobbered (§2.7, T04).
 - **`resets_at` in the past** (Claude Code drops a window once it resets, but a stale cache may
   still hold one): the reader shows the window; the percentage is governed by the staleness
@@ -200,7 +212,15 @@ reading across the 15-minute staleness line without a write.
 ### 3.5 Storage
 
 `~/.claude/cockpit/usage-cache.json`, mode `0600` (it holds account usage figures), lockless,
-one atomic writer at a time by temp-then-rename — the same treatment as `bitbucket-cache.json`.
+written by temp-then-rename — the same shape as `bitbucket-cache.json`, with one difference that
+matters. `bitbucket-cache.json` has a single writer (the daemon), so a fixed `<file>.tmp` is safe;
+this cache is written by the statusline tap, which is registered globally (§2.6) and runs in every
+Claude session, so **many sessions can write it concurrently**. Two writers sharing one `.tmp`
+path would interleave into a torn temp that rename then publishes. So each writer uses a **unique
+temp name** (`<file>.<pid>.<rand>.tmp`) and renames its own temp over the target; the rename is
+atomic and last-writer-wins, and no two writers ever touch the same temp. No lock is needed — the
+per-writer temp plus atomic rename is enough, and the reader tolerates a corrupt file anyway (§2.n)
+so even a lost race degrades to one stale draw, repaired by the next turn.
 
 ```json
 {

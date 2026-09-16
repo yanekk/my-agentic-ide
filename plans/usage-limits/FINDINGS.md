@@ -11,6 +11,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-16 | 📌 | Footer already runs ~150 cols before usage (keys 95 + diff 53); attached with agent name + usage reaches ~237. Usage sits far-right, so it clips first — hence the one-row drop-order rule (DESIGN §2.2): key hints yield, usage kept. |
+| 2026-09-16 | 📌 | Machine re-checked at plan review: Claude Code 2.1.273, node v24.2.0, no `statusLine` in settings.json (clean add), hooks present are `Stop` + `UserPromptSubmit` (both must survive the merge). |
 | 2026-09-16 | 📌 | Subscription session/weekly limits have no public API, no local file, no non-interactive command. The only supported read is Claude Code's statusline `rate_limits` stdin object (v2.1.251+, Pro/Max only). This machine is 2.1.273. |
 | 2026-09-16 | 📌 | Raw endpoint `GET api.anthropic.com/api/oauth/usage` (header `anthropic-beta: oauth-2025-04-20`, `User-Agent: claude-code/<ver>` or it 429s) returns the same numbers with `utilization`/ISO timestamps. Deferred as Method 2 (DESIGN §8), not used. |
 | 2026-09-16 | 📌 | statusline stdin field names differ from the raw endpoint: `used_percentage` (0–100) and `resets_at` (epoch seconds), under `rate_limits.five_hour`/`.seven_day`. T00 confirms this on the live machine before T02 parses it. |

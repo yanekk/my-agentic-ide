@@ -28,6 +28,11 @@ Automated: none — the other tasks carry the automated proof. This task is the 
 - [ ] The user confirms a company Bedrock session shows no usage segment.
 - [ ] The user confirms the reading dims with `· as of HH:MM` after ~15 min without a personal
       turn (or this is noted as observed-later if the sitting can't wait).
+- [ ] The user confirms the `◔` and `↺` glyphs render as real characters in the actual terminal
+      font, not tofu boxes (they were only ever seen in the browser prototype until now).
+- [ ] The user confirms that registering the tap globally did not put an unwanted blank/replaced
+      status line inside ordinary (non-cockpit) Claude sessions, and adds no noticeable lag — the
+      tap is meant to be invisible and harmless everywhere it runs (DESIGN §2.6, §2.7).
 - [ ] Each confirmation is written to FINDINGS.md as a ✅ row with today's date.
 
 ## Needs a person
@@ -45,6 +50,8 @@ bin/cockpit-usage-tap.mjs --install
 Expect: on the personal session the footer's far right shows `◔ 5h NN% ↺HH:MM  7d NN% ↺Ddd HH:MM`
 with plausible numbers; on the Bedrock session, no usage segment at all.
 Tell me: the two things you see (personal: the segment and roughly its numbers/colour; Bedrock:
-that it is absent), and — if you can leave a personal session idle ~15 min — whether it dims with
-an "as of" stamp. This is the live-world step, so it stops here and waits for your answer rather
-than being marked done on the strength of the build.
+that it is absent); whether the `◔` and `↺` show as real glyphs or as blank/tofu boxes; whether
+any ordinary (non-cockpit) Claude session now shows an unwanted blank status line at its bottom;
+and — if you can leave a personal session idle ~15 min — whether it dims with an "as of" stamp.
+This is the live-world step, so it stops here and waits for your answer rather than being marked
+done on the strength of the build.

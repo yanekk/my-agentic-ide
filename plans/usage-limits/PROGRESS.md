@@ -8,13 +8,13 @@ touching the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. The cell is an index; the account is the
 commit message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan usage-limits` before the first `/pir-work`
+**Plan reviewed:** 2026-09-16 — 6 fixed, 1 decided with the user
 
-**Status:** Plan written 2026-09-16, direction confirmed against the prototype. Nothing built.
-Awaiting the plan review before any task starts.
+**Status:** Plan written 2026-09-16, direction confirmed against the prototype, reviewed
+2026-09-16. Nothing built.
 **Last updated:** 2026-09-16
-**Next `pir-work` will:** nothing yet — `/pir-review-plan usage-limits` must run first. After
-that, implement T00 (the only task with no dependencies and the one that gates the cache shape).
+**Next `pir-work` will:** implement T00 (the only task with no dependencies and the one that gates
+the cache shape). T00 is hand-verified — it needs the user's live subscription.
 
 ## Tasks
 
