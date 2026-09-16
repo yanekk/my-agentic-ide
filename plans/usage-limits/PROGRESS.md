@@ -10,10 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-16 — 6 fixed, 1 decided with the user
 
-**Status:** T00, T01, T02 done. T05 implemented, awaiting review. T03/T04 not started.
-**Last updated:** 2026-09-16
-**Next `pir-work` will:** review T05 (the only 🔍). Then T03/T04 (auto) and, once T04+T05 are ✅,
-the hand-verified T06 on the live subscription.
+**Status:** T00, T01, T02, T05 done. T03/T04 not started.
+**Last updated:** 2026-09-17
+**Next `pir-work` will:** implement T03 (auto), then T04 (auto). Once T04 is ✅, the hand-verified
+T06 on the live subscription (needs T05, now ✅).
 
 ## Tasks
 
@@ -27,10 +27,10 @@ done · ⛔ blocked, needs a human.
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ✅ | |
 | T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ⬜ | |
 | T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ⬜ | Tests use a scratch dir (`COCKPIT_DIR`); the real settings.json edit is T06, human-driven. |
-| T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | 🔍 | `readCache`→`renderUsage`→ANSI, far-right, dimmed when stale; watches `usage-cache.json`; narrow window drops key hints (secondary, then primary, then name) to keep usage one row. 16 checks in cockpit-test §12b (539 total green). Deviation from the non-binding prototype: whole window carries the role colour (task interface), not only the %. Also copied the two usage siblings beside the click-test's strip copy so its relative imports resolve. |
+| T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ✅ | Reviewed clean, no fix commit. §12b's six cases assert real ANSI (roles green/amber/red, stale dim + colour-suppression), watch filter, narrow one-row width. Probed: no-usage byte-for-byte via §12 click tests, trim picks widest fitting level, gap fills to `cols` (no wrap), hit-zones from trimmed pre; purity held (clock in strip, model pure). Suites green (539+usage). |
 | T06 | Install and verify on the live subscription | you | T04, T05 | ⬜ | Hand-verified with the user. No code; the automated half is green from the other tasks, this half is real-world only. |
 
-**Review queue:** T05
+**Review queue:** (empty)
 
 ## Blocked on the user
 
