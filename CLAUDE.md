@@ -163,7 +163,9 @@ makes typing-without-submitting possible.
 
 Once per machine: `bin/install.sh`. It checks the seven tools, records where this
 checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
-registers the session-naming hook in `~/.claude/settings.json`.
+registers two things in `~/.claude/settings.json`: the session-naming hook and the
+usage statusline (`cockpit-usage-tap.mjs`, which feeds the footer's usage segment;
+reversible with `cockpit-usage-tap.mjs --uninstall`).
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
 remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
 
@@ -188,6 +190,9 @@ bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events RE
 bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, age+NEW/ACTIVE/STALE tags, summarizeDiffstat, paginate, two-line render + press emphasis, hit-zones
 bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments, listPRDiffstat
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
+bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what the footer's usage segment draws)
+bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer temp so concurrent sessions don't tear it)
+bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest

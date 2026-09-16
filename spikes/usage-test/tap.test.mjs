@@ -185,4 +185,67 @@ section("the script itself: exit 0 and empty stdout on every path");
   eq("the default visible statusline is empty", good.out, "");
 }
 
+// --- 8. runtime chaining of a recorded foreign statusline (DESIGN 2.7) ----------
+section("a recorded foreign statusline is chained onto the visible line");
+{
+  // A stub standing in for a statusline the user already had. It reads the piped
+  // stdin and echoes it back behind a marker, so the assertions prove both that its
+  // stdout becomes the visible line AND that the tap piped Claude Code's JSON to it.
+  function recordPrev(dir, command) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "statusline-prev"),
+      JSON.stringify({ type: "command", command }, null, 2) + "\n");
+  }
+  function stub(dir, body) {
+    const p = path.join(dir, "prev-statusline.sh");
+    fs.writeFileSync(p, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    fs.chmodSync(p, 0o755);
+    return p;
+  }
+
+  { // The chained command's stdout is emitted, and the cache is still written on top.
+    const dir = scratch();
+    const s = stub(dir, `IN=$(cat); printf 'chained:%s' "$IN"`);
+    recordPrev(dir, s);
+    const line = runTap({ env: {}, stdinText: JSON.stringify(SAMPLE), now: NOW, dir });
+    ok("the chained command's stdout is the visible line", line.startsWith("chained:"), line);
+    ok("...and the tap piped Claude Code's stdin to it", line.includes('"s1"'), line);
+    eq("the data is still tapped on top of the chained line", readCache(dir)?.fiveHour,
+       { usedPct: 62, resetsAt: R5 });
+  }
+
+  { // A chained command that fails falls back to empty output; the cache still writes.
+    const dir = scratch();
+    recordPrev(dir, "false");   // /usr/bin/false: always exits non-zero
+    let threw = false, line;
+    try { line = runTap({ env: {}, stdinText: JSON.stringify(SAMPLE), now: NOW, dir }); }
+    catch { threw = true; }
+    ok("a failing chained command does not throw", !threw);
+    eq("a failing chained command falls back to empty output", line, "");
+    ok("...but the data is still tapped", readCache(dir) !== null);
+  }
+
+  { // The foreign statusline is chained even on a Bedrock session (it is unrelated to
+    // usage), but no usage cache is written there.
+    const dir = scratch();
+    const s = stub(dir, `printf 'bedrock-prev'`);
+    recordPrev(dir, s);
+    const line = runTap({
+      env: { CLAUDE_CODE_USE_BEDROCK: "1" },
+      stdinText: JSON.stringify(SAMPLE), now: NOW, dir,
+    });
+    eq("a Bedrock session still shows the chained statusline", line, "bedrock-prev");
+    eq("...but writes no usage cache", readCache(dir), null);
+  }
+
+  { // A malformed statusline-prev is ignored, not a crash: empty line, cache written.
+    const dir = scratch();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "statusline-prev"), "not json {{{");
+    const line = runTap({ env: {}, stdinText: JSON.stringify(SAMPLE), now: NOW, dir });
+    eq("a corrupt statusline-prev chains nothing", line, "");
+    ok("...and the data is still tapped", readCache(dir) !== null);
+  }
+}
+
 done();
