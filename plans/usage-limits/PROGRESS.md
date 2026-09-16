@@ -11,10 +11,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-09-16 — 6 fixed, 1 decided with the user
 
 **Status:** Plan written 2026-09-16, direction confirmed against the prototype, reviewed
-2026-09-16. Nothing built.
+2026-09-16. T00 verified with the user; the `rate_limits` shape is captured and recorded.
 **Last updated:** 2026-09-16
-**Next `pir-work` will:** implement T00 (the only task with no dependencies and the one that gates
-the cache shape). T00 is hand-verified — it needs the user's live subscription.
+**Next `pir-work` will:** implement T01 and T02 (T02 now has its confirmed parse shape from T00).
 
 ## Tasks
 
@@ -23,7 +22,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Runs | Depends on | State | Notes |
 |---|---|---|---|---|---|
-| T00 | Capture the real `rate_limits` stdin shape | you | — | ⬜ | Hand-verified: needs the user's live subscription. No code. Gates T02's parse and the cache shape. |
+| T00 | Capture the real `rate_limits` stdin shape | you | — | ✅ | ✅ 2026-09-16. Live capture (49 renders, personal Pro/Max): `rate_limits.five_hour`/`.seven_day`, each `{used_percentage` float 0–100, `resets_at` epoch **seconds**`}`, present from first render. User confirmed via matching usage UI. T02 parses this shape. No code; probe removed. |
 | T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ⬜ | |
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ⬜ | Carries the purity grep. Bulk of the logic and tests. |
 | T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ⬜ | |
