@@ -24,14 +24,14 @@ done · ⛔ blocked, needs a human.
 | # | Task | Runs | Depends on | State | Notes |
 |---|---|---|---|---|---|
 | T00 | Capture the real `rate_limits` stdin shape | you | — | ⬜ | Hand-verified: needs the user's live subscription. No code. Gates T02's parse and the cache shape. |
-| T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ⬜ | |
+| T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | 🔍 | Built `readCache`/`writeCache`; per-writer temp `<file>.<pid>.<rand>.tmp` (not fixed), 0600, atomic. `readCache`→null on absent/empty/corrupt, tolerates one null window. New `spikes/usage-test/` (harness, run.sh, store.test.mjs), 13 checks green. run.sh auto-globs future `*.test.mjs`. No deviations. |
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ⬜ | Carries the purity grep. Bulk of the logic and tests. |
 | T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ⬜ | |
 | T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ⬜ | Tests use a scratch dir (`COCKPIT_DIR`); the real settings.json edit is T06, human-driven. |
 | T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ⬜ | Off the critical path; parallel with T03/T04. |
 | T06 | Install and verify on the live subscription | you | T04, T05 | ⬜ | Hand-verified with the user. No code; the automated half is green from the other tasks, this half is real-world only. |
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 
