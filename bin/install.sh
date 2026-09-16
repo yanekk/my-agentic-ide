@@ -210,6 +210,31 @@ else
     [ -n "$NAMING" ] && ok "$NAMING_PLAN"
 fi
 
+# --- 3c. plan the usage statusline -----------------------------------------
+#
+# Registered as the statusLine command in ~/.claude/settings.json, by absolute
+# path -- so, like the naming hook and unlike note/agenda/config, it needs no PATH
+# symlink; Claude Code invokes it directly. It runs on EVERY session (the limit is
+# account-wide), does nothing on a company Bedrock session, and stays silent unless
+# a pre-existing statusline was recorded to chain. cockpit-usage-tap.mjs owns the
+# merge (--install), so the tests drive the same code path this does.
+USAGE="$REPO/bin/cockpit-usage-tap.mjs"
+say ""
+say "${bold}usage statusline${off} ${dim}(~/.claude/settings.json)${off}"
+if [ ! -f "$USAGE" ]; then
+    warn "cockpit-usage-tap.mjs is missing -- skipping"
+    USAGE=""
+elif ! command -v node >/dev/null 2>&1; then
+    warn "no node on this PATH -- skipping (it is checked above)"
+    USAGE=""
+else
+    USAGE_PLAN="$(node "$USAGE" --check 2>&1)" || {
+        warn "$USAGE_PLAN"
+        USAGE=""
+    }
+    [ -n "$USAGE" ] && ok "$USAGE_PLAN"
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
     say ""
     say "--check: nothing written."
@@ -245,6 +270,16 @@ if [ -n "$NAMING" ]; then
         ok "$OUT"
     else
         warn "could not register the naming hook: $OUT"
+    fi
+fi
+
+# Idempotent and self-repointing like the naming hook: a re-run after a move
+# repairs the statusLine path the same way it repairs config.lua.
+if [ -n "$USAGE" ]; then
+    if OUT="$(node "$USAGE" --install 2>&1)"; then
+        ok "$OUT"
+    else
+        warn "could not register the usage statusline: $OUT"
     fi
 fi
 
