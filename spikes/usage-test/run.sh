@@ -52,6 +52,22 @@ for suite in "$HERE"/*.test.mjs; do
 done
 
 echo
+echo "== the pure model keeps its side of the boundary (DESIGN 3.1) =="
+# The model turns a rate_limits object plus `now` into what the footer draws, and
+# it must do so with no clock, no fs, no network and no env -- `now` arrives as a
+# parameter. If any of these appears the fix is to MOVE THE CODE OUT of the model,
+# never to relax this check: every rule that leaks across the line becomes a rule
+# only a person on a live subscription could verify. `new Date(<arg>)` is allowed;
+# a bare zero-argument `new Date()` is a clock and is not.
+MODEL="$ROOT/bin/cockpit-usage-model.mjs"
+if [ -f "$MODEL" ]; then
+  impure="$(grep -nE 'node:fs|node:http|node:https|node:child_process|fetch\(|Date\.now\(|new Date\(\)|process\.env' "$MODEL" | wc -l | tr -d ' ')"
+  same "the model reaches for nothing impure"      "$impure" "0"
+else
+  echo "  FAIL the pure model bin/cockpit-usage-model.mjs is missing"; fail=1
+fi
+
+echo
 echo "== nothing leaks into the repo, or into your real cockpit dir =="
 # A state file checked into the repo would appear in `revdiff --untracked HEAD` --
 # the very diff an agent is reviewed on -- and would put usage figures in git.
