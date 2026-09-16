@@ -1,6 +1,6 @@
 # T06 — Install and verify on the live subscription
 
-**Phase:** 3 · **Depends on:** T04, T05 · **Weight:** light · **Hand-verified**
+**Phase:** 3 · **Runs:** you · **Depends on:** T04, T05 · **Weight:** light · **Hand-verified**
 
 ## Goal
 

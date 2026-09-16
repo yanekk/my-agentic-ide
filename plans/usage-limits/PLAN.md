@@ -35,9 +35,9 @@ Phase 3  ▸  T06              install and verify on the live subscription    wi
 
 Nothing is designed on top of an assumption that has not been checked on this machine.
 
-| # | Task | Depends on |
-|---|---|---|
-| [T00](tasks/T00-capture-rate-limits.md) | Capture the real `rate_limits` stdin shape from a live session | — |
+| # | Task | Runs | Depends on |
+|---|---|---|---|
+| [T00](tasks/T00-capture-rate-limits.md) | Capture the real `rate_limits` stdin shape from a live session | you | — |
 
 **T00 gates the parse.** If `rate_limits` arrives with `five_hour`/`seven_day` and
 `used_percentage`/`resets_at` as expected, T02's `normalizeRateLimits` and all the tests are
@@ -48,12 +48,12 @@ after the sample is recorded in FINDINGS.
 
 ## Phase 1 — Headless core
 
-| # | Task | Depends on |
-|---|---|---|
-| [T01](tasks/T01-usage-store.md) | `cockpit-usage-store.mjs` — read/write the cache, atomic, 0600 | — |
-| [T02](tasks/T02-usage-model.md) | `cockpit-usage-model.mjs` — normalize + `renderUsage`, pure, + purity grep | T00 |
-| [T03](tasks/T03-usage-tap.md) | `cockpit-usage-tap.mjs` — the statusline command, gate + write | T00, T01, T02 |
-| [T04](tasks/T04-install.md) | Register the statusline in settings.json; `--install`/`--uninstall`; wire into `bin/install.sh` | T03 |
+| # | Task | Runs | Depends on |
+|---|---|---|---|
+| [T01](tasks/T01-usage-store.md) | `cockpit-usage-store.mjs` — read/write the cache, atomic, 0600 | auto | — |
+| [T02](tasks/T02-usage-model.md) | `cockpit-usage-model.mjs` — normalize + `renderUsage`, pure, + purity grep | auto | T00 |
+| [T03](tasks/T03-usage-tap.md) | `cockpit-usage-tap.mjs` — the statusline command, gate + write | auto | T00, T01, T02 |
+| [T04](tasks/T04-install.md) | Register the statusline in settings.json; `--install`/`--uninstall`; wire into `bin/install.sh` | auto | T03 |
 
 At the end of Phase 1: a personal session's numbers land in `usage-cache.json`, a company
 session writes nothing, and the registration is installed and reversible — all provable without
@@ -61,18 +61,18 @@ a footer.
 
 ## Phase 2 — The footer
 
-| # | Task | Depends on |
-|---|---|---|
-| [T05](tasks/T05-footer-segment.md) | `cockpit-strip.mjs` draws the usage segment; watches the cache | T01, T02 |
+| # | Task | Runs | Depends on |
+|---|---|---|---|
+| [T05](tasks/T05-footer-segment.md) | `cockpit-strip.mjs` draws the usage segment; watches the cache | auto | T01, T02 |
 
 At the end of Phase 2: the footer shows whatever is in the cache, formatted and coloured, dims
 when stale, shows nothing when absent — proven in `spikes/cockpit-test/` with seeded caches.
 
 ## Phase 3 — Verify on the real subscription
 
-| # | Task | Depends on |
-|---|---|---|
-| [T06](tasks/T06-verify.md) | Install, and verify the real numbers on a live personal session and a Bedrock session | T04, T05 |
+| # | Task | Runs | Depends on |
+|---|---|---|---|
+| [T06](tasks/T06-verify.md) | Install, and verify the real numbers on a live personal session and a Bedrock session | you | T04, T05 |
 
 At the end of Phase 3: seen working by hand, recorded in FINDINGS with the date.
 
@@ -86,6 +86,21 @@ T00 → T02 → T03 → T04 → T06
 
 T01 is off the path (needed by T03 and T05 but small and independent). T05 depends only on T01
 and T02, so it can be built in parallel with T03/T04; T06 needs both branches done.
+
+## How this runs in parallel
+
+Two task kinds. `auto` tasks (T01–T05) are built by a worker and reviewed by a fresh session;
+`you` tasks (T00, T06) run the `pir-verify` procedure — a worker sets up and tears down, a person
+judges, no review, straight to merge. Dispatch is driven by the `Depends on` column, not by phase
+order: the coordinator starts every task whose dependencies are done, so T01 and the T00 capture
+can start at once, and T05 builds alongside T03/T04.
+
+T00 and T06 both need the one live personal subscription (T06 also a real Bedrock session), so the
+run **parks** on each until the person is free — no fake dependency serialises them, and nothing
+before T02 waits on anything but the T00 capture landing in FINDINGS. The one live edit to the
+real `~/.claude/settings.json` happens only inside T06's person-driven block (T04's own tests use a
+`COCKPIT_DIR` scratch dir), so the reversibility seatbelt (`--uninstall`, DESIGN §6) is exercised
+in exactly one human-driven task.
 
 ## Rough sizing
 

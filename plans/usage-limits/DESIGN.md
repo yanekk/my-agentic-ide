@@ -343,3 +343,23 @@ turn rewrites it.
   its visible output, but the person asked for the cockpit footer; the tap stays silent (§2.7).
 - **Any Bedrock/company usage readout.** Bedrock has no session/weekly caps; there is nothing to
   show and it must not appear (§2.5).
+
+## 9. Parallel-run classification
+
+Converted for `/pir-coordinate` on 2026-09-16. Each task carries a `Runs` value in PROGRESS.md
+(`auto` = a worker builds it, a fresh session reviews it; `you` = the `pir-verify` procedure, a
+person judges, no review, straight to merge).
+
+- **T00 and T06 are `you`** — the two rows of the §5.1 "cannot be tested automatically" table live
+  entirely in these two tasks, and neither carries code. T00 captures the real `rate_limits` shape
+  with a throwaway probe (deleted after); T06 installs on the real machine and confirms the footer.
+  No fold-or-split was needed: the plan already isolated both live-world checks into their own
+  code-free tasks, so there was no task that was both code and a mandatory human check.
+- **T01–T05 are `auto`** — code proven by `spikes/usage-test/` and `spikes/cockpit-test/` against
+  the T00-captured sample, synthetic inputs and seeded caches. None performs a live action.
+- **The seatbelts survive parallelism.** The one live-world change — editing the real global
+  `~/.claude/settings.json` — is confined to T06's person-driven block. T04 builds and tests the
+  `--install`/`--uninstall` merge only against a `COCKPIT_DIR` scratch dir (§5.2), and the
+  `--uninstall` reversibility (§6) is exercised for real only in that one human-driven task. No
+  `you` task is serialised behind another by a fake dependency; both simply park on the single live
+  subscription until the person is free.

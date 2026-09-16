@@ -1,6 +1,6 @@
 # T00 — Capture the real `rate_limits` stdin shape
 
-**Phase:** 0 · **Depends on:** — · **Weight:** light · **Throwaway**
+**Phase:** 0 · **Runs:** you · **Depends on:** — · **Weight:** light · **Throwaway**
 
 ## Goal
 

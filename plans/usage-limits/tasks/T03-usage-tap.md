@@ -1,6 +1,6 @@
 # T03 — `cockpit-usage-tap.mjs` (the statusline command)
 
-**Phase:** 1 · **Depends on:** T00, T01, T02 · **Weight:** medium
+**Phase:** 1 · **Runs:** auto · **Depends on:** T00, T01, T02 · **Weight:** medium
 
 ## Goal
 

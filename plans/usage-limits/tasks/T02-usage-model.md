@@ -1,6 +1,6 @@
 # T02 — `cockpit-usage-model.mjs` (pure)
 
-**Phase:** 1 · **Depends on:** T00 · **Weight:** medium
+**Phase:** 1 · **Runs:** auto · **Depends on:** T00 · **Weight:** medium
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # T05 — The footer usage segment
 
-**Phase:** 2 · **Depends on:** T01, T02 · **Weight:** light
+**Phase:** 2 · **Runs:** auto · **Depends on:** T01, T02 · **Weight:** light
 
 ## Goal
 

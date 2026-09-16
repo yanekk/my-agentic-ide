@@ -1,6 +1,6 @@
 # T04 — Register the statusline in settings.json
 
-**Phase:** 1 · **Depends on:** T03 · **Weight:** medium
+**Phase:** 1 · **Runs:** auto · **Depends on:** T03 · **Weight:** medium
 
 ## Goal
 

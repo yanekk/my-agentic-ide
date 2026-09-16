@@ -1,6 +1,6 @@
 # T01 — `cockpit-usage-store.mjs`
 
-**Phase:** 1 · **Depends on:** — · **Weight:** light
+**Phase:** 1 · **Runs:** auto · **Depends on:** — · **Weight:** light
 
 ## Goal
 

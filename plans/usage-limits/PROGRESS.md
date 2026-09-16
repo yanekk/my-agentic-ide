@@ -21,15 +21,15 @@ the cache shape). T00 is hand-verified — it needs the user's live subscription
 Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review · ✅ reviewed and
 done · ⛔ blocked, needs a human.
 
-| # | Task | Depends on | State | Notes |
-|---|---|---|---|---|
-| T00 | Capture the real `rate_limits` stdin shape | — | ⬜ | Hand-verified: needs the user's live subscription. Gates T02's parse and the cache shape. |
-| T01 | `cockpit-usage-store.mjs` (cache read/write) | — | ⬜ | |
-| T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | T00 | ⬜ | Carries the purity grep. Bulk of the logic and tests. |
-| T03 | `cockpit-usage-tap.mjs` (statusline command) | T00, T01, T02 | ⬜ | |
-| T04 | Register statusline in settings.json (`--install`/`--uninstall`) | T03 | ⬜ | |
-| T05 | Footer usage segment in `cockpit-strip.mjs` | T01, T02 | ⬜ | Off the critical path; parallel with T03/T04. |
-| T06 | Install and verify on the live subscription | T04, T05 | ⬜ | Hand-verified with the user. Automated half is green from the other tasks; this half is real-world only. |
+| # | Task | Runs | Depends on | State | Notes |
+|---|---|---|---|---|---|
+| T00 | Capture the real `rate_limits` stdin shape | you | — | ⬜ | Hand-verified: needs the user's live subscription. No code. Gates T02's parse and the cache shape. |
+| T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ⬜ | |
+| T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ⬜ | Carries the purity grep. Bulk of the logic and tests. |
+| T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ⬜ | |
+| T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ⬜ | Tests use a scratch dir (`COCKPIT_DIR`); the real settings.json edit is T06, human-driven. |
+| T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ⬜ | Off the critical path; parallel with T03/T04. |
+| T06 | Install and verify on the live subscription | you | T04, T05 | ⬜ | Hand-verified with the user. No code; the automated half is green from the other tasks, this half is real-world only. |
 
 **Review queue:** *(empty)*
 
