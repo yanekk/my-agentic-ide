@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-16 — 6 fixed, 1 decided with the user
 
-**Status:** T00–T02 done. T03 implemented, awaiting review.
+**Status:** T00–T03 done. T04 and T05 next (parallel, both off the live path).
 **Last updated:** 2026-09-16
-**Next `pir-work` will:** review T03 (`cockpit-usage-tap.mjs`).
+**Next `pir-work` will:** implement T04 (`--install`/`--uninstall`) or T05 (footer segment).
 
 ## Tasks
 
@@ -24,12 +24,12 @@ done · ⛔ blocked, needs a human.
 | T00 | Capture the real `rate_limits` stdin shape | you | — | ✅ | |
 | T01 | `cockpit-usage-store.mjs` (cache read/write) | auto | — | ✅ | |
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ✅ | |
-| T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | 🔍 | Built the tap: Bedrock gate → normalize (T02) → writeCache (T01), empty stdout and exit 0 on every path. 28 tests (in-process runTap + subprocess exit-0 contract) in `tap.test.mjs`. No deviations. `--install`/`--uninstall` left for T04. |
+| T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ✅ | Clean, no fix. All 7 task cases assert real behaviour (gutting the tap fails them). Bedrock gate first, skips inspection; no-clobber holds for absent/empty rate_limits; exit-0/empty on every path incl. unwritable dir; clock read in tap, model pure. Probed JSON primitives/arrays as stdin → all "". usage-test 63 green. |
 | T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ⬜ | Tests use a scratch dir (`COCKPIT_DIR`); the real settings.json edit is T06, human-driven. |
 | T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ⬜ | Off the critical path; parallel with T03/T04. |
 | T06 | Install and verify on the live subscription | you | T04, T05 | ⬜ | Hand-verified with the user. No code; the automated half is green from the other tasks, this half is real-world only. |
 
-**Review queue:** T03
+**Review queue:** (empty)
 
 ## Blocked on the user
 
