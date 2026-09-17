@@ -10,11 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-16 — 6 fixed, 1 decided with the user
 
-**Status:** Plan written 2026-09-16, direction confirmed against the prototype, reviewed
-2026-09-16. Nothing built.
-**Last updated:** 2026-09-16
-**Next `pir-work` will:** implement T00 (the only task with no dependencies and the one that gates
-the cache shape). T00 is hand-verified — it needs the user's live subscription.
+**Status:** T00, T01, T02, T05 done. T03/T04 not started.
+**Last updated:** 2026-09-17
+**Next `pir-work` will:** implement T03 (auto), then T04 (auto). Once T04 is ✅, the hand-verified
+T06 on the live subscription (needs T05, now ✅).
 
 ## Tasks
 
@@ -28,10 +27,10 @@ done · ⛔ blocked, needs a human.
 | T02 | `cockpit-usage-model.mjs` (pure: normalize + renderUsage) | auto | T00 | ✅ | |
 | T03 | `cockpit-usage-tap.mjs` (statusline command) | auto | T00, T01, T02 | ✅ | |
 | T04 | Register statusline in settings.json (`--install`/`--uninstall`) | auto | T03 | ✅ | |
-| T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ⬜ | Off the critical path; parallel with T03/T04. |
+| T05 | Footer usage segment in `cockpit-strip.mjs` | auto | T01, T02 | ✅ | Reviewed clean, no fix. §12b asserts real ANSI (role colours, stale dim + colour-suppression), watch filter, narrow one-row width. Probed: no-usage byte-for-byte, trim picks widest fitting level, gap fills to `cols` (no wrap), hit-zones from trimmed pre; purity held (clock in strip, model pure). Suites green (539+usage). |
 | T06 | Install and verify on the live subscription | you | T04, T05 | ⬜ | Hand-verified with the user. No code; the automated half is green from the other tasks, this half is real-world only. |
 
-**Review queue:** *(empty)*
+**Review queue:** (empty)
 
 ## Blocked on the user
 

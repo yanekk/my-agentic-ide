@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-16 | 📌 | T05: `cockpit-strip.mjs` imports its usage siblings by relative path. The cockpit-test §12 click test runs a COPY of the strip in a temp dir, so it must copy `cockpit-usage-store.mjs`/`-model.mjs` beside it or node dies on the missing import before reading a click. |
 | 2026-09-16 | 📌 | T03 review clean. Tap's main-module guard uses `new URL(import.meta.url).pathname` (copied from `cockpit-auto-name.mjs`, not `fileURLToPath`): a checkout path with a space/unicode would silently disable the hook. Pre-existing, controlled path, left alone. |
 | 2026-09-16 | ✅ | Machine: T00 captured 49 live renders, `rate_limits` on every one from the first — `five_hour`/`seven_day` each `{used_percentage` float 0–100, `resets_at` epoch **seconds**`}`. Person: user confirmed personal Pro/Max; live usage UI (62%/93%) matched the sample. |
 | 2026-09-16 | 📌 | Footer already runs ~150 cols before usage (keys 95 + diff 53); attached with agent name + usage reaches ~237. Usage sits far-right, so it clips first — hence the one-row drop-order rule (DESIGN §2.2): key hints yield, usage kept. |

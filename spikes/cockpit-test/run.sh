@@ -1989,6 +1989,11 @@ else
 # live cockpit running from this very checkout.
 CLICKER="$T/strip-under-test.mjs"
 cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"
+# The strip imports its footer usage siblings by RELATIVE path (T05), so the copy
+# needs them next to it or the node process dies on a missing import before it can
+# read a click. They pull in only node builtins, so copying the two files is enough.
+cp "$ROOT/bin/cockpit-usage-store.mjs" "$T/cockpit-usage-store.mjs"
+cp "$ROOT/bin/cockpit-usage-model.mjs" "$T/cockpit-usage-model.mjs"
 
 footer uncommitted                        # Browse drawn plain, as it would be clicked
 click() {  # click <label>: send a left-click at that label's column, echo the verb
@@ -2014,6 +2019,81 @@ same "clicking Last Commit still appends diff-lastcommit" \
 same "clicking Uncommitted Changes still appends diff-uncommitted" \
                                                   "$(click 'Uncommitted Changes')" "diff-uncommitted"
 fi
+
+echo
+echo "== 12b. the footer's usage segment (T05) =="
+# The footer reads usage-cache.json through the store, asks the pure model what to
+# show, and turns its semantic roles into ANSI colour (DESIGN 2.2-2.4). Rendered
+# directly like section 12 (a separate process off terminals.json), with the cache
+# seeded in $SD -- the strip's COCKPIT_DIR -- so readCache() picks it up. The model
+# reads the clock live, so timestamps are relative to now: fresh = now, stale = 20
+# min ago (past the 15-min window). Reset instants are future; the exact reset
+# STRING is the model's own test, so here only the ↺ mark and percentages are
+# asserted, which keeps these checks off the today-vs-tomorrow boundary.
+NOW_S=$(date +%s)
+NOW_MS=$(( NOW_S * 1000 ))
+STALE_MS=$(( (NOW_S - 1200) * 1000 ))
+R5=$(( NOW_S + 3600 ))
+R7=$(( NOW_S + 3 * 86400 ))
+# Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
+# code points. The legend is full of 1-column BMP glyphs (◔ ↺ ⌥ · →), so code
+# points equal columns here -- which is what the one-row width assertion needs.
+LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
+useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
+# ufooter <mode> <cols>: render one frame at a forced width (no TTY under the pipe,
+# so COLUMNS is how the narrow-window trim is exercised).
+ufooter() {
+  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' "$1" > "$SD/terminals.json"
+  ( COCKPIT_DIR="$SD" COLUMNS="$2" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
+
+# A fresh cache: mark, both windows with their percentages, coloured by role.
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+footer uncommitted
+check  "a fresh cache draws the usage mark"        "◔" "$PLAIN"
+check  "...the 5h window with its percent"         "5h 80% ↺" "$PLAIN"
+check  "...the 7d window with its percent"         "7d 93% ↺" "$PLAIN"
+check  "a 70-89% window is amber (warn)"           "$(printf '\033[33m5h 80%% ↺')" "$RAW"
+check  "a >=90% window is red (crit)"              "$(printf '\033[31m7d 93%% ↺')" "$RAW"
+
+# An under-70% window is green (the ok role).
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":61,\"resetsAt\":$R7}}"
+footer uncommitted
+check  "an under-70% window is green (ok)"         "$(printf '\033[32m5h 45%% ↺')" "$RAW"
+
+# A stale cache: the WHOLE segment is dimmed and stamped, role colour suppressed.
+useed "{\"writtenAt\":$STALE_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+footer uncommitted
+check  "a stale reading dims the whole segment"    "$(printf '\033[2m◔')" "$RAW"
+check  "...and stamps the write time (as of)"      "· as of " "$PLAIN"
+refute "...role colour suppressed (crit not red)"  "$(printf '\033[31m')" "$RAW"
+
+# An absent cache: no usage segment, and the rest of the footer is today's -- the
+# full legend (incl. the dim secondary hints) is kept, proving nothing was trimmed.
+rm -f "$SD/usage-cache.json"
+footer uncommitted
+refute "an absent cache draws no usage segment"    "◔" "$PLAIN"
+check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
+
+# A cache with one window null draws only the other.
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":null}"
+footer uncommitted
+check  "a null window still draws the other"       "5h 45% ↺" "$PLAIN"
+refute "...and the null window is not drawn"       "7d " "$PLAIN"
+
+# A window too narrow for the full footer: the line stays one row and the usage
+# readout survives while key hints are dropped first (DESIGN 2.2).
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+ufooter uncommitted 140
+check  "a narrow window keeps the usage readout"   "◔" "$PLAIN"
+refute "...dropping key hints to make room"        "drag copy" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 140 ]; then okline "the narrow footer stays within the column count ($NW <= 140)"
+else echo "  FAIL the narrow footer wrapped: width $NW > 140 columns"; fail=1; fi
+rm -f "$SD/usage-cache.json"
+
 echo "== 13. the agenda: the daemon keeps the event cache current =="
 # T07. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.5), so the refresh is
 # cockpitd's and is tested here rather than in agenda-test.
