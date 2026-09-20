@@ -42,6 +42,44 @@ function roleFor(pct) {
   return "ok";
 }
 
+// --- the derived daily-budget window (1d) ---
+// The weekly cap, paced as seven equal daily slices, so the person can see whether
+// today's spend is on track without doing the sum. It is NOT a number Claude Code
+// reports: it is DERIVED from the seven_day window and the current instant. "100%"
+// of 1d is one slice -- 100/7 of the weekly cap. The slices are aligned to the
+// WEEKLY RESET (a 07:00-style boundary), not to local midnight, because the reset
+// is the only boundary that divides the 7*24h window into seven whole days.
+//
+// The value is a pure closed form:
+//
+//     1d% = 7 * weeklyUsedPct - 100 * (dayIndex - 1)
+//
+// It rides 0 -> 100 across a day when spending is perfectly on pace. Overspend and
+// credit both carry to the next day with NO stored state: the weekly used% is
+// already cumulative, and each elapsed day subtracts one whole slice (the -100),
+// so a day ended at 114% opens the next at 14%, and one ended at 50% opens the next
+// at -50%. Over 100 is red (crit); at-or-under 100, INCLUDING negative credit, is
+// green (ok) -- there is no amber here, unlike the reported windows: 100 is the line
+// and being under it, however far, is simply fine.
+const DAY_SEC = 86400;
+const WEEK_SEC = 7 * DAY_SEC;
+
+// The 1d window {key,pct,role,reset} from the 7d window and now, or null when there
+// is no 7d window to derive it from. dayIndex is clamped to 1..7 so a reading that
+// has drifted before the week's start or past its reset still yields a drawable
+// window (extreme, but the stale mark already flags it) rather than a NaN.
+function oneDayWindow(sevenDay, nowMs) {
+  if (!sevenDay) return null;
+  const nowSec = nowMs / 1000;
+  const weekStart = sevenDay.resetsAt - WEEK_SEC;
+  let dayIndex = Math.floor((nowSec - weekStart) / DAY_SEC) + 1;
+  if (dayIndex < 1) dayIndex = 1;
+  if (dayIndex > 7) dayIndex = 7;
+  const pct = Math.round(7 * sevenDay.usedPct - 100 * (dayIndex - 1));
+  const reset = weekStart + dayIndex * DAY_SEC; // this slice's next boundary
+  return { key: "1d", pct, role: pct > 100 ? "crit" : "ok", reset: formatReset(reset, nowMs) };
+}
+
 // The reset string (DESIGN 2.2): a reset later the same local day is just "HH:MM";
 // once it falls on another day the weekday matters, so "Ddd HH:MM". `resetsAt` is
 // epoch SECONDS (as Claude Code's `resets_at` gives it); `nowMs` is epoch ms.
@@ -86,16 +124,25 @@ export function renderUsage(cache, nowMs) {
   if (!cache || typeof cache !== "object") return null;
   const stale = nowMs - cache.writtenAt > STALE_MS;
   const windows = [];
-  for (const [key, w] of [
-    ["5h", cache.fiveHour],
-    ["7d", cache.sevenDay],
-  ]) {
-    if (!w) continue;
+  // Order is 5h / 1d / 7d: the session cap, the derived daily budget, the weekly
+  // cap. The 1d window is derived from the 7d one (oneDayWindow), so it appears
+  // exactly when 7d does and never on its own.
+  if (cache.fiveHour) {
     windows.push({
-      key,
-      pct: w.usedPct,
-      role: roleFor(w.usedPct),
-      reset: formatReset(w.resetsAt, nowMs),
+      key: "5h",
+      pct: cache.fiveHour.usedPct,
+      role: roleFor(cache.fiveHour.usedPct),
+      reset: formatReset(cache.fiveHour.resetsAt, nowMs),
+    });
+  }
+  const oneDay = oneDayWindow(cache.sevenDay, nowMs);
+  if (oneDay) windows.push(oneDay);
+  if (cache.sevenDay) {
+    windows.push({
+      key: "7d",
+      pct: cache.sevenDay.usedPct,
+      role: roleFor(cache.sevenDay.usedPct),
+      reset: formatReset(cache.sevenDay.resetsAt, nowMs),
     });
   }
   if (windows.length === 0) return null;

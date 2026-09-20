@@ -159,17 +159,19 @@ let footerAttached = false;
 // The model (T02) decides WHAT to show -- percent, role, reset, staleness; the
 // strip only turns its semantic `role` into an ANSI colour here (DESIGN 2.3, 3.3).
 // STALE overrides every role colour with one dim style across the WHOLE segment --
-// the mark, both windows and the "as of" stamp -- so a frozen reading reads as
-// frozen, never as a fresh red; the approved prototype does the same (DESIGN 2.4).
+// every window and the "as of" stamp -- so a frozen reading reads as frozen, never
+// as a fresh red; the approved prototype does the same (DESIGN 2.4).
 const USAGE_COLOR = { ok: `${ESC}32m`, warn: `${ESC}33m`, crit: `${ESC}31m` };
 function formatUsage(u) {
   // A window is "5h NN% ↺<reset>"; fresh, the whole window carries its role colour;
-  // stale, it is left plain here and the whole segment is dimmed below.
+  // stale, it is left plain here and the whole segment is dimmed below. Windows are
+  // joined with " / " (5h / 1d / 7d) and carry no leading glyph -- the keys name
+  // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
     const text = `${w.key} ${w.pct}% ↺${w.reset}`;
     return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
   };
-  const body = `◔ ${u.windows.map(win).join("  ")}`;
+  const body = u.windows.map(win).join(" / ");
   return u.stale ? `${ESC}2m${body} · as of ${u.asOf}${ESC}0m` : body;
 }
 

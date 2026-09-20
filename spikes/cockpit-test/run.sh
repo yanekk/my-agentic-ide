@@ -2036,7 +2036,7 @@ STALE_MS=$(( (NOW_S - 1200) * 1000 ))
 R5=$(( NOW_S + 3600 ))
 R7=$(( NOW_S + 3 * 86400 ))
 # Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
-# code points. The legend is full of 1-column BMP glyphs (◔ ↺ ⌥ · →), so code
+# code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
 # points equal columns here -- which is what the one-row width assertion needs.
 LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
 useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
@@ -2049,14 +2049,18 @@ ufooter() {
   node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
 }
 
-# A fresh cache: mark, both windows with their percentages, coloured by role.
+# A fresh cache: the 5h / 1d / 7d windows with their percentages, coloured by role.
+# R7 is NOW+3 days, so the weekly window started NOW-4 days -> we are in daily slice
+# 5, and 1d% = 7*93 - 100*4 = 251 (well over budget, so red).
 useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
 footer uncommitted
-check  "a fresh cache draws the usage mark"        "◔" "$PLAIN"
-check  "...the 5h window with its percent"         "5h 80% ↺" "$PLAIN"
+check  "a fresh cache draws the 5h window"         "5h 80% ↺" "$PLAIN"
+check  "...the derived 1d daily-budget window"     "1d 251% ↺" "$PLAIN"
 check  "...the 7d window with its percent"         "7d 93% ↺" "$PLAIN"
+check  "windows are separated by /"                "/ 1d 251%" "$PLAIN"
 check  "a 70-89% window is amber (warn)"           "$(printf '\033[33m5h 80%% ↺')" "$RAW"
 check  "a >=90% window is red (crit)"              "$(printf '\033[31m7d 93%% ↺')" "$RAW"
+check  "a 1d window over 100%% is red (crit)"      "$(printf '\033[31m1d 251%% ↺')" "$RAW"
 
 # An under-70% window is green (the ok role).
 useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":61,\"resetsAt\":$R7}}"
@@ -2064,30 +2068,40 @@ footer uncommitted
 check  "an under-70% window is green (ok)"         "$(printf '\033[32m5h 45%% ↺')" "$RAW"
 
 # A stale cache: the WHOLE segment is dimmed and stamped, role colour suppressed.
+# The segment now leads with the 5h window (no glyph), so the dim marker is [2m5h.
 useed "{\"writtenAt\":$STALE_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
 footer uncommitted
-check  "a stale reading dims the whole segment"    "$(printf '\033[2m◔')" "$RAW"
+check  "a stale reading dims the whole segment"    "$(printf '\033[2m5h')" "$RAW"
 check  "...and stamps the write time (as of)"      "· as of " "$PLAIN"
 refute "...role colour suppressed (crit not red)"  "$(printf '\033[31m')" "$RAW"
 
 # An absent cache: no usage segment, and the rest of the footer is today's -- the
 # full legend (incl. the dim secondary hints) is kept, proving nothing was trimmed.
+# The 1d key appears only inside the usage segment, so its absence proves no segment.
 rm -f "$SD/usage-cache.json"
 footer uncommitted
-refute "an absent cache draws no usage segment"    "◔" "$PLAIN"
+refute "an absent cache draws no usage segment"    "1d " "$PLAIN"
 check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
 
-# A cache with one window null draws only the other.
+# A cache with seven_day null draws only 5h (no 7d, and no derived 1d).
 useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":null}"
 footer uncommitted
-check  "a null window still draws the other"       "5h 45% ↺" "$PLAIN"
-refute "...and the null window is not drawn"       "7d " "$PLAIN"
+check  "a null 7d still draws the 5h window"       "5h 45% ↺" "$PLAIN"
+refute "...and the null 7d is not drawn"           "7d " "$PLAIN"
+refute "...and no 1d is derived without a 7d"      "1d " "$PLAIN"
+
+# five_hour null but seven_day present: 1d and 7d draw, no 5h.
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":null,\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+footer uncommitted
+check  "seven_day alone still derives the 1d window" "1d 251% ↺" "$PLAIN"
+check  "...and draws the 7d window"                "7d 93% ↺" "$PLAIN"
+refute "...and draws no 5h window"                 "5h " "$PLAIN"
 
 # A window too narrow for the full footer: the line stays one row and the usage
 # readout survives while key hints are dropped first (DESIGN 2.2).
 useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
 ufooter uncommitted 140
-check  "a narrow window keeps the usage readout"   "◔" "$PLAIN"
+check  "a narrow window keeps the usage readout"   "1d " "$PLAIN"
 refute "...dropping key hints to make room"        "drag copy" "$PLAIN"
 NW=$(node -e "$LEN" "$RAW")
 if [ "${NW:-0}" -le 140 ]; then okline "the narrow footer stays within the column count ($NW <= 140)"

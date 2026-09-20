@@ -106,8 +106,45 @@ section("reset formatting (today HH:MM / another day Ddd HH:MM)");
     sevenDay: { usedPct: 5, resetsAt: R7 }, // tomorrow (Thu)
   };
   const r = renderUsage(cache, NOW);
-  eq("a reset later today is bare HH:MM", r.windows[0].reset, "18:30");
-  eq("a reset on another day is Ddd HH:MM", r.windows[1].reset, "Thu 09:00");
+  const w = (k) => r.windows.find((x) => x.key === k);
+  eq("a reset later today is bare HH:MM", w("5h").reset, "18:30");
+  eq("a reset on another day is Ddd HH:MM", w("7d").reset, "Thu 09:00");
+  // With both reported windows present the order is 5h / 1d / 7d, the 1d derived.
+  eq("the windows are ordered 5h / 1d / 7d", r.windows.map((x) => x.key), ["5h", "1d", "7d"]);
+}
+
+// --- the derived 1d daily-budget window ------------------------------------
+section("1d daily-budget window (derived from 7d, reset-aligned)");
+{
+  // A clean weekly window: reset Thu 09:00 UTC, so it started the previous Thu 09:00.
+  // Days are slices of that window, not calendar days. `at(day, hours)` is an instant
+  // `hours` into slice `day` (1..7); `oneD` reads back the derived 1d window there.
+  const W7 = Math.floor(Date.UTC(2026, 8, 17, 9, 0, 0) / 1000); // Thu 09:00, weekly reset
+  const weekStart = W7 - 7 * 86400;                             // previous Thu 09:00
+  const at = (day, hours) => (weekStart + (day - 1) * 86400 + hours * 3600) * 1000;
+  const oneD = (usedPct, nowMs) => {
+    const cache = { writtenAt: nowMs, fiveHour: null, sevenDay: { usedPct, resetsAt: W7 } };
+    return renderUsage(cache, nowMs).windows.find((x) => x.key === "1d");
+  };
+
+  // 1d% = 7*weekly - 100*(day-1). Day 1 subtracts no slice; day 2 subtracts one.
+  eq("day 1, 5% weekly -> 35%", oneD(5, at(1, 3)).pct, 35);
+  eq("day 2, 20% weekly -> 40%", oneD(20, at(2, 3)).pct, 40);
+  // Carry-forward: a high weekly total early in the week reads over 100 -> red.
+  eq("day 2, 40% weekly -> 180% (over budget)", oneD(40, at(2, 3)).pct, 180);
+  eq("over 100 is crit (red)", oneD(40, at(2, 3)).role, "crit");
+  eq("100 or under is ok (green)", oneD(20, at(2, 3)).role, "ok");
+  // Banked credit reads negative and stays green (no amber on 1d).
+  eq("day 6, 30% weekly -> -290% (banked credit)", oneD(30, at(6, 3)).pct, -290);
+  eq("negative (credit) is ok (green)", oneD(30, at(6, 3)).role, "ok");
+  // The slice resets at the next reset-aligned boundary (day 1 -> Fri 09:00).
+  eq("1d reset is the next daily boundary", oneD(5, at(1, 3)).reset, "Fri 09:00");
+  // A reading drifted past the weekly reset clamps to day 7 rather than overshooting.
+  const past = (W7 + 2 * 86400) * 1000;
+  eq("past the weekly reset clamps to day 7", oneD(50, past).pct, 7 * 50 - 100 * 6);
+  // 1d appears only WITH the 7d window it derives from, never on its own.
+  const onlyFiveCache = { writtenAt: at(1, 3), fiveHour: { usedPct: 10, resetsAt: W7 }, sevenDay: null };
+  eq("only five_hour present -> no 1d window", renderUsage(onlyFiveCache, at(1, 3)).windows.map((x) => x.key), ["5h"]);
 }
 
 // --- renderUsage empties ---------------------------------------------------
@@ -121,10 +158,13 @@ section("renderUsage returns null when there is nothing to draw");
 // --- one window only -------------------------------------------------------
 section("one window null draws only the other");
 {
+  // seven_day present, five_hour null: the reported 7d window is drawn, and the 1d
+  // window derived from it -- no 5h. (1d always accompanies 7d; only five_hour is
+  // ever drawn truly alone.)
   const onlySeven = { writtenAt: NOW, fiveHour: null, sevenDay: { usedPct: 72, resetsAt: R7 } };
   const r = renderUsage(onlySeven, NOW);
-  eq("only one window is drawn", r.windows.length, 1);
-  eq("the drawn window is the 7d one", r.windows[0], {
+  eq("no 5h, but 1d and 7d are drawn", r.windows.map((x) => x.key), ["1d", "7d"]);
+  eq("the reported 7d window is unchanged", r.windows.find((x) => x.key === "7d"), {
     key: "7d",
     pct: 72,
     role: "warn",

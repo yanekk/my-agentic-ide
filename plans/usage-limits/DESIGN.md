@@ -13,8 +13,8 @@ no such session/weekly caps, so those numbers are meaningless there and must nev
 
 ### Success criteria
 
-- On a personal-subscription session, the footer shows `◔ 5h NN% ↺HH:MM  7d NN% ↺Ddd HH:MM`
-  with the real numbers, refreshed as the person works.
+- On a personal-subscription session, the footer shows `5h NN% ↺HH:MM / 1d NN% ↺Ddd HH:MM /
+  7d NN% ↺Ddd HH:MM` with the real numbers, refreshed as the person works (`1d` derived, §2.2a).
 - On a company Bedrock session, the footer is exactly what it is today — no usage segment.
 - The numbers are never fetched over the network by this project and never handle a token:
   they arrive from Claude Code itself.
@@ -46,15 +46,40 @@ The machine here is 2.1.273, past the cutoff (checked 2026-09-16).
 
 ### 2.2 What shows, and the exact format
 
-`◔ 5h NN% ↺HH:MM  7d NN% ↺Ddd HH:MM`, on the far right of the footer, after the diff-mode
-segment. `◔` marks it as the usage readout. `5h` is the session window, `7d` the weekly one.
-`↺` prefixes each window's reset time: a reset later the same local day shows `HH:MM`, a
+`5h NN% ↺HH:MM / 1d NN% ↺Ddd HH:MM / 7d NN% ↺Ddd HH:MM`, on the far right of the footer, after
+the diff-mode segment, windows joined by ` / ` and carrying no leading glyph (the keys name
+themselves). `5h` is the session window, `1d` the derived daily budget (§2.2a), `7d` the weekly
+one. `↺` prefixes each window's reset time: a reset later the same local day shows `HH:MM`, a
 reset on another day shows `Ddd HH:MM` (weekday plus time), because the day matters once it is
 not today. Percentages are whole numbers.
 
 Chosen over a bare percentage because the reset time is the number that decides whether to
 wait (§7). The other formats mocked (percent-only, mini gauge, worded) were rejected by the
 user on 2026-09-16 against `plans/usage-limits/prototype/`.
+
+### 2.2a The derived daily-budget window (1d)
+
+`1d` is not a number Claude Code reports. It is derived from the weekly (`7d`) window so the
+person can pace the weekly cap as seven equal daily slices without doing the sum. **`100%` of
+`1d` is one slice — 100/7 of the weekly cap (~14.29%).** Slices are aligned to the *weekly
+reset instant* (a 07:00-style boundary, whatever the account's reset is), not to local
+midnight, because the reset is the only boundary that divides the 7×24h window into seven whole
+days; `1d`'s own `↺` shows the next such boundary.
+
+The value is a closed form with **no stored state**:
+
+    1d% = 7 × weeklyUsedPct − 100 × (dayIndex − 1)          dayIndex = 1..7 within the week
+
+It rides 0→100 across a day when spending is perfectly on pace. Overspend and credit both
+carry forward automatically, because the weekly used% is already cumulative and each elapsed
+day subtracts one whole slice: a day ended at 114% opens the next at 14%, one ended at 50%
+opens the next at −50% (so a negative `1d%` is banked credit). Over 100 is **red**; at or under
+100, *including any negative value*, is **green** — there is no amber on `1d` (unlike the
+reported windows in §2.3): 100 is the line, and being under it, however far, is fine. `dayIndex`
+is clamped to 1..7 so a reading drifted past the reset still draws rather than yielding a NaN.
+
+Chosen with the user on 2026-09-20: daily target 100/7 (uses the full weekly cap), days aligned
+to the 07:00 reset (exactly 7 equal days, last ending at the weekly reset), footer only.
 
 **When the line is too narrow to hold everything, the usage readout wins.** The footer is a
 single row and must never wrap (wrapping breaks the measured one-row invariant `pinHeight`
@@ -186,7 +211,7 @@ two arguments and nothing else.
 renderUsage(cache, nowMs) → null | {
   stale:   boolean,                    // nowMs - cache.writtenAt > STALE_MS
   asOf:    "HH:MM" | null,             // local write time, only when stale
-  windows: [ { key, pct, role, reset } ]   // key "5h"|"7d"; role "ok"|"warn"|"crit"; reset "HH:MM"|"Ddd HH:MM"
+  windows: [ { key, pct, role, reset } ]   // key "5h"|"1d"|"7d"; role "ok"|"warn"|"crit"; reset "HH:MM"|"Ddd HH:MM" (1d is derived, §2.2a: crit>100 else ok)
 }
 ```
 
