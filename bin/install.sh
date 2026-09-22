@@ -235,6 +235,32 @@ else
     [ -n "$USAGE" ] && ok "$USAGE_PLAN"
 fi
 
+# --- 3d. plan the stop-notify hook -----------------------------------------
+#
+# The Stop-hook notification sound, made selective for PIR parallel workers: it
+# supersedes a plain unconditional `afplay .../Glass.aiff` Stop hook, staying
+# silent when a worker merely finished its task and still dinging when one parks
+# waiting for the person (a question, a decision, a merge conflict). Like the
+# naming hook it owns its own settings.json merge (--install) -- which also drops
+# the legacy afplay line it replaces -- so the tests drive the same code path
+# this does.
+STOP="$REPO/bin/cockpit-stop-notify.mjs"
+say ""
+say "${bold}stop notification${off} ${dim}(~/.claude/settings.json)${off}"
+if [ ! -f "$STOP" ]; then
+    warn "cockpit-stop-notify.mjs is missing -- skipping"
+    STOP=""
+elif ! command -v node >/dev/null 2>&1; then
+    warn "no node on this PATH -- skipping (it is checked above)"
+    STOP=""
+else
+    STOP_PLAN="$(node "$STOP" --check 2>&1)" || {
+        warn "$STOP_PLAN"
+        STOP=""
+    }
+    [ -n "$STOP" ] && ok "$STOP_PLAN"
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
     say ""
     say "--check: nothing written."
@@ -280,6 +306,16 @@ if [ -n "$USAGE" ]; then
         ok "$OUT"
     else
         warn "could not register the usage statusline: $OUT"
+    fi
+fi
+
+# Idempotent and self-repointing like the naming hook: a re-run after a move
+# repairs the Stop hook path, and supersedes any plain afplay Stop hook left over.
+if [ -n "$STOP" ]; then
+    if OUT="$(node "$STOP" --install 2>&1)"; then
+        ok "$OUT"
+    else
+        warn "could not register the stop-notify hook: $OUT"
     fi
 fi
 

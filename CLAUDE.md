@@ -163,9 +163,10 @@ makes typing-without-submitting possible.
 
 Once per machine: `bin/install.sh`. It checks the seven tools, records where this
 checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
-registers two things in `~/.claude/settings.json`: the session-naming hook and the
+registers three things in `~/.claude/settings.json`: the session-naming hook, the
 usage statusline (`cockpit-usage-tap.mjs`, which feeds the footer's usage segment;
-reversible with `cockpit-usage-tap.mjs --uninstall`).
+reversible with `cockpit-usage-tap.mjs --uninstall`), and the stop-notify hook
+(`cockpit-stop-notify.mjs`, the Stop-event sound; reversible with `--uninstall`).
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
 remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
 
@@ -193,6 +194,7 @@ bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes b
 bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what the footer's usage segment draws)
 bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer temp so concurrent sessions don't tear it)
 bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
+bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a PIR worker that finished; still dings when one parks for the person; --install/--uninstall register it (superseding a plain afplay Stop hook)
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
@@ -203,6 +205,7 @@ spikes/notes-test/      the `note` command and the right column, notes + agenda 
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
+spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
