@@ -23,10 +23,10 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | swap-spike | — | ⬜ | |
-| T01 | pir-model | — | ⬜ | |
+| T00 | swap-spike | — | ✅ | |
+| T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ✅ | Built: switch segment, `fleet-*` clicks, `reviewable:false` drops `O`, fifth trim level drops `Diff mode:` (person). Review: one fix, the fifth level fired without a fleet block below ~115 cols, reproduced against the pre-T02 renderer, now gated, locked at 100 cols; 594 green. Probed pinned hashes, click zones, dim state. |
-| T03 | program-swap | T00 | ⬜ | |
+| T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
 | T05 | docs | T04 | ⬜ | |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |

@@ -171,7 +171,8 @@ case "$FOOTER$DIFF$SHELL_PANE$STRIP" in
     *[!0-9]*|"") die "could not split panes (got footer='$FOOTER' diff='$DIFF' shell='$SHELL_PANE' strip='$STRIP')" ;;
 esac
 
-# `foot` is recorded for completeness/debugging; the daemon never touches it.
+# `foot` is the daemon's landmark for the cockpit tab: the one pane never parked,
+# split into or restarted (the fleet pane can be parked while pir is shown).
 printf '{"diff":%s,"fleet":%s,"shell":%s,"strip":%s,"foot":%s,"repo":"%s"}\n' \
     "$DIFF" "$FLEET" "$SHELL_PANE" "$STRIP" "$FOOTER" "$REPO" > "$DIR/panes.json"
 
@@ -187,6 +188,10 @@ pkill -f "cockpitd.mjs" 2>/dev/null || true
 # Truncate the terminal-command channel so a keypress from a previous window is
 # not replayed into this one.
 : > "$DIR/cmd"
+# pir's report of what its dashboard has open (pir-pane DESIGN 2.4). A rebuild
+# starts on claude agents with no pir running, so any copy here is a previous
+# window's and would be followed the moment PIR is clicked.
+rm -f "$DIR/pir-dashboard.json"
 nohup node "$HERE/cockpitd.mjs" >"$DIR/daemon.log" 2>&1 &
 echo "cockpit: daemon pid $! · panes diff=$DIFF fleet=$FLEET shell=$SHELL_PANE"
 

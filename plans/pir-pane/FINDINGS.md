@@ -11,7 +11,14 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 | Date | | Finding |
 |---|---|---|
 | 2026-09-27 | 🔄 | T02: the switch pushed the 140-col footer to 145. The person chose a fifth trim level dropping the `Diff mode:` caption (not wrapping, not shorter labels). |
-| 2026-09-27 | 🐞 | cockpit-test leaks two `cockpitd` per run (COCKPIT_DIR `…/agenda2/state`, `…/agenda3/state`), orphaned to init; seen in every worktree. Pre-existing, not fixed in T02. |
+| 2026-09-27 | 📌 | T03 review, by reading: a pir pane that dies while shown leaves `fleet-claude` splitting into a dead pane id, so claude agents is unreachable until a rebuild. Only closing the pane triggers it; left alone. |
+| 2026-09-27 | 🐞 | cockpit-test sections 13 and 13b leave two `cockpitd` daemons (agenda2, agenda3) running after `ALL PASS`: `kill $D2PID`/`$D3PID` hit the wrapper subshell, the stopbb problem of section 14. Found and killed by hand in T03. |
+| 2026-09-27 | 📌 | T00 swap in, wezterm 20240203: `split-pane --left --percent 50 --pane-id <fleet> --move-pane-id <pir>` halves the slot (29x22 each at 120x40), then `move-pane-to-new-tab <fleet>`: pir 59x22, sh 47x22, strip 12x22, diff 120x15 unchanged. 80x24: 39x12, 31, 8. |
+| 2026-09-27 | 📌 | T00 swap out is the mirror (`--pane-id <pir> --move-pane-id <fleet>`, park pir): fleet back to 59x22 / 39x12. Three round trips per size, sizes identical each time. The moved-in pane becomes the tab's active pane. |
+| 2026-09-27 | 📌 | T00 landmark: `panes.foot`'s `tab_id` equalled the cockpit tab after all 15 measured steps per size, parked panes each in their own tab. DESIGN §2.10 holds. |
+| 2026-09-27 | 📌 | T00 first spawn: `split-pane --left --percent 50 --pane-id <fleet> -- /usr/bin/env PATH HOME PIR_HOME PIR_DASHBOARD_STATE pir`, then park fleet: pir 59x22 / 39x12, runs list drawn, state file `view: list` written. |
+| 2026-09-27 | 📌 | T00 redraw: pir's runs list and a `less` stand-in came back identical over three park/return trips. `get-text --start-line 0` returns rows above the viewport after a resize (14 lines, 12-row pane); compare the last `rows` lines only. |
+| 2026-09-27 | 📌 | T00 probe: the probe's zsh caller passing "120 40" as one argument broke the mux config and the server then fought for `~/.local/share/wezterm/pid`. Kill a private mux by its config path (`pkill -f "$T/wezterm.lua"`), not only its pid file. |
 | 2026-09-27 | 📌 | pir `d4f2e7e` publishes `PIR_DASHBOARD_STATE` (installed). Driven on its conversation rig: list, run, worker, back twice, quit all match §2.4; file removed on Esc. Back is ←; Esc in a worker view interrupts, not back. |
 | 2026-09-27 | 📌 | pir's run key is `{repo}__{record.slug}`, and a planning run's slug is its run id until the rename, so the rename changes the key, not only `cwd` (§2.11). The cockpit sees a new run; the old key is reaped. |
 | 2026-09-27 | 📌 | pir moved to `4e209ad` (plan-only: a new-plan box on the runs list); the installed engine matches its source. The engine parser keeps YAML-style quotes on a test line, so a quoted line runs as one command name (exit 127). |
