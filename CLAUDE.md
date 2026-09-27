@@ -206,6 +206,8 @@ spikes/agenda-test/     the agenda's store, model, Google client and command (63
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
+spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
+spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
