@@ -25,7 +25,9 @@ DESIGN §2.1, §2.2, §2.3, §2.5.
   (`GPID`, `BBPID`) are plain launches and may keep a plain `kill`; the trap still stops them.
 - `kill $D2PID`, `kill $D3PID` and every `stopbb` call become `daemon_stop`. `stopbb` and its
   comment are removed; the reason moves to the helper file's comment if it is not already there.
-- `daemon_tripwire "$T" || fail=1` right before the final `ALL PASS` / `FAILURES` line.
+- `daemon_stop $DPID` (and any other `D*PID` still set), then `daemon_tripwire "$T" || fail=1`, right
+  before the final `ALL PASS` / `FAILURES` line. The main daemon is otherwise stopped only by the EXIT
+  trap, so without the explicit stop the tripwire reports it as a leak on every run.
 
 ## Tests
 

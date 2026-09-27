@@ -55,7 +55,8 @@ touch the caller's counters, because each suite counts differently.
       (`perl -e 'setpgrp(0,0); exec …'`): SIGINT to the group leaves none; SIGTERM to its shell only
       leaves none. (SIGKILL is T03's, since only the backstop can cover it.)
 - [ ] fence: no `pkill -f` naming `cockpitd` anywhere under `spikes/` (excluding this check's own
-      line).
+      line). None exists today; the footer-click `pkill -f "$CLICKER"` in cockpit-test names a
+      scratch path and must not trip it.
 
 ## Done when
 

@@ -8,7 +8,7 @@ touching the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. The cell is an index; the account is the
 commit message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan test-daemon-leaks` before the first `/pir-work`
+**Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-09-27

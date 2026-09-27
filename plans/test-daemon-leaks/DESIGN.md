@@ -83,9 +83,9 @@ cockpitd reads an optional environment variable, `COCKPIT_OWNER_PID`. When it is
 integer, the daemon checks on its existing reconcile interval (`POLL_MS`, no new timer) whether
 that process still exists, with `process.kill(pid, 0)`. `ESRCH` counts as a miss; two consecutive
 misses log `owner <pid> gone, exiting` and run the normal `shutdown()`. `EPERM` means the process
-exists under another user and counts as alive. Any other value of the variable (empty, `0`,
-non-numeric) is logged once at start and ignored, so a malformed seam can never stop a daemon.
-Unset, nothing changes, which is how the real daemon runs: `bin/cockpit-layout.sh` never sets it.
+exists under another user and counts as alive. Any other non-empty value (`0`, non-numeric) is
+logged once at start and ignored, so a malformed seam can never stop a daemon. Unset or empty,
+nothing changes, which is how the real daemon runs: `bin/cockpit-layout.sh` never sets it.
 
 Every cockpitd a suite starts sets `COCKPIT_OWNER_PID="$$"`, the suite shell's pid (`$$` is the
 script's pid inside subshells and functions too). This is the only layer that covers a suite
@@ -229,6 +229,10 @@ Never kill a cockpitd by name to clean up after a check. Use the `$T` match, or 
   each is cheaper than finding the first leak in one of them by load average.
 - **Tripwire reports, the sweep kills.** Killing in the tripwire would make the leak invisible on the
   next run; reporting without the sweep would leave the leak running.
+- **T05 stops the pre-fix orphans once (user, 2026-09-27).** Daemons leaked before this plan have no
+  `COCKPIT_OWNER_PID`, so nothing here would ever end them short of a reboot. They are matched by a
+  `HOME` under the temp folder and parent pid 1 (measured: every orphan had both; the real daemon has
+  neither), and stopped by pid, never by name. It is a one-off step in T05, not a tool.
 - **No CLAUDE.md measured-facts row by default.** The table is capped at thirty rows and the rule is
   enforced by the tripwire, which is the better record. T05 adds one only if a finding during the
   build shows a session would re-break it despite the tripwire.

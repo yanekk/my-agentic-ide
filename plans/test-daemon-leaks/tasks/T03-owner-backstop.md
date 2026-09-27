@@ -40,7 +40,9 @@ and each `dNenv` function).
 ## Tests
 
 In `daemon-leak-test`, against the real `bin/cockpitd.mjs` with a scratch `HOME` and `COCKPIT_DIR`,
-`COCKPIT_TIME_SCALE` small, `AGENDA_ORIGIN`/`BITBUCKET_ORIGIN` at `http://127.0.0.1:9`, and a PATH
+`COCKPIT_TIME_SCALE` small, `AGENDA_ORIGIN`/`BITBUCKET_ORIGIN` at `http://127.0.0.1:9`, a seeded
+`$COCKPIT_DIR/panes.json` and empty `fleet.log` (cockpitd exits at start without `panes.json`,
+`bin/cockpitd.mjs:109`; copy the shape cockpit-test writes), and a PATH
 whose `wezterm` and `claude` are stubs that print nothing and exit 0:
 
 - [ ] owner is a live `sleep` → the daemon is still running after several ticks.
@@ -52,8 +54,10 @@ whose `wezterm` and `claude` are stubs that print nothing and exit 0:
 - [ ] the force-kill path: a child mini-suite launching the real daemon through an env function with
       `COCKPIT_OWNER_PID="$$"`, killed with SIGKILL to its shell only → the daemon is gone within the
       bound, although no trap ran.
-- [ ] fence: every line under `spikes/` that launches `bin/cockpitd.mjs` is in a launch that sets
-      `COCKPIT_OWNER_PID` (count launches in `cockpit-test` against owner assignments).
+- [ ] fence: every launch of `bin/cockpitd.mjs` in a `spikes/*-test/run.sh` other than
+      `daemon-leak-test` sets `COCKPIT_OWNER_PID` (count launches against owner assignments).
+      `daemon-leak-test` is excluded because its no-owner and malformed-owner launches are the checks
+      themselves; the hands-on probes in `spikes/pane-swap/` and `spikes/browse-mode/` are not suites.
 - [ ] fence: `COCKPIT_OWNER_PID` does not appear in `bin/cockpit-layout.sh` or `wezterm/cockpit.lua`.
 
 ## Done when
