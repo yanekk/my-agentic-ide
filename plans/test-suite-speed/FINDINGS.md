@@ -9,6 +9,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T05 TIMINGS before→after (load 3–26): 12 20.0→1.6, 12b 5.9→1.2, 12c 110.5→10.7, 13 32.4→8.9, 13b 16.2→3.4; footer+agenda 185s→26s. Full run 402s, 767 checks. Old clicks waited 4s each for script(1) to exit. |
+| 2026-09-27 | 📌 | T05 stability: `ONLY=13c` and `ONLY=12b` 5× serial, and 13c/12b/12c 3 rounds of 4 concurrent, all passed at load 6–14. Mutants (stale 300ms, in-flight guard removed, stale w3 on return, a live press expected empty) all failed. |
 | 2026-09-27 | 📌 | T01 review: `ONLY="11c'''"` failed section 7 "the vanished agent's diff pane too" at load 28 while a full run passed beside it. Section body untouched by T01; another load flake for T03. |
 | 2026-09-27 | 📌 | T01 baseline, merged script, 0 orphans: 557s, 767 checks. Chains: main 303s, footer 134s, dashboard 69s, agenda 49s. Top ten: 12c 109, 14 34, 13 33, 14d 25, 12 20, 13b 16, 11k 12, 16n 11, 11p 11, 14b 10. |
 | 2026-09-27 | 📌 | That baseline ran beside another suite, load 2.8 rising to 24; a load-5 run with six orphans took 560s, so wall time is wait-bound. Section 12c (pir-pane footer switch, ~0.8s per frame) alone is 109s. |

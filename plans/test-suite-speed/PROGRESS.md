@@ -27,14 +27,14 @@ done · ⛔ blocked, needs a human.
 | T02 | waituntil | — | ✅ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
-| T05 | convert-footer-agenda | T01, T02 | ⬜ | |
+| T05 | convert-footer-agenda | T01, T02 | 🔍 | Footer: `strip_frame` polls for the finished frame; `press` polls, and an expected-empty click is proven by a following sentinel press, not a window. Agenda: tick/stale derived from SPEED, stub `slow` hold 5 ticks, windows `nap 2`. Chain helpers moved above headings. Deviation: `same` ungated, else `ONLY=14c` differs. 767 checks. |
 | T06 | convert-dashboard | T01, T02 | ⬜ | |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** empty
+**Review queue:** T05
 
 ## Blocked on the user
 
