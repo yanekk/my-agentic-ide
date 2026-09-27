@@ -529,10 +529,13 @@ retitle() {
   awk -v p="$1" -v t="$2" '{ if ($1 == p) print $1, $2, t; else print }' \
       "$PANESTATE" > "$PANESTATE.rt" && mv "$PANESTATE.rt" "$PANESTATE"
 }
-# waitfor <pattern> <file> <seconds>: poll until it shows up. Where the daemon
-# announces what it did, waiting for the announcement beats sleeping a guess --
-# and a wait that ENDS at a known moment is what makes the cooldown checks below
-# measure a window rather than a race.
+# waitfor <pattern> <file> <seconds> [description]: poll until it shows up. Where
+# the daemon announces what it did, waiting for the announcement beats sleeping a
+# guess -- and a wait that ENDS at a known moment is what makes the cooldown checks
+# below measure a window rather than a race. With a description, a timeout also
+# prints waited_fail's line, so the report says what never arrived rather than only
+# the check after it failing; without one it stays silent, as every caller that
+# predates the description expects.
 waitfor() {
   local i=0 lim
   lim=$(awk -v s="$3" 'BEGIN{ printf "%d", s * 10 }')
@@ -540,8 +543,12 @@ waitfor() {
     grep -qF -- "$1" "$2" && return 0
     sleep 0.1; i=$((i + 1))
   done
+  [ -n "${4:-}" ] && waited_fail "$3" "$4"
   return 1
 }
+# waited_fail <seconds> <description>: the one line every timed-out wait prints.
+# It sets fail but does not count a check -- the assertion after the wait does.
+waited_fail() { echo "  FAIL timed out after ${1}s waiting for: $2"; fail=1; }
 # The daemon's log is cumulative, so a heal that has happened once already makes
 # `check` pass without the daemon doing anything at all. Where the same line is
 # expected AGAIN, the assertion is on its COUNT against a baseline taken first.
@@ -551,7 +558,7 @@ grew() {     # grew <description> <pattern> <file> <baseline>
   if [ "${n:-0}" -gt "$4" ]; then okline "$1"
   else echo "  FAIL $1"; echo "       [$2] appears $n times, expected more than $4"; fail=1; fi
 }
-waitmore() { # waitmore <pattern> <file> <baseline> <seconds>
+waitmore() { # waitmore <pattern> <file> <baseline> <seconds> [description]
   local i=0 lim n
   lim=$(awk -v s="$4" 'BEGIN{ printf "%d", s * 10 }')
   while [ "$i" -lt "$lim" ]; do
@@ -559,6 +566,32 @@ waitmore() { # waitmore <pattern> <file> <baseline> <seconds>
     [ "${n:-0}" -gt "$3" ] && return 0
     sleep 0.1; i=$((i + 1))
   done
+  [ -n "${5:-}" ] && waited_fail "$4" "$5"
+  return 1
+}
+# waituntil <seconds> <description> <command...>: poll for a condition that is not
+# a log line -- a cache file's JSON, the stub's pane table, a call count. Runs the
+# command (output discarded) every 0.1s until it exits 0, then returns 0 silently.
+# On timeout it prints waited_fail's line, sets fail and returns 1; the run carries
+# on, exactly as after a failed check. It is not itself a check: the assertion that
+# follows it is, so replacing a sleep with it leaves the check count unchanged.
+#
+# The limit is deliberately NOT scaled by SPEED (DESIGN 3.1). It is not a window
+# being proved -- a passing wait returns the moment the condition holds -- so it
+# only decides how long a real failure takes to report. Scaling it down would make
+# a loaded machine (four suites at once) fail waits that were merely slow.
+# Like waitfor it counts 0.1s ticks, so a slow command stretches the limit rather
+# than cutting it short.
+waituntil() {
+  local i=0 lim secs="$1" what="$2"
+  shift 2
+  lim=$(awk -v s="$secs" 'BEGIN{ printf "%d", s * 10 }')
+  while :; do
+    "$@" >/dev/null 2>&1 && return 0
+    [ "$i" -ge "$lim" ] && break
+    sleep 0.1; i=$((i + 1))
+  done
+  waited_fail "$secs" "$what"
   return 1
 }
 

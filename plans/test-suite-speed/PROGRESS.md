@@ -10,9 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** T01 done. T02 next; T03–T07 wait on it.
+**Status:** T01 and T02 done. T03–T07 can build in parallel.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T02.
+**Next `pir-work` will:** implement T03.
 
 ## Tasks
 
@@ -22,7 +22,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | section-runner | — | ✅ | Review clean, no fix commit. Full run 767, ALL PASS at load ~15–28. Probed: `ONLY` nope/partial-nope exit 2, a forced FAIL under `ONLY=12` exits 1 with FAILURES, `ONLY=14c` prefix, a renamed heading refused by the `CHAIN_OF` check, no orphans left. Baseline ran beside another suite, not on a quiet machine. |
-| T02 | waituntil | — | ⬜ | |
+| T02 | waituntil | — | ✅ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
