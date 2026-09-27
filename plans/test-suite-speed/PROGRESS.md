@@ -28,7 +28,7 @@ done · ⛔ blocked, needs a human.
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
-| T06 | convert-dashboard | T01, T02 | ⬜ | |
+| T06 | convert-dashboard | T01, T02 | 🔍 | Chain 68s→16s, 85 checks, full run 767. `BB_TICK_MS`=800×SPEED for D4/D6. Deviations: 14's in-flight guard unconfigures before `slow`, so its drain is 1s not 5s; two vacuous checks strengthened (14d review no-op pattern, 14b fetchedAt vs start); `bb-sync-<n>` marker verb for the clamp. |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |
