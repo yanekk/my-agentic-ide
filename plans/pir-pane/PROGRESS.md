@@ -10,11 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built. The pir-side change is a separate plan started from
+**Status:** T00 done; build under way. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
-dependencies and may run beside it.
+**Next `pir-work` will:** implement T01 (pir-model), T02 (footer-switch) or T03 (program-swap), all unblocked.
 
 ## Tasks
 
@@ -23,7 +22,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | swap-spike | — | 🔍 | Probe run on a private headless mux at 120x40 and 80x24, then deleted; six FINDINGS rows. Swap-in/out keep every width, foot stays in the cockpit tab, pir and a less stand-in return identical. No DESIGN contradiction. No code, so no new tests. |
+| T00 | swap-spike | — | ✅ | Six FINDINGS rows on swap geometry, landmark and redraw. Review clean, no fix commit: an independent probe on a private mux reproduced every size at 120x40 and 80x24, foot in the cockpit tab, pir and less identical over three trips (trailing spaces aside), pir state file written. Nothing left running. |
 | T01 | pir-model | — | ⬜ | |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
@@ -32,7 +31,7 @@ done · ⛔ blocked, needs a human.
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** T00
+**Review queue:** empty
 
 ## Blocked on the user
 
