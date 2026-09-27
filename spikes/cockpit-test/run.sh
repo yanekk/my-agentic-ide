@@ -18,7 +18,13 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+# ONE EXIT trap, set here and never replaced: bash keeps only the last one set.
+# It stops every daemon/stub pid the sections below may leave set, then sweeps by
+# $T for any cockpitd a section launched without a pid variable here
+# (plans/test-daemon-leaks/DESIGN.md §2.3).
+. "$ROOT/spikes/lib/test-daemons.sh"
+DPID=""; D2PID=""; D3PID=""; GPID=""; D4PID=""; D5PID=""; D6PID=""; BBPID=""
+trap 'daemon_stop $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 # The reader's launch line, in ONE place: the scheme name is asserted in four
 # sections (the browse launch, two heals and the worktree rebuild) and a change of
@@ -334,7 +340,6 @@ HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS="$REAP_MS" \
     AGENDA_ORIGIN="http://127.0.0.1:9" \
     node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
 DPID=$!
-trap 'kill $DPID 2>/dev/null; rm -rf "$T"' EXIT
 sleep 1   # node startup is fixed overhead -- not scaled by SPEED
 
 fail=0
@@ -2124,8 +2129,6 @@ echo "== 13. the agenda: the daemon keeps the event cache current =="
 # AGENDA_STALE_MS is 60s in both -- longer than this section runs -- so nothing is
 # ever re-fetched by accident. A calendar goes stale only when a line below zeroes
 # its fetchedAt, and that is what makes every assertion here deterministic.
-D2PID=""; D3PID=""; GPID=""
-
 same() {  # same <description> <actual> <expected>
   if [ "$2" = "$3" ]; then
     okline "$1"
@@ -2225,7 +2228,6 @@ d2env() {
 }
 d2env node "$ROOT/bin/cockpitd.mjs" > "$A2/daemon.log" 2>&1 &
 D2PID=$!
-trap 'kill $DPID $D2PID $D3PID $GPID 2>/dev/null; rm -rf "$T"' EXIT
 sleep 2
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5).
@@ -2337,7 +2339,7 @@ echo
 echo "== 13b. the agenda: coming back to the fleet list refreshes it =="
 # D2 is stopped first so nothing it does can land in the shared hit log, and so a
 # 60s staleness boundary cannot expire underneath D3.
-kill $D2PID 2>/dev/null
+daemon_stop $D2PID
 D2PID=""
 : > "$GHITS"
 
@@ -2397,7 +2399,7 @@ same "no line in this suite names a real Google host" \
 same "the tick defaults to 60s"        "$(grep -c 'COCKPIT_AGENDA_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
 same "staleness defaults to one minute" "$(grep -c 'COCKPIT_AGENDA_STALE_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
 
-kill $D3PID 2>/dev/null; D3PID=""
+daemon_stop $D3PID; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""
 
 echo
@@ -2413,17 +2415,9 @@ echo "== 14. the bitbucket dashboard: the daemon keeps the PR cache current =="
 # BitBucket has NO staleness window (unlike the agenda): a pass fetches every watched
 # repo, so a clean "nothing is fetching" edge for the guard test is made by
 # UNCONFIGURING, not by ageing a cache entry.
-D4PID=""; D5PID=""; D6PID=""; BBPID=""
-
-# A daemon launched as `envfn node ... > log &` has $! bound to the wrapping
-# SUBSHELL, not to node (the redirection stops bash execing node in place), so a
-# plain `kill $!` leaves cockpitd orphaned and still ticking. The agenda sections
-# above never notice -- their 60s staleness window means a surviving daemon
-# re-fetches nothing inside a test -- but the dashboard has NO staleness window, so
-# a leaked daemon keeps hitting the stub every tick and poisons the shared hit log.
-# So kill the node child too. pgrep -P finds it while the subshell still lives; if a
-# launch DID exec node in place (no wrapper), the -P finds nothing and $1 is node.
-stopbb() { kill $(pgrep -P "$1" 2>/dev/null) "$1" 2>/dev/null; }
+# Every daemon below is stopped with daemon_stop (spikes/lib/test-daemons.sh), never a
+# plain `kill`: the dashboard has NO staleness window, so a leaked daemon keeps hitting
+# the stub every tick and poisons the shared hit log.
 
 # --- a loopback stand-in for BitBucket (DESIGN 5.2) ------------------------
 # The client is pointed at 127.0.0.1, so a call that crept out to the real API
@@ -2521,7 +2515,6 @@ server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`)
 BBSTUB
 node "$T/bbstub.mjs" "$BBMODE" "$BBHITS" > "$T/bbstub.out" 2>&1 &
 BBPID=$!
-trap 'kill $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID 2>/dev/null; rm -rf "$T"' EXIT
 for _ in $(seq 1 60); do grep -q '^PORT ' "$T/bbstub.out" 2>/dev/null && break; sleep 0.1; done
 BBPORT="$(sed -n 's/^PORT //p' "$T/bbstub.out" | head -1)"
 BBORIGIN="http://127.0.0.1:$BBPORT"
@@ -2699,7 +2692,7 @@ sleep 4                             # drain the held request
 refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
 refute "no credential ever reaches the log" "me@x:tok"        "$A4/daemon.log"
 
-stopbb $D4PID; D4PID=""; sleep 0.5   # node child too, or it out-ticks D5 below
+daemon_stop $D4PID; D4PID=""   # waits for death, or it out-ticks D5 below
 
 echo
 echo "== 14d. the dashboard reacts to clicks (tabs, paging, Open) =="
@@ -2834,7 +2827,7 @@ same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toRe
 refute "no PR title reaches the log via a click" "PAGED-PR" "$A6/daemon.log"
 
 echo ok > "$BBMODE"
-stopbb $D6PID; D6PID=""; sleep 0.5
+daemon_stop $D6PID; D6PID=""
 
 echo
 echo "== 14b. the bitbucket dashboard: start fills the cache, return refreshes it =="
@@ -2881,7 +2874,7 @@ echo list > "$A5/fleetstate"; sleep 3
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
 same  "...and the cache was rewritten"                   "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
 
-stopbb $D5PID; D5PID=""
+daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
 
 echo
@@ -2897,6 +2890,12 @@ same "no line in this suite names the real bitbucket host" \
 # states -- so the default is asserted in the source, not trusted.
 same "the bitbucket tick defaults to 60s" \
      "$(grep -c 'COCKPIT_BITBUCKET_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+
+# Every daemon a section started must be gone by now. The main one is otherwise
+# stopped only by the EXIT trap, so stop it (and anything still set) first, or the
+# tripwire would report it on every run (DESIGN §2.5).
+daemon_stop $DPID $D2PID $D3PID $D4PID $D5PID $D6PID; DPID=""; D2PID=""; D3PID=""; D4PID=""; D5PID=""; D6PID=""
+if daemon_tripwire "$T"; then okline "no cockpitd of this run is left running"; else fail=1; fi
 
 echo
 if [ "$fail" = 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"; fi

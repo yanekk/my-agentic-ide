@@ -9,12 +9,20 @@
 # macOS only: `ps -E` appends a process's initial environment to its command.
 # It shows nothing for Apple's platform binaries (/bin/sleep prints no env), but
 # node's is visible, and node is what a cockpitd runs as.
+#
+# `ps` and `pgrep` are called by ABSOLUTE path. cockpit-test puts a stub `ps` first
+# on its PATH (it fakes a pane's foreground process for the daemon), and every call
+# here then read the stub: `ps -E` listed nothing, so the tripwire passed with a
+# daemon leaked (measured, T02), and every pid looked alive, so daemon_stop always
+# waited out its 2s and SIGKILLed.
+_DPS=/bin/ps
+_DPGREP=/usr/bin/pgrep
 
 # Liveness that treats a zombie as gone: a killed background job of this shell
 # stays a zombie until bash reaps it, and `kill -0` would call that alive.
 _daemon_alive() {
   local st
-  st=$(ps -o stat= -p "$1" 2>/dev/null) || return 1
+  st=$("$_DPS" -o stat= -p "$1" 2>/dev/null) || return 1
   [ -n "$st" ] && [[ $st != Z* ]]
 }
 
@@ -25,7 +33,7 @@ _daemon_tree() {
   local p c
   for p in "$@"; do
     echo "$p"
-    for c in $(pgrep -P "$p" 2>/dev/null); do _daemon_tree "$c"; done
+    for c in $("$_DPGREP" -P "$p" 2>/dev/null); do _daemon_tree "$c"; done
   done
 }
 
@@ -57,7 +65,7 @@ daemon_stop() {
 # This shell and its ancestors: never a match, whatever their environment says.
 _daemon_ancestors() {
   local table p=$$ pp
-  table=$(ps -ax -o pid=,ppid= 2>/dev/null)
+  table=$("$_DPS" -ax -o pid=,ppid= 2>/dev/null)
   while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
     echo "$p"
     pp=$(awk -v p="$p" '$1 == p { print $2; exit }' <<<"$table")
@@ -75,8 +83,8 @@ _daemon_ancestors() {
 daemon_pids() {
   local T=${1%/} plain envd line pid rest anc
   [ -n "$T" ] || return 0
-  plain=$(ps -ww -ax -o pid=,command= 2>/dev/null)
-  envd=$(ps -E -ww -ax -o pid=,command= 2>/dev/null)
+  plain=$("$_DPS" -ww -ax -o pid=,command= 2>/dev/null)
+  envd=$("$_DPS" -E -ww -ax -o pid=,command= 2>/dev/null)
   anc=" $(_daemon_ancestors | tr '\n' ' ') "
   # A space-delimited string, not `local -A`: /bin/bash 3.2 has no associative
   # arrays, and there `local -A` fails and leaves a GLOBAL array that remembers
@@ -112,7 +120,7 @@ daemon_tripwire() {
     sleep 0.1
   done
   for pid in $pids; do
-    path=$(ps -E -ww -p "$pid" -o command= 2>/dev/null | tr ' ' '\n' |
+    path=$("$_DPS" -E -ww -p "$pid" -o command= 2>/dev/null | tr ' ' '\n' |
       grep -F -m1 "=$T/" | cut -d= -f2-)
     echo "LEAK cockpitd pid $pid still running, env names ${path:-$T/}"
   done
