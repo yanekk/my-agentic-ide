@@ -9,6 +9,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🐞 | T07: macOS `fs.watch` dropped a second `pir-dashboard.json` change made ~0.4s after the first: 5/384 lost under 4 concurrent suites, 0/288 at 1.5s. The suite spaces pir writes (`pirspace`); T11, added with the person's yes, is the daemon backstop. |
+| 2026-09-27 | 📌 | T07 pir sections 15a–16p, 15m–15o, `TIMINGS=1`: before 75.7s (load ~40), after 46.6s (load ~2); 21.7s before the spacing. 16m and 16n stay ~9s each, mostly spacing. 554 checks unchanged. |
+| 2026-09-27 | 📌 | 11c'''' "a browser sitting at a shell is never questioned" failed 2 of ~40 main-chain runs during T07: once on the unmodified script at load 40, once at load 3. Untouched by T07; T04's section. |
 | 2026-09-27 | 📌 | T06 review: 14's in-flight window is a fixed 1.5s but `BB_TICK_MS` grows with SPEED; at 1.0 (800ms) about one tick lands behind the held pass, at 2.0 none, making the check vacuous. Mutant still caught at 1.0; left. |
 | 2026-09-27 | 📌 | T06 dashboard chain, `TIMINGS=1`, load ~3: before 14 33.5s, 14d 24.5s, 14b 10.2s, total 68.4s; after 9.5, 3.9, 2.1, 16.0s. 85 checks unchanged. `ONLY=14c` 5 serial and 3×4 concurrent runs passed, load up to 11. |
 | 2026-09-27 | 📌 | bitbucket `refreshPRs` logs each repo, then writes the cache once at pass end. A poll on the log line can read the previous pass's cache; T06 polls the cache (`bqtrue`) or waits for a second log line. |

@@ -2083,6 +2083,23 @@ before_last "...and it came BEFORE the reap, not after" \
 in_slot "the attached agent still holds the slot" "$(pane_key diff)"
 fi
 
+# --- waits for the pir-pane sections (15a-16p, plans/test-suite-speed T07) ---
+# No log line marks the END of an attach or an exit: "pir: enter" and "exit ... →
+# fleet list" are logged BEFORE the panes move. showTerminal writes terminals.json
+# LAST (after the parks, the focus and panes.json), so the footer's label changing
+# is the end of the pane dance, and these sections poll for it with `waitfor` on
+# terminals.json (a whole-file rewrite, so a poll there reads state, not history).
+# tjlacks <fragment>: for waituntil, the footer no longer carries a fragment.
+tjlacks() { ! grep -qF -- "$1" "$T/state/terminals.json"; }
+# fleetclick <claude|pir>: click a fleet label and wait for switchFleet to finish.
+# "fleet slot now shows" is its last line, after the park, the focus and the
+# footer write; counted against a baseline because the log is cumulative (3.3).
+fleetclick() {
+  local n0; n0=$(countof "fleet slot now shows $1" "$T/daemon.log")
+  echo "fleet-$1" >> "$T/state/cmd"
+  waitmore "fleet slot now shows $1" "$T/daemon.log" "$n0" 10 "the fleet slot to show $1"
+}
+
 if section 15a "the fleet slot: PIR is refused with an agent attached, nothing moves"; then
 # pir-pane T03. The bottom-left slot can hold claude agents OR the pir dashboard, the
 # other one parked. A switch is only allowed with the shown program at its list
@@ -2090,7 +2107,7 @@ if section 15a "the fleet slot: PIR is refused with an agent attached, nothing m
 : > "$CALLS"
 R0="$(countof "refusing fleet-pir: claude is not at its list" "$T/daemon.log")"
 echo fleet-pir >> "$T/state/cmd"
-nap 2
+waitmore "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0" 10 "the fleet-pir refusal"
 grew   "the refusal was logged"                    "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0"
 refute "no pir pane was spawned"                   "cockpit-pir.sh" "$CALLS"
 refute "the claude pane was not parked"            "move-pane-to-new-tab --pane-id 20" "$CALLS"
@@ -2109,31 +2126,32 @@ cat > "$AGENTS_JSON" <<JSON
   "sessionId":"s3","name":"stray agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 echo list > "$FLEETSTATE"
-nap 3
+waitfor '"switchable":true' "$T/state/terminals.json" 10 "the switch to go clickable at the list"
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 check  "at the list the switch is clickable"       '"switchable":true' "$T/state/terminals.json"
 echo "stray agent" > "$FLEETSTATE"
-nap 3
+# The non-repo line is logged after noteSwitchable has written the dim switch.
+waitfor "at non-repo $T/home" "$T/daemon.log" 10 "the stray agent to be judged non-repo"
 check  "the stray agent was not attached"          "at non-repo $T/home" "$T/daemon.log"
 check  "...the panes stayed on the repo"           '"agent":"repo"' "$T/state/terminals.json"
 check  "...and the switch went dim anyway"         '"switchable":false' "$T/state/terminals.json"
 : > "$CALLS"
 R0="$(countof "refusing fleet-pir: claude is not at its list" "$T/daemon.log")"
 echo fleet-pir >> "$T/state/cmd"
-nap 2
+waitmore "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0" 10 "the stray fleet-pir refusal"
 grew   "a stray fleet-pir is refused there too"    "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0"
 refute "...and spawns nothing"                     "cockpit-pir.sh" "$CALLS"
 fi
 
 if section 15c "back at the list: claude shown, switchable, pir available"; then
 echo list > "$FLEETSTATE"
-nap 3
+waitfor '"fleet":{"program":"claude","switchable":true,"available":true}' "$T/state/terminals.json" 10 "the switch to go clickable again"
 check  "terminals.json carries the fleet block"    '"fleet":{"program":"claude","switchable":true,"available":true}' "$T/state/terminals.json"
 fi
 
 if section 15d "PIR at the list: the pir pane is spawned into the slot, claude parked"; then
 : > "$CALLS"
-echo fleet-pir >> "$T/state/cmd"
-nap 2
+fleetclick pir
 PIRP="$(pane_key pir)"
 same   "panes.json names the pir pane"             "$([ -n "$PIRP" ] && echo yes || echo no)" "yes"
 check  "split into the claude pane, T00's order"   "split-pane --left --percent 50 --pane-id 20 --cwd $WT --" "$CALLS"
@@ -2152,6 +2170,9 @@ fi
 if section 15e "while pir is shown, the claude pane's text attaches nothing"; then
 E0="$(countof "enter abc12345" "$T/daemon.log")"
 echo "test agent" > "$FLEETSTATE"
+# Window: POLL_MS (800 scaled) is the reconcile cadence, and an ungated one enters
+# within one poll plus a `claude agents` read; 1.5s at 0.5 is ~4 polls. Nothing is
+# logged while pir is shown, so there is no event to poll for instead.
 nap 3
 same   "no agent was entered (reconcile is gated)" "$(countof "enter abc12345" "$T/daemon.log")" "$E0"
 check  "the panes stayed on the repo"              '"agent":"repo"' "$T/state/terminals.json"
@@ -2161,10 +2182,11 @@ fi
 
 if section 15f "while pir is shown, focus-claude activates nothing"; then
 : > "$CALLS"
+F0="$(countof "focus-claude ignored: pir is shown" "$T/daemon.log")"
 echo focus-claude >> "$T/state/cmd"
-nap 1
+waitmore "focus-claude ignored: pir is shown" "$T/daemon.log" "$F0" 10 "focus-claude to be ignored"
 refute "no pane was activated"                     "activate-pane" "$CALLS"
-check  "the ignore was logged"                     "focus-claude ignored: pir is shown" "$T/daemon.log"
+grew   "the ignore was logged"                     "focus-claude ignored: pir is shown" "$T/daemon.log" "$F0"
 fi
 
 if section 15g "terminals still land in the cockpit tab with claude parked"; then
@@ -2173,16 +2195,17 @@ if section 15g "terminals still land in the cockpit tab with claude parked"; the
 # parked tab ($FTAB) and fill the window with it.
 : > "$CALLS"
 echo new >> "$T/state/cmd"
-nap 2
+# terminalCommand writes terminals.json after its park and its log line.
+waitfor '"n":2,"active":true' "$T/state/terminals.json" 10 "the new repo terminal"
 NEWT="$(grep -oE 'opened terminal pane [0-9]+ for repo' "$T/daemon.log" | tail -1 | grep -oE '[0-9]+')"
 in_slot "the new repo terminal is in the slot"     "$NEWT"
 check  "parking re-activated the cockpit tab"      "activate-tab --tab-id 0" "$CALLS"
 refute "...never claude's parked tab"              "activate-tab --tab-id $FTAB" "$CALLS"
 echo next >> "$T/state/cmd"
-nap 2
+waitfor '"n":1,"active":true' "$T/state/terminals.json" 10 "next to cycle the repo terminals"
 check  "next cycled the repo terminals"            '"n":1,"active":true' "$T/state/terminals.json"
 echo close-2 >> "$T/state/cmd"
-nap 2
+waituntil 10 "close-2 to close the second terminal" tjlacks '"n":2'
 refute "close-2 closed the second"                 '"n":2' "$T/state/terminals.json"
 refute "no park activated claude's tab"            "activate-tab --tab-id $FTAB" "$CALLS"
 in_slot "the pir pane still holds the slot"        "$PIRP"
@@ -2190,8 +2213,7 @@ fi
 
 if section 15h "Claude Agents: claude comes back, pir is parked, not killed"; then
 : > "$CALLS"
-echo fleet-claude >> "$T/state/cmd"
-nap 2
+fleetclick claude
 check  "claude split back into the pir pane"      "split-pane --left --percent 50 --pane-id $PIRP --move-pane-id 20" "$CALLS"
 before "...before pir was parked"                  "--move-pane-id 20" "move-pane-to-new-tab --pane-id $PIRP" "$CALLS"
 in_slot "the claude pane holds the slot"           20
@@ -2202,8 +2224,7 @@ fi
 
 if section 15i "PIR again restores the SAME pir pane, spawning nothing"; then
 : > "$CALLS"
-echo fleet-pir >> "$T/state/cmd"
-nap 2
+fleetclick pir
 check  "the parked pir pane was moved back"        "split-pane --left --percent 50 --pane-id 20 --move-pane-id $PIRP" "$CALLS"
 refute "no second pir pane was spawned"            "cockpit-pir.sh" "$CALLS"
 same   "panes.json still names the same pane"      "$(pane_key pir)" "$PIRP"
@@ -2217,8 +2238,10 @@ if section 15j "a Review click while pir is shown switches to claude, THEN spawn
 printf '{"version":1,"meUuid":null,"repos":{"alpha":{"fetchedAt":1,"prs":[{"id":7,"links":{"html":{"href":"https://bitbucket.org/ws/pr/7"}}}]}}}\n' \
   > "$T/state/bitbucket-cache.json"
 : > "$CALLS"
+SP0="$(countof "spawned agent in alpha" "$T/daemon.log")"
 echo bb-review:alpha/7 >> "$T/state/cmd"
-nap 2
+# spawnAgent logs this after the switch and both sends.
+waitmore "spawned agent in alpha" "$T/daemon.log" "$SP0" 10 "the Review click to spawn"
 before "claude was brought back before anything was typed" "--move-pane-id 20" "send-text --pane-id 20" "$CALLS"
 check  "the review directive went to claude's box" "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$CALLS"
 same   "...as the text then a real Enter"          "$(grep -c -- 'send-text --pane-id 20 --no-paste' "$CALLS")" "2"
@@ -2231,14 +2254,12 @@ fi
 if section 15k "a pir pane that died is spawned afresh on the next PIR"; then
 awk -v p="$PIRP" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
 : > "$CALLS"
-echo fleet-pir >> "$T/state/cmd"
-nap 2
+fleetclick pir
 PIRP2="$(pane_key pir)"
 check  "a new pir pane was spawned"                "cockpit-pir.sh" "$CALLS"
 refute "...not a move of the dead one"             "--move-pane-id $PIRP" "$CALLS"
 in_slot "the new pir pane holds the slot"          "$PIRP2"
-echo fleet-claude >> "$T/state/cmd"
-nap 2
+fleetclick claude
 in_slot "and claude comes back from it"            20
 fi
 
@@ -2247,8 +2268,9 @@ if section 15k2 "PIR then Claude Agents read in one tick: both happen, claude en
 # arrive together, and the second was checked against the program before the first
 # had switched -- dropped as "already shown", leaving pir up after a Claude click.
 S0="$(countof "fleet slot now shows" "$T/daemon.log")"
+C0="$(countof "fleet slot now shows claude" "$T/daemon.log")"
 printf 'fleet-pir\nfleet-claude\n' >> "$T/state/cmd"
-nap 3
+waitmore "fleet slot now shows claude" "$T/daemon.log" "$C0" 10 "the second click to switch"
 same   "both clicks switched"                      "$(countof "fleet slot now shows" "$T/daemon.log")" "$((S0 + 2))"
 in_slot "the last click's program holds the slot"  20
 check  "...and the footer says claude"             '"program":"claude"' "$T/state/terminals.json"
@@ -2257,14 +2279,14 @@ fi
 if section 15l "after the swaps, an agent attach still lands in the cockpit tab"; then
 : > "$CALLS"
 echo "test agent" > "$FLEETSTATE"
-nap 4
+waitfor '"agent":"test agent"' "$T/state/terminals.json" 10 "the agent attach to finish"
 check  "the agent was entered"                     "enter abc12345" "$T/daemon.log"
 in_slot "its diff pane is in the slot"             "$(pane_key diff)"
 in_slot "its terminal is in the slot"              "$(pane_key shell)"
 check  "parks re-activated the cockpit tab"        "activate-tab --tab-id 0" "$CALLS"
 check  "focus handed back to the claude pane"      "activate-pane --pane-id 20" "$CALLS"
 echo list > "$FLEETSTATE"
-nap 3
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 fi
 
 if section 16a "pir reports a RUN: its shared worktree attaches at custom-against-fork-point"; then
@@ -2283,23 +2305,37 @@ MAINTIP="$(git -C "$PREPO" rev-parse --short HEAD)"
 # pirwrite <view> <run cwd|null> [<worker cwd|null>] [pid]: one atomic write. The pid
 # defaults to this script's own, which is alive for as long as the suite runs.
 pirjson() { [ "$1" = null ] && printf null || printf '"%s"' "$1"; }
+# pirspace / pirmark: every change to pir-dashboard.json lands at least 1.5s after
+# the one before. macOS's directory watch drops a second change to the same file made
+# ~0.4s after the first -- measured 2026-09-27: 5 of 384 lost with the polls back to
+# back, 0 of 288 at 1.5s (FINDINGS). A lost one is never acted on, so this is not a
+# window being proved but a daemon weakness worked around until T11's backstop lands.
+# Real seconds, not `nap`: the drop is the OS's timing, not the daemon's.
+PIR_LAST=0
+pirspace() {
+  local w
+  w=$(awk -v l="$PIR_LAST" -v n="${EPOCHREALTIME/,/.}" 'BEGIN{ d=1.5-(n-l); if (d>0) printf "%.3f", d; else print 0 }')
+  [ "$w" = 0 ] || sleep "$w"
+}
+pirmark() { PIR_LAST=${EPOCHREALTIME/,/.}; }
 pirwrite() {
   local view="$1" run="null" worker="null" pid="${4:-$$}"
+  pirspace
   [ "$view" != list ] && run="{\"key\":\"proj__slug\",\"kind\":\"work\",\"slug\":\"slug\",\"repo\":\"proj\",\"repoPath\":\"$PREPO\",\"branch\":\"pir/slug\",\"cwd\":$(pirjson "$2")}"
   [ "$view" = worker ] && worker="{\"id\":\"w1\",\"task\":\"T01\",\"role\":\"implement\",\"cwd\":$(pirjson "$3")}"
   printf '{"version":1,"pid":%s,"view":"%s","run":%s,"worker":%s,"updatedAt":"2026-09-27T00:00:00.000Z"}\n' \
     "$pid" "$view" "$run" "$worker" > "$T/state/pir-dashboard.json.tmp"
   mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+  pirmark
 }
 RK="pir.proj__slug"; WK="pir.proj__slug.w1"
 RFILE="$T/state/review-$RK.md"
-rm -f "$T/state/pir-dashboard.json"
-echo fleet-pir >> "$T/state/cmd"
-nap 2
+rm -f "$T/state/pir-dashboard.json"; pirmark
+fleetclick pir
 check  "pir is shown, and with no file it is at its list" '"fleet":{"program":"pir","switchable":true' "$T/state/terminals.json"
 : > "$CALLS"
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug","diffMode":"custom"' "$T/state/terminals.json" 10 "the run key's attach to finish"
 check  "the run key was entered at the run's folder" "pir: enter $RK → $PRUN" "$T/daemon.log"
 RDIFF="$(pane_key diff)"; RTERM="$(pane_key shell)"
 in_slot "its diff pane holds the slot"             "$RDIFF"
@@ -2316,7 +2352,7 @@ check  "the switch is dim while pir is in a run"   '"switchable":false' "$T/stat
 refute "the fork point was never persisted"        "$RK" "$T/state/custom-refs.json"
 R0="$(countof "refusing fleet-claude: pir is not at its list" "$T/daemon.log")"
 echo fleet-claude >> "$T/state/cmd"
-nap 1.5
+waitmore "refusing fleet-claude: pir is not at its list" "$T/daemon.log" "$R0" 10 "the fleet-claude refusal"
 grew   "Claude Agents is refused inside a run"     "refusing fleet-claude: pir is not at its list" "$T/daemon.log" "$R0"
 in_slot "...and pir keeps the slot"                "$PIRP2"
 fi
@@ -2332,7 +2368,7 @@ if section 16c "a revdiff flush on a pir key: nothing typed, logged, file kept";
 : > "$CALLS"
 N0="$(countof "review not sent: pir has no input box" "$T/daemon.log")"
 printf '## runwork.txt:1 (+)\nPIR REVIEW STAYS\n' > "$RFILE"
-nap 1.5
+waitmore "review not sent: pir has no input box" "$T/daemon.log" "$N0" 10 "the inert review's log line"
 grew   "the inert review was logged"               "review not sent: pir has no input box" "$T/daemon.log" "$N0"
 refute "nothing was typed into any pane"           "send-text" "$CALLS"
 check  "the review file was left as flushed"       "PIR REVIEW STAYS" "$RFILE"
@@ -2343,7 +2379,9 @@ if section 16d "⌥[ with the diff focused cycles the pir key's own mode"; then
 : > "$CALLS"
 echo "$RDIFF" > "$ACTIVE"
 echo prev >> "$T/state/cmd"
-nap 2
+# relaunchDiff logs, then diffModeCommand writes the footer.
+waitfor "relaunched diff pane $RDIFF for $RK in lastcommit mode" "$T/daemon.log" 10 "the lastcommit relaunch"
+waitfor '"diffMode":"lastcommit"' "$T/state/terminals.json" 10 "the footer to show lastcommit"
 : > "$ACTIVE"
 check  "the run key relaunched in lastcommit"      "relaunched diff pane $RDIFF for $RK in lastcommit mode" "$T/daemon.log"
 check  "the footer shows it"                       '"diffMode":"lastcommit"' "$T/state/terminals.json"
@@ -2352,7 +2390,7 @@ fi
 if section 16e "pir reports a WORKER: its own key and folder, at uncommitted"; then
 : > "$CALLS"
 pirwrite worker "$PRUN" "$PWORK"
-nap 3
+waitfor '"agent":"slug / T01"' "$T/state/terminals.json" 10 "the worker key's attach to finish"
 check  "the worker key was entered"                "pir: enter $WK → $PWORK" "$T/daemon.log"
 WDIFF="$(pane_key diff)"; WTERM="$(pane_key shell)"
 in_slot "its own diff pane holds the slot"         "$WDIFF"
@@ -2368,7 +2406,7 @@ if section 16f "back to the RUN: its parked panes return untouched"; then
 : > "$CALLS"
 RL0="$(countof "relaunched diff pane $RDIFF" "$T/daemon.log")"
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug","diffMode":"lastcommit"' "$T/state/terminals.json" 10 "the run key's return to finish"
 in_slot "the run's diff pane is back"              "$RDIFF"
 in_slot "...and its terminal"                      "$RTERM"
 parked "the worker's diff pane is parked"          "$WDIFF"
@@ -2380,7 +2418,7 @@ fi
 if section 16g "back to the LIST: the welcome pane and the repo terminals"; then
 : > "$CALLS"
 pirwrite list
-nap 3
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 check  "the run key was left"                      "exit $RK → fleet list" "$T/daemon.log"
 check  "the footer is back on the repo"            '"agent":"repo"' "$T/state/terminals.json"
 check  "...reviewable again"                       '"reviewable":true' "$T/state/terminals.json"
@@ -2392,18 +2430,20 @@ fi
 
 if section 16h "a pir key's diff pane killed while shown is re-attached, no file write"; then
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
 in_slot "the run is shown again"                   "$RDIFF"
 H0="$(countof "pir: enter $RK" "$T/daemon.log")"
 O0="$(countof "opened diff pane" "$T/daemon.log")"
 awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
-waitfor "diff pane for $RK is gone; rebuilding" "$T/daemon.log" 6
-waitmore "pir: enter $RK" "$T/daemon.log" "$H0" 6
+waitfor "diff pane for $RK is gone; rebuilding" "$T/daemon.log" 10 "the heal to notice the killed pane"
+waitmore "pir: enter $RK" "$T/daemon.log" "$H0" 10 "the heal to re-enter the run"
 grew   "the heal re-ran pir's state"               "pir: enter $RK" "$T/daemon.log" "$H0"
 # "pir: enter" is logged before showDiff splits the new pane, so wait for the open
 # itself before reading its id (read too early, pane_key returned the killed one).
-waitmore "opened diff pane" "$T/daemon.log" "$O0" 6
-nap 0.5
+waitmore "opened diff pane" "$T/daemon.log" "$O0" 10 "the heal's new diff pane"
+# ...and panes.json is published after that line: poll it off the killed id.
+newdiff() { local k; k=$(pane_key diff); [ -n "$k" ] && [ "$k" != "$RDIFF" ]; }
+waituntil 10 "panes.json to name the new diff pane" newdiff
 RDIFF="$(pane_key diff)"
 in_slot "a fresh diff pane holds the slot"         "$RDIFF"
 check  "...opened at the run's folder"            "opened diff pane $RDIFF for slug at $PRUN" "$T/daemon.log"
@@ -2412,9 +2452,11 @@ fi
 if section 16i "the same key at a new folder: revdiff relaunched there, watches moved"; then
 git -C "$PREPO" worktree add -q -b pir/slug-renamed "$PRUN2" pir/slug
 : > "$CALLS"
-nap 2   # past the relaunch cooldown of the heal above
+# Window: DIFF_RELAUNCH_COOLDOWN_MS (3000 scaled, 1.5s at 0.5) from the heal's launch
+# in 16h, plus 0.25s; 16h no longer spends it on sleeps, so it is spent here whole.
+nap 3.5
 pirwrite run "$PRUN2"
-nap 3
+waitfor "cd \"$PRUN2\" && revdiff" "$CALLS" 10 "revdiff to relaunch in the new folder"
 check  "the move was followed"                     "agent $RK moved worktree $PRUN → $PRUN2" "$T/daemon.log"
 check  "revdiff relaunched in the new folder"      "cd \"$PRUN2\" && revdiff" "$CALLS"
 in_slot "the same diff pane still holds the slot"  "$RDIFF"
@@ -2425,14 +2467,14 @@ if section 16i2 "the SHOWN worker's folder removed, pir writes nothing: the run 
 # conversation open; its recorded cwd has not changed, so it writes no new report.
 # Found by the T06 drill on a real mux: revdiff sat on a chdir error until pir moved.
 pirwrite worker "$PRUN2" "$PWORK"
-nap 3
+waitfor '"agent":"slug / T01"' "$T/state/terminals.json" 10 "the worker key's attach to finish"
 in_slot "the worker is shown"                      "$WDIFF"
 E1="$(countof "pir: enter $RK" "$T/daemon.log")"
 git -C "$PREPO" worktree remove --force "$PWORK"
-waitfor "pir: the folder of $WK is gone; re-reading pir's report" "$T/daemon.log" 6
-waitmore "pir: enter $RK" "$T/daemon.log" "$E1" 6
+waitfor "pir: the folder of $WK is gone; re-reading pir's report" "$T/daemon.log" 10 "the vanished worker folder to be noticed"
+waitmore "pir: enter $RK" "$T/daemon.log" "$E1" 10 "the run to be re-entered"
 grew   "the run was entered without a pir write"   "pir: enter $RK" "$T/daemon.log" "$E1"
-nap 1
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run's attach to finish"
 in_slot "the run's diff pane holds the slot"       "$RDIFF"
 check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
 same   "the vanished folder was logged once"       "$(countof "the folder of $WK is gone" "$T/daemon.log")" "1"
@@ -2442,11 +2484,14 @@ if section 16j "worker folder gone: the run is shown, and the worker key is reap
 [ ! -d "$PWORK" ] || git -C "$PREPO" worktree remove --force "$PWORK"
 E0="$(countof "pir: enter $WK" "$T/daemon.log")"
 pirwrite worker "$PRUN2" "$PWORK"
+# Window: PIR_DEBOUNCE_MS (150 scaled) after the write, plus fs.watch delivery and
+# an attach's start; 1.5s at 0.5. decidePir answers the already-shown run, which
+# logs nothing, so there is no event to poll for.
 nap 3
 same   "the worker was not entered"                "$(countof "pir: enter $WK" "$T/daemon.log")" "$E0"
 in_slot "the run stays shown"                      "$RDIFF"
 check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
-waitfor "pir folder $PWORK is gone" "$T/daemon.log" 6
+waitfor "pir folder $PWORK is gone" "$T/daemon.log" 10 "the worker key's reap"
 gone   "the worker's diff pane was reaped"         "$WDIFF"
 gone   "...and its terminal"                       "$WTERM"
 fi
@@ -2457,13 +2502,13 @@ if section 16k "the shown run's folder goes too: the list, and only then is the 
 # folders gone decidePir answers the list (DESIGN 2.5), and the key, no longer shown,
 # is reaped.
 rm -rf "$PRUN2"
-waitfor "pir: the folder of $RK is gone; re-reading pir's report" "$T/daemon.log" 6
-waitfor "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log" 6
+waitfor "pir: the folder of $RK is gone; re-reading pir's report" "$T/daemon.log" 10 "the vanished run folder to be noticed"
+waitfor "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log" 10 "the list to be chosen"
 check  "both gone: the list, and why"              "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log"
-nap 1
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 check  "the repo is shown"                         '"agent":"repo"' "$T/state/terminals.json"
 check  "...not switchable: pir is not at its list" '"switchable":false' "$T/state/terminals.json"
-waitfor "reaped diff pane $RDIFF — pir folder $PRUN2 is gone" "$T/daemon.log" 6
+waitfor "reaped diff pane $RDIFF — pir folder $PRUN2 is gone" "$T/daemon.log" 10 "the run key's reap"
 gone   "once not shown, the run key was reaped"    "$RDIFF"
 gone   "...terminal and all"                       "$RTERM"
 git -C "$PREPO" worktree prune
@@ -2472,7 +2517,7 @@ fi
 if section 16l "a folder that is not a git work tree reads as the list"; then
 mkdir -p "$T/notgit"
 pirwrite run "$T/notgit"
-nap 3
+waitfor "pir: run folder is not a git work tree: $T/notgit" "$T/daemon.log" 10 "the non-git folder to be judged"
 check  "logged"                                    "pir: run folder is not a git work tree: $T/notgit" "$T/daemon.log"
 check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
 fi
@@ -2481,14 +2526,15 @@ if section 16m "a dead pid, a corrupt file and no file all read as the list"; th
 sleep 0 & DEADPID=$!; wait "$DEADPID"
 for how in dead corrupt missing; do
   pirwrite run "$PRUN"
-  nap 3
+  waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "$how: the run key's attach to finish"
   X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
   case "$how" in
     dead)    pirwrite run "$PRUN" "" "$DEADPID" ;;
-    corrupt) printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json" ;;
-    missing) rm -f "$T/state/pir-dashboard.json" ;;
+    corrupt) pirspace; printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json"; pirmark ;;
+    missing) pirspace; rm -f "$T/state/pir-dashboard.json"; pirmark ;;
   esac
-  nap 3
+  waitmore "exit $RK → fleet list" "$T/daemon.log" "$X0" 10 "$how: the run key to be left"
+  waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "$how: the exit to the list to finish"
   grew "$how: the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
   check "$how: switchable again"                  '"switchable":true' "$T/state/terminals.json"
 done
@@ -2497,55 +2543,66 @@ fi
 if section 16n "a stored ref wins over the fork point; one that stopped resolving is uncommitted"; then
 git -C "$PREPO" branch tmpbase "$FORK"
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
 RDIFF="$(pane_key diff)"
 echo diff-custom >> "$T/state/cmd"
-nap 2
+waitfor "opened custom-range prompt for $RK" "$T/daemon.log" 10 "the custom-range prompt"
 check  "the prompt is pre-filled with the fork point" "opened custom-range prompt for $RK (prefill \"$FORK\")" "$T/daemon.log"
 printf '{"jobId":"%s","ref":"tmpbase"}' "$RK" > "$T/state/custom-ref-pending"
+CS0="$(countof "custom range set for $RK: tmpbase" "$T/daemon.log")"
 echo custom-ok >> "$T/state/cmd"
-nap 2
+# Logged last, after the ref is stored and revdiff relaunched: past it, no launch
+# line from this relaunch can land in the $CALLS truncated below.
+waitmore "custom range set for $RK: tmpbase" "$T/daemon.log" "$CS0" 10 "the custom ref to be set"
 check  "the person's ref is stored for the key"    "\"$RK\":\"tmpbase\"" "$T/state/custom-refs.json"
-pirwrite list; nap 3
+pirwrite list
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 # A parked pane that died is spawned afresh, so the launch line shows the ref used.
 awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
 : > "$CALLS"
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
 check  "the stored ref is used"                    "-o \"$RFILE\" \"tmpbase\"" "$CALLS"
 RDIFF="$(pane_key diff)"
-pirwrite list; nap 3
+pirwrite list
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 git -C "$PREPO" branch -D -q tmpbase
 awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
 : > "$CALLS"
 pirwrite run "$PRUN"
-nap 3
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
 check  "a stale stored ref is logged"              "$RK starts at uncommitted: stored ref does not resolve: tmpbase" "$T/daemon.log"
 check  "...and the key opens uncommitted"          "-o \"$RFILE\" HEAD" "$CALLS"
 refute "...never the prompt"                       "cockpit-custom-prompt" "$CALLS"
-pirwrite list; nap 3
+pirwrite list
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 fi
 
 if section 16o "no main to fork from: uncommitted, logged"; then
 NOMAIN="$T/nomain"; mkdir -p "$NOMAIN"; git init -q -b trunk "$NOMAIN"
 git -C "$NOMAIN" config user.email t@t; git -C "$NOMAIN" config user.name t
 git -C "$NOMAIN" commit -q --allow-empty -m base
+pirspace
 printf '{"version":1,"pid":%s,"view":"run","run":{"key":"proj__nomain","slug":"nomain","cwd":"%s"},"worker":null}\n' "$$" "$NOMAIN" \
   > "$T/state/pir-dashboard.json.tmp" && mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+pirmark
 : > "$CALLS"
-nap 3
+waitfor '"agent":"nomain"' "$T/state/terminals.json" 10 "the nomain key's attach to finish"
 check  "the failed merge-base is logged"           "pir.proj__nomain starts at uncommitted: no fork point from main (git merge-base failed)" "$T/daemon.log"
 check  "...and the key opens uncommitted"          "review-pir.proj__nomain.md\" HEAD" "$CALLS"
-check  "the footer agrees"                         '"diffMode":"uncommitted"' "$T/state/terminals.json"
-pirwrite list; nap 3
+# The key's own label with it: at the list the footer reads uncommitted too (3.3).
+check  "the footer agrees"                         '"agent":"nomain","diffMode":"uncommitted"' "$T/state/terminals.json"
+pirwrite list
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
 fi
 
 if section 16p "while claude is shown, pir's file does nothing"; then
-echo fleet-claude >> "$T/state/cmd"
-nap 2
+fleetclick claude
 in_slot "claude is back in the fleet slot"         20
 E0="$(countof "pir: enter" "$T/daemon.log")"
 pirwrite run "$PRUN"
+# Window: PIR_DEBOUNCE_MS (150 scaled) plus fs.watch delivery and an attach's start,
+# as in 16j; 1.5s at 0.5. While claude is shown the watch drops the write silently.
 nap 3
 same   "nothing was entered"                       "$(countof "pir: enter" "$T/daemon.log")" "$E0"
 check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
@@ -2579,10 +2636,11 @@ PATH="$NOPIR_PATH" HOME="$T/home" SHELL=/bin/zsh COCKPIT_OWNER_PID="$$" \
   PSBUSY="$A7/psbusy" PSFG="$A7/psfg" AGENTS_JSON="$AGENTS_JSON" \
   "$NODE_BIN" "$ROOT/bin/cockpitd.mjs" > "$A7/daemon.log" 2>&1 &
 D7PID=$!
-sleep 2
+d7has() { grep -qF -- "$1" "$S7/terminals.json"; }
+waituntil 10 "D7's first footer frame" d7has '"available":false'
 check  "the footer is told pir is unavailable"    '"available":false' "$S7/terminals.json"
 echo fleet-pir >> "$S7/cmd"
-sleep 1
+waitfor "refusing fleet-pir: pir is not on the daemon's PATH" "$A7/daemon.log" 10 "D7's fleet-pir refusal"
 check  "PIR is refused, and says why"             "refusing fleet-pir: pir is not on the daemon's PATH" "$A7/daemon.log"
 refute "...spawning nothing"                      "cockpit-pir.sh" "$A7/calls.log"
 check  "...and claude stays shown"                '"program":"claude"' "$S7/terminals.json"
@@ -2601,7 +2659,10 @@ PIRSTUB
 chmod +x "$PL/pir"
 PIRRUNS="$PL/runs" bash "$ROOT/bin/cockpit-pir.sh" "$PL/pir" "$PL/state.json" </dev/null > "$PL/out" 2>&1 &
 PLPID=$!
-sleep 3
+waitfor "until you press Enter" "$PL/out" 10 "the relaunch loop to give up"
+# Window, unscaled (the loop's own timing is real seconds): a closed stdin taken for
+# Enter would relaunch pir within milliseconds of that message.
+sleep 0.5
 same   "five runs, then it stopped relaunching"   "$(wc -l < "$PL/runs" | tr -d ' ')" "5"
 same   "...each handed the state file"            "$(grep -cFx "$PL/state.json" "$PL/runs")" "5"
 check  "it said why"                              "pir exited immediately 5 times in a row (last exit status 3)" "$PL/out"
