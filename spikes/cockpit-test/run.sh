@@ -3184,9 +3184,10 @@ d2env() {
 }
 d2env node "$ROOT/bin/cockpitd.mjs" > "$A2/daemon.log" 2>&1 &
 D2PID=$!
-# Booted: its first fleet poll reaches the wezterm stub only after the start-up
-# refresh has read the (empty) state. Then two and a half ticks with nothing
-# configured is the window that proves a tick asks for nothing.
+# Booted: it has reached the wezterm stub. Nothing is configured yet, so whether
+# the start-up refresh has run by then does not matter here (D3's boot below is
+# where it does). Then two and a half ticks with nothing configured is the window
+# that proves a tick asks for nothing.
 waituntil 10 "the agenda daemon D2 to boot" test -s "$A2/calls.log"
 nap 2   # window: 2.5 x AGENDA_TICK_MS
 
@@ -3339,22 +3340,26 @@ d3env() {
 }
 d3env node "$ROOT/bin/cockpitd.mjs" > "$A3/daemon.log" 2>&1 &
 D3PID=$!
+# polls_past <n>: has D3 read the fleet pane more than n times? Only reconcile
+# reads pane 20, and it holds its lock through onExit, so a poll counted AFTER the
+# exit line was made after the on-return refresh had started. Two of them span a
+# full POLL_MS, time for a fetch it started to reach the stub.
+polls_past() { [ "$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")" -gt "$1" ]; }
+
 # Configured only AFTER boot, so the one refresh at start-up finds nothing to do
-# and cannot be mistaken for the on-return trigger below. Booted means its first
-# fleet poll has reached the stub, which follows the start-up refresh's state read.
-waituntil 10 "the agenda daemon D3 to boot" test -s "$A3/calls.log"
+# and cannot be mistaken for the on-return trigger below. Booted means a SECOND
+# fleet poll: the first get-text, and the `list` writeTerminals makes before it, are
+# issued while the module body is still running -- BEFORE refreshAgenda("start")
+# reads the state -- so configuring on the first stub call races the start refresh
+# into fetching w3 (reproduced with a 600ms stall before it). The second poll comes
+# from the POLL_MS interval, which cannot fire until the whole body has run.
+waituntil 10 "the agenda daemon D3 to boot" polls_past 1
 d3env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.writeClient({clientId:"cid",clientSecret:"csec"});s.putAccount("me@x.test","REFRESH-TOKEN",1);s.putCalendar({slug:"w3",account:"me@x.test",calendarId:"w3-cal",title:"W3",colour:1},1);});' "$ROOT"
 # D3's tick is an hour, so only a return could fetch here, and no return has
 # happened: 2.5 fleet polls (POLL_MS, 800ms scaled by COCKPIT_TIME_SCALE) is the
 # window in which a spurious one would have shown up.
 nap 2   # window: 2.5 x POLL_MS
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/events' "$GHITS")" "0"
-
-# polls_past <n>: has D3 read the fleet pane more than n times? Only reconcile
-# reads pane 20, and it holds its lock through onExit, so a poll counted AFTER the
-# exit line was made after the on-return refresh had started. Two of them span a
-# full POLL_MS, time for a fetch it started to reach the stub.
-polls_past() { [ "$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")" -gt "$1" ]; }
 
 # The return to the fleet LIST is the trigger (DESIGN 2.5) -- so attach first,
 # then step back out, which is what makes reconcile call onExit.
