@@ -28,7 +28,7 @@ done · ⛔ blocked, needs a human.
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
-| T06 | convert-dashboard | T01, T02 | ⬜ | |
+| T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |
