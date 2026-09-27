@@ -25,10 +25,10 @@ done · ⛔ blocked, needs a human.
 | T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ⬜ | |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
-| T04 | other-suites-tripwire | T01 | 🔍 | Seven suites source the helper, sweep in the EXIT trap, tripwire before the result line. Tripwire not counted, so check counts unchanged. Fake daemon in agenda-test printed LEAK and FAILURES, left nothing. No pir-pane-test on main; logged in FINDINGS. |
+| T04 | other-suites-tripwire | T01 | ✅ | Review clean, no fix commit. All eight suites pass with counts unchanged. Probed a leaked fake daemon in stop-notify (the `$SHIM` variant): LEAK line, FAILURES, daemon gone after. Checked no early exits or second traps bypass the sweep. Node-test scratch dirs sit outside `$T`, as designed. |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** T04
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
