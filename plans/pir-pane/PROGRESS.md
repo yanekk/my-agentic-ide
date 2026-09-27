@@ -10,10 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
-**Status:** Building. T00, T01, T03, T04 done. The pir-side change is a separate plan started from
+**Status:** Building. T00–T04 done. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T02 (footer-switch) or T05 (docs).
+**Next `pir-work` will:** implement T05 (docs) or T06 (pir-pane-drill).
 
 ## Tasks
 
@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | swap-spike | — | ✅ | |
 | T01 | pir-model | — | ✅ | |
-| T02 | footer-switch | — | ⬜ | |
+| T02 | footer-switch | — | ✅ | |
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | Reviewed: code sound, deviations accepted. Fixed a 16h race reading the healed pane id before the split (4 FAILs reproduced), added the agent `reviewable:true` check; 701 checks pass. Probed debounce, reaper, heal, start-mode reuse; one edge logged in FINDINGS. |
 | T05 | docs | T04 | ⬜ | |

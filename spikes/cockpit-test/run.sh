@@ -2644,6 +2644,142 @@ if [ "${NW:-0}" -le 140 ]; then okline "the narrow footer stays within the colum
 else echo "  FAIL the narrow footer wrapped: width $NW > 140 columns"; fail=1; fi
 rm -f "$SD/usage-cache.json"
 
+echo "== 12c. the footer's program switch: Claude Agents | PIR (pir-pane T02) =="
+# The footer reads a `fleet` block from terminals.json (pir-pane DESIGN 2.1, 2.2,
+# 3.5) and draws `Claude Agents | PIR` leftmost; a click on the label NOT shown,
+# while switchable, appends fleet-claude / fleet-pir. The daemon starts writing the
+# block in T03, so here terminals.json is hand-written, as in sections 12 and 12b.
+# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
+# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
+ffooter() {
+  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
+      "$1" "$2" > "$SD/terminals.json"
+  ( COCKPIT_DIR="$SD" COLUMNS="${3:-}" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
+SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
+FL_CLAUDE=',"fleet":{"program":"claude","switchable":true,"available":true}'
+FL_PIR=',"fleet":{"program":"pir","switchable":true,"available":true}'
+FL_LOCKED=',"fleet":{"program":"claude","switchable":false,"available":true}'
+FL_GONE=',"fleet":{"program":"claude","switchable":true,"available":false}'
+rm -f "$SD/usage-cache.json"
+
+# No fleet block: the frame is byte-for-byte the footer from before this task. The
+# hashes are of the pre-T02 renderer's output for exactly these two states (agent
+# attached, and the fleet list), captured before the change -- so "today" is pinned
+# to a real frame, not to whatever the renderer happens to draw now.
+ffooter "test agent" ""
+same "no fleet block: attached footer is byte-identical to pre-T02" \
+     "$(node -e "$SHA" "$RAW")" "6bd86012ba6cae631da6c470ae4c7fd122e65146adc8cf4c33d30d81d65abd48"
+ffooter "repo" ""
+same "no fleet block: fleet-list footer is byte-identical to pre-T02" \
+     "$(node -e "$SHA" "$RAW")" "4d6c5ffb099b94af8754ff325c24b256a5bbfd6e85f7223ed8b4fa0ebf21e08f"
+ffooter "test agent" "$FL_GONE"
+same "available:false draws no segment (the pre-T02 frame again)" \
+     "$(node -e "$SHA" "$RAW")" "6bd86012ba6cae631da6c470ae4c7fd122e65146adc8cf4c33d30d81d65abd48"
+refute "...and no PIR label"                          "PIR" "$PLAIN"
+
+# The O hint (DESIGN 2.7): only an explicit reviewable:false drops it.
+ffooter "test agent" ',"reviewable":false'
+refute "reviewable:false drops the O send→claude hint" "O send→claude" "$PLAIN"
+check  "...and keeps the other primary keys"          "⌥w close  ·  ⌥←↑↓→ move" "$PLAIN"
+ffooter "test agent" ',"reviewable":true'
+check  "reviewable:true keeps the O hint"             "O send→claude" "$PLAIN"
+
+# Drawn: leftmost, the shown program reversed, the other plain dim.
+ffooter "test agent" "$FL_CLAUDE"
+check  "the segment reads Claude Agents | PIR"        "Claude Agents  | PIR" "$PLAIN"
+same   "...leftmost, ahead of the agent name" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+check  "...Claude Agents reversed while claude is shown" "$(printf '\033[7m Claude Agents ')" "$RAW"
+check  "...PIR drawn dim"                             "$(printf '\033[2mPIR\033[0m')" "$RAW"
+check  "...the agent name still follows"              "PIR    test agent · 1 terminal" "$PLAIN"
+ffooter "test agent" "$FL_PIR"
+check  "PIR reversed while pir is shown"              "$(printf '\033[7m PIR ')" "$RAW"
+check  "...Claude Agents drawn dim"                   "$(printf '\033[2mClaude Agents\033[0m')" "$RAW"
+ffooter "test agent" "$FL_LOCKED"
+check  "switchable:false dims the shown label too (reverse kept)" "$(printf '\033[2;7m Claude Agents ')" "$RAW"
+refute "...no bright reverse label left"              "$(printf '\033[7m Claude Agents ')" "$RAW"
+ffooter "repo" "$FL_CLAUDE"
+same   "the segment is drawn at the fleet list too, still leftmost" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+
+# Narrow window with usage (the 12b width): one row, the switch kept, and the
+# existing parts trimmed in their existing order -- whatever is kept is one of the
+# four levels (all keys+name, primary+name, name, nothing), never a mix. The switch
+# pushes the untrimmable rest to ~145 columns, so a fifth level drops the dim
+# `Diff mode:` caption as well (the person's choice, 2026-09-27).
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+ffooter "test agent" "$FL_CLAUDE" 140
+check  "narrow: the switch is kept"                   "Claude Agents  | PIR" "$PLAIN"
+check  "narrow: the usage readout is kept"            "1d " "$PLAIN"
+check  "narrow: the diff labels are kept"             "Browse" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 140 ]; then okline "narrow: the switch footer stays one row ($NW <= 140)"
+else echo "  FAIL the switch footer wrapped: width $NW > 140 columns"; fail=1; fi
+has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
+LV="$(has 'drag copy')$(has '⌥t new')$(has 'test agent')"
+case "$LV" in 111|011|001|000) okline "narrow: trimming stays in its order ($LV)";;
+  *) echo "  FAIL narrow trim is out of order: sec/pri/name = $LV"; fail=1;; esac
+refute "narrow: the Diff mode: caption gives way"     "Diff mode:" "$PLAIN"
+# Without the switch the 140 footer still fits at level four: the caption stays,
+# so a daemon that writes no fleet block trims exactly as before.
+ffooter "test agent" "" 140
+check  "narrow, no switch: the caption is kept"       "Diff mode:  Uncommitted Changes" "$PLAIN"
+# ...and below 140, where level four already overflows, the fifth level must still
+# not engage without the switch: the pre-T02 footer kept its caption at any width.
+ffooter "test agent" "" 100
+check  "narrower (100), no switch: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
+ffooter "test agent" "$FL_GONE" 100
+check  "narrower (100), available:false: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
+# At the live window's width nothing is trimmed, switch or not.
+ffooter "test agent" "$FL_CLAUDE" 319
+check  "wide (319): the full legend is kept with the switch" "drag copy" "$PLAIN"
+check  "wide (319): ...and the caption"               "Diff mode:" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 319 ]; then okline "wide: the switch footer stays one row ($NW <= 319)"
+else echo "  FAIL the wide switch footer wrapped: width $NW > 319 columns"; fail=1; fi
+rm -f "$SD/usage-cache.json"
+
+# The click path, under script(1) exactly like section 12's click().
+if command -v script >/dev/null; then
+fclick() {  # fclick <label> [cols]: left-press that label in the current frame, echo the verb
+  local col p i=0
+  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
+  : > "$SD/cmd"
+  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
+  | ( COCKPIT_DIR="$SD" COLUMNS="${2:-}" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
+  p=$!
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  wait "$p" 2>/dev/null
+  pkill -f "$CLICKER" 2>/dev/null
+  tr -d '\n' < "$SD/cmd"
+}
+cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it
+# Both sizes the task names: 319 (the live window) and the 140 narrow one, the
+# latter with usage present so the trim is in play.
+for W in 319 140; do
+  if [ "$W" = 140 ]; then useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"; fi
+  ffooter "test agent" "$FL_CLAUDE" "$W"
+  same "[$W] claude shown: clicking PIR appends fleet-pir"           "$(fclick PIR "$W")" "fleet-pir"
+  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] the diff labels still land behind the switch"           "$(fclick Browse "$W")" "diff-browse"
+  same "[$W] ...and Uncommitted Changes too"                         "$(fclick 'Uncommitted Changes' "$W")" "diff-uncommitted"
+  ffooter "test agent" "$FL_PIR" "$W"
+  same "[$W] pir shown: clicking Claude Agents appends fleet-claude" "$(fclick 'Claude Agents' "$W")" "fleet-claude"
+  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W")" ""
+  ffooter "test agent" "$FL_LOCKED" "$W"
+  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W")" ""
+  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W")" ""
+  ffooter "repo" "$FL_CLAUDE" "$W"
+  same "[$W] at the fleet list the switch still clicks (fleet-pir)"  "$(fclick PIR "$W")" "fleet-pir"
+  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W")" ""
+done
+rm -f "$SD/usage-cache.json"
+fi
+
 echo "== 13. the agenda: the daemon keeps the event cache current =="
 # T07. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.5), so the refresh is
 # cockpitd's and is tested here rather than in agenda-test.
