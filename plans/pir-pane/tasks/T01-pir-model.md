@@ -45,7 +45,8 @@ export function decidePir(state, { exists, isGitRepo }) →
 // label: run → "{slug}", worker → "{slug} / {task}"
 
 // storedRef: the custom-refs.json entry for key, or undefined; resolves(ref) → bool
-export function startingMode({ isRun, storedRef, resolves }) →
+// forkPoint: abbreviated `git merge-base main HEAD` in the run's folder, or null when it failed
+export function startingMode({ isRun, storedRef, forkPoint, resolves }) →
   { mode: "custom", ref } | { mode: "uncommitted", reason? }
 
 export function shouldReapPirKey(key, { shownKey, exists, cwdOfKey }) → bool
@@ -59,8 +60,9 @@ export function shouldReapPirKey(key, { shownKey, exists, cwdOfKey }) → bool
 - [ ] `decidePir`: every row of DESIGN §2.5, including worker cwd null, worker cwd gone with
       run cwd present, both gone, run cwd not a git repo, worker cwd not a git repo.
 - [ ] `pirKey`/`isPirKey`: prefix, worker suffix, an agent job id is not a pir key.
-- [ ] `startingMode`: run with no stored ref → custom main; run with stored ref → that ref; ref
-      that does not resolve → uncommitted with reason; worker → uncommitted.
+- [ ] `startingMode`: run with no stored ref → custom at `forkPoint`; run with stored ref → that
+      ref; stored ref that does not resolve → uncommitted with reason; no stored ref and
+      `forkPoint` null → uncommitted with reason; worker → uncommitted.
 - [ ] `shouldReapPirKey`: folder gone and not shown → true; shown → false; folder present →
       false; non-pir key → false.
 - [ ] Purity grep over the module (the pattern of `spikes/usage-test/run.sh:64`) finds nothing.

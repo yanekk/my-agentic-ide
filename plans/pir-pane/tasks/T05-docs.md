@@ -19,11 +19,13 @@ DESIGN §2 as a whole; §2.10 for the CLAUDE.md row.
 - `docs/cockpit.md` (a section on the pir pane: swap, contract, following, what stays
   claude-only)
 - `bin/install.sh` (report `pir` as optional when absent; never fail on it)
+- `spikes/pir-pane-test/run.sh` (the installer check below)
 
 ## Tests
 
-- [ ] `bin/install.sh` dry path with `pir` absent from PATH prints the optional note and exits 0
-      (whatever check style the installer already uses for its tools).
+- [ ] In `spikes/pir-pane-test/run.sh`, asserted on the real lines of `bin/install.sh` the way
+      `spikes/auto-name-test/run.sh:109` does (the installer has no dry run): the `pir` check
+      prints an optional note and has no `die`/`exit` on its branch.
 
 ## Done when
 

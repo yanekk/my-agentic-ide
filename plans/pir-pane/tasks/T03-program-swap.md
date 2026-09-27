@@ -32,7 +32,9 @@ async function switchFleet(target)    // "claude" | "pir"; refuses unless fleetS
 function fleetSwitchable()            // claude: paneState().mode === "list"; pir: T04 decides,
                                       // here always true
 // cmd verbs: "fleet-claude", "fleet-pir"
-// terminals.json: fleet: { program: fleetProgram, switchable, available: PIR_BIN !== null }
+// terminals.json: fleet: { program: fleetProgram, switchable, available: PIR_BIN !== null },
+//   rewritten from the reconcile poll whenever switchable changes, not only on attach/exit:
+//   a non-repo agent's header (unreviewableName) attaches nothing yet is not a list
 // panes.json: pir: <pane id> once spawned
 ```
 
@@ -40,11 +42,12 @@ function fleetSwitchable()            // claude: paneState().mode === "list"; pi
 # bin/cockpit-pir.sh <pir-binary> <state-file>
 # loop: PIR_DASHBOARD_STATE=<state-file> <pir-binary>; on 5 exits each under 2s,
 # print why and wait for Enter, then loop again. Never exits.
+# Spawned as: split-pane … -- /usr/bin/env PATH=… COCKPIT_REPO=… bin/cockpit-pir.sh … (DESIGN §2.3)
 ```
 
 The places that read `panes.fleet` today (from the survey; re-check with a grep): the tab
 lookups at `cockpitd.mjs` `cockpitTabId`, `diffPaneFocused`, and the inline `tab_id` finds
-near `showTerminal`, `showDiff`, the healers; the split anchors in `insertIntoSlot` and
+near `showTerminal`, `terminalCommand`, `showDiff`, the healers; the split anchors in `insertIntoSlot` and
 `rebuildDiffSlot`; the focus hand-back at the ends of `showTerminal` and `showDiff`;
 `focus-claude`; `injectReview`; `spawnAgent`; `paneState`.
 
@@ -56,6 +59,9 @@ near `showTerminal`, `showDiff`, the healers; the split anchors in `insertIntoSl
       `fleet-pir` restores the same pir pane without spawning.
 - [ ] `fleet-pir` with an agent attached → refused, logged, nothing moves.
 - [ ] `fleet-pir` when `pir` is not on PATH → refused; `available:false`.
+- [ ] The pir pane's spawn names `PATH` and `COCKPIT_REPO` through `/usr/bin/env`.
+- [ ] Claude pane showing a non-repo agent's header → `switchable:false` written, though nothing
+      attached.
 - [ ] While pir is shown, changing the stubbed fleet text to an agent header does not attach
       (reconcile gated).
 - [ ] While pir is shown, `focus-claude` activates nothing.

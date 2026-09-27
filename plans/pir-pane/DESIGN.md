@@ -1,7 +1,7 @@
 ---
 setup: none
 test:
-  - "[ ! -e spikes/pir-pane-test/run.sh ] || bash spikes/pir-pane-test/run.sh"
+  - [ ! -e spikes/pir-pane-test/run.sh ] || bash spikes/pir-pane-test/run.sh
   - bash spikes/cockpit-test/run.sh
 ---
 
@@ -24,7 +24,7 @@ browse the tree, poke around in a terminal at its folder, go back.
 - Clicking `PIR` in the footer at the fleet list shows the pir dashboard in the Claude pane;
   clicking `Claude Agents` at pir's runs list brings `claude agents` back, instantly, in the
   state it was left in.
-- Opening a run in pir shows that plan's shared worktree as a diff against `main`; opening one
+- Opening a run in pir shows that plan's shared worktree as a diff against the point it split from `main`; opening one
   of its workers narrows to that task's worktree at `uncommitted`; backing out widens again, and
   the runs list returns the notes view and the repo terminals.
 - Nothing about `claude agents` changes while it is the program shown.
@@ -79,6 +79,12 @@ The pir pane runs `bin/cockpit-pir.sh`, a relaunch loop around `pir` with
 closed; the loop is the same fix `claude agents` has in `cockpit-layout.sh`. After five exits
 inside two seconds each it stops looping and waits for Enter, printing why, rather than
 spinning; it never `exec`s away, so the pane survives.
+
+The pane is spawned through `/usr/bin/env` naming the same `PATH` and `COCKPIT_REPO` a cockpit
+terminal gets, because a split inherits nothing from the daemon (CLAUDE.md, "Terminals are
+spawned through `/usr/bin/env`"). That is the environment `pir` has today when typed into a
+cockpit terminal, so runs it starts, and their workers, see `note` and session naming as they
+do now.
 
 ### 2.4 What pir reports (the contract)
 
@@ -140,22 +146,34 @@ never collide with a `claude agents` job id and so every pir-only rule can test 
 
 ### 2.6 The starting diff mode
 
-A run key starts in `custom` against `main`, without opening the ref prompt; a worker key
-starts at `uncommitted`, like an agent. A run's shared worktree has finished tasks merged in as
-commits and usually nothing uncommitted, so `uncommitted` would open onto an empty diff; the
-whole plan's work against `main` is what reviewing a run means. The person chose this
-(2026-09-26).
+A run key starts in `custom` against its **fork point**, `git merge-base main HEAD` in the run's
+folder, abbreviated, without opening the ref prompt; a worker key starts at `uncommitted`, like
+an agent. A run's shared worktree has finished tasks merged in as commits and usually nothing
+uncommitted, so `uncommitted` would open onto an empty diff; the whole plan's work is what
+reviewing a run means. The person chose `custom` (2026-09-26) and the fork point over `main`'s
+tip (2026-09-27): pir branches a run off `main` and never merges back, and the person commits to
+`main` during builds, so a diff against the tip shows every later `main` commit reversed. The
+footer therefore reads `Custom: <short sha>`.
 
-If `custom-refs.json` already holds a ref for the run key, that ref is used instead of `main`,
-because the person set it deliberately. If the ref does not resolve in that repo the key falls
-back to `uncommitted` with a log line, not the prompt, since nobody asked for a prompt.
+The fork point is recomputed on every attach of the run key, never stored, so a run that has
+since merged `main` in is shown from its new fork point on the next visit. It does not move while
+the run stays attached. CLAUDE.md's "merge-base froze at launch" row is about `uncommitted`,
+where committed work must drop out; here keeping it in is the point.
+
+If `custom-refs.json` already holds a ref for the run key, that ref is used instead, because the
+person set it deliberately. The computed fork point is therefore held in memory only and never
+written to `custom-refs.json`; writing it would make every run look deliberately set. If the
+stored ref does not resolve in that repo, or `git merge-base` fails, the key falls back to
+`uncommitted` with a log line, not the prompt, since nobody asked for a prompt.
 
 ### 2.7 Reviews are inert under pir
 
 With a pir key attached, revdiff is still launched with `-o review-{key}.md`, because without
 an output file revdiff's flush prints to stdout and quits. The daemon neither injects nor
 resets that file: it logs `review not sent: pir has no input box` and the annotations stay in
-revdiff. `focus-claude` is ignored while pir is shown, because it would activate a parked pane
+revdiff. Because `O` does nothing here, the footer drops its `O send→claude` hint while a pir
+key is attached (person, 2026-09-27): a legend must not offer a gesture that cannot happen. The
+daemon says so with `reviewable: false` in `terminals.json`. `focus-claude` is ignored while pir is shown, because it would activate a parked pane
 and fill the window with it. The person chose to leave reviews out for now (2026-09-26); pir's
 worker input sends on Enter, and proving a multi-line draft can sit there unsent is a later
 plan.
@@ -176,6 +194,10 @@ keystrokes to its dashboard.
 the parked fleet pane is at its list and cannot change. `followWorktreeMigration` and the agent
 reaper skip `pir.` keys. pir keys are reaped instead when their folder no longer exists and the
 key is not the one shown, which is when pir has removed a worktree after a merge.
+
+`healMissingPanes` detaches when an attached pane dies and leaves the re-attach to `reconcile()`.
+With reconcile gated under pir, the heal re-runs `onPirState` instead, or a pir key that lost a
+pane would stay detached until pir next wrote the file.
 
 ### 2.10 The pane's identity
 
@@ -255,7 +277,7 @@ footer click ─▶ cmd: fleet-pir / fleet-claude        ▼
                        ▼                             │
                daemon: swap panes              attach key / onExit
                        │                             │
-                       └──────▶ terminals.json { fleet: { program, switchable, available } }
+                       └──────▶ terminals.json { fleet: {…}, reviewable }
                                         │
                                         ▼
                                 cockpit-strip.mjs footer
@@ -265,7 +287,8 @@ footer click ─▶ cmd: fleet-pir / fleet-claude        ▼
 
 `pir-dashboard.json`: written by pir, read by the daemon, deleted on rebuild; atomic by pir's
 temp-then-rename, so the daemon never reads half a file. `terminals.json` gains
-`fleet: { program: "claude"|"pir", switchable: bool, available: bool }`, written by the daemon
+`fleet: { program: "claude"|"pir", switchable: bool, available: bool }` and `reviewable: bool`
+(false only with a pir key attached; absent reads as true), written by the daemon
 as today. `panes.json` gains `pir` once the pir pane exists. No new persisted state: the shown
 program and the per-key modes are in memory, as diff modes are.
 
@@ -290,7 +313,7 @@ None of it proves the real pir writes the file; that is the pir plan's own tests
 |---|---|
 | OS | macOS (Darwin 25.5.0) |
 | Language / runtime | Node.js v24.2.0 (ESM `.mjs`), bash/zsh |
-| Toolchain | wezterm 20240203-110809-5046fc22; Claude Code 2.1.283; revdiff v1.12.0; pir from `~/src/plan-implement-review` at `40ac418` (installed at `~/.claude/pir-engine`, wrapper `~/.local/bin/pir`) |
+| Toolchain | wezterm 20240203-110809-5046fc22; Claude Code 2.1.283; revdiff v1.12.0; pir from `~/src/plan-implement-review` at `4e209ad` (installed at `~/.claude/pir-engine`, wrapper `~/.local/bin/pir`) |
 | Deliberately absent | No `package.json`, no npm dependencies: every cockpit module is Node standard library. pir has no status command or JSON output; its dashboard exposes nothing outside its screen until the pir plan of §2.4 lands. |
 
 **The test command.** The `test` lines at the top. The pir-pane line is guarded because T01
@@ -321,10 +344,22 @@ wezterm, real daemon, real strip renderer) and, for geometry and redraw, a real 
 |---|---|---|
 | Headless `wezterm-mux-server` with its own socket and pid file | used by T00, T06 | Never touches the live cockpit window |
 | `COCKPIT_DIR` / `HOME` pointed at a scratch dir | used by cockpit-test | The daemon under test never reads or writes the real state |
-| `PIR_HOME` pointed at a scratch dir | T06, T07 if a stand-in run is needed | pir's run index is not touched |
+| `PIR_HOME` pointed at a scratch dir | T00, T06, T07 | pir's run index is not touched |
+| pir's conversation rig, `~/src/plan-implement-review/src/shell/conversation-rig.mjs` | T07 | A pretend run and worker in a scratch folder; the worker is a fake `claude`, so no model is called |
 
-Rebuilding the live cockpit window (T07) closes every agent terminal and revdiff. It is the
-person's decision when to do it, not the worker's.
+### 5.3 Outside actions
+
+Agreed with the person 2026-09-27. Nothing here costs money or is seen by anyone else.
+
+| Action | Bin | Why |
+|---|---|---|
+| The two suites, `bash spikes/pir-pane-test/run.sh`, `bash spikes/cockpit-test/run.sh` | worker | Stubbed wezterm, scratch state |
+| `bash spikes/pir-pane-swap/probe.sh` (T00), `bash spikes/pir-pane-drill/drill.sh` (T06), `bash spikes/pir-pane-drill/rig-check.sh` (T07) | worker | Private headless mux, scratch `HOME`/`COCKPIT_DIR`/`PIR_HOME`; real pir only against its own rig, never the person's runs, where an Enter in a worker's conversation messages a live worker |
+| Rebuilding the live cockpit window and clicking the footer in it (T07) | person | Closes every agent terminal and revdiff; needs the GUI |
+
+No `ask` rows. The worker rows are `permissions.allow` rules in `.claude/settings.json`.
+
+Rebuilding the live cockpit window (T07) is the person's decision when to do it, not the worker's.
 
 ---
 
@@ -343,7 +378,10 @@ file. Reverting this plan's commits restores today's cockpit exactly.
 - 2026-09-26, person: switch by footer click only, no key. `⌥[`/`⌥]` stay as they are.
 - 2026-09-26, person: switching only at a list screen; disabled (dim) elsewhere.
 - 2026-09-26, person: reviews (`O`) inert under pir for now.
-- 2026-09-26, person: a run starts at `custom` against `main`.
+- 2026-09-26, person: a run starts at `custom`. 2026-09-27, person: against its fork point from
+  `main`, not `main`'s tip (§2.6).
+- 2026-09-27, person: hide `O send→claude` while a pir key is attached (§2.7).
+- 2026-09-27, person: the §5.3 bins; T07's automated half on pir's rig, not real runs.
 - 2026-09-26, person: BitBucket buttons switch to Claude, then launch.
 - Defaults the planner chose and the person accepted in the requirements playback: start on
   claude every rebuild, follow other repos, relaunch pir on exit, hide the segment when pir is

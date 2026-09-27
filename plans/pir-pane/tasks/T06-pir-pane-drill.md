@@ -16,7 +16,7 @@ DESIGN §2.1–§2.11.
 
 ## Files
 
-- `spikes/pir-pane-drill/` (the drill script; kept, as `spikes/pane-swap/` was, with a
+- `spikes/pir-pane-drill/drill.sh` and its directory (kept, as `spikes/pane-swap/` was, with a
   `RESULTS.md`)
 - fixes anywhere in the files of T02–T04, each with a cockpit-test check
 

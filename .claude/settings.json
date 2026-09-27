@@ -1,5 +1,14 @@
 {
   "worktree": {
     "bgIsolation": "none"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bash spikes/pir-pane-test/run.sh)",
+      "Bash(bash spikes/cockpit-test/run.sh)",
+      "Bash(bash spikes/pir-pane-swap/probe.sh)",
+      "Bash(bash spikes/pir-pane-drill/drill.sh)",
+      "Bash(bash spikes/pir-pane-drill/rig-check.sh)"
+    ]
   }
 }

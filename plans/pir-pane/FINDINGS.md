@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | pir moved to `4e209ad` (plan-only: a new-plan box on the runs list); the installed engine matches its source. The engine parser keeps YAML-style quotes on a test line, so a quoted line runs as one command name (exit 127). |
 | 2026-09-26 | 📌 | `FORCE_COLOR=3` is set in this machine's session environment, contradicting usage-limits DESIGN §5. cockpit-test and notes-test still printed zero escape bytes. |
 | 2026-09-26 | 📌 | cockpit-test takes about 6 minutes (545 checks); notes-test 4s. A fresh clone needs no setup and stays clean. |
 | 2026-09-26 | 📌 | revdiff's `O` flush without `-o` writes to stdout and quits, so pir-followed diffs keep `-o review-{key}.md` and the daemon simply does not inject (DESIGN §2.7). |

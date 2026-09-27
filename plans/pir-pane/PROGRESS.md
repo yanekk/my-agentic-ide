@@ -8,7 +8,7 @@ touching the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. The cell is an index; the account is the
 commit message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan pir-pane` before the first `/pir-work`
+**Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.

@@ -13,14 +13,18 @@ T06; this confirms the two halves meet.
 
 DESIGN §5.1.
 
+## Files
+
+- `spikes/pir-pane-drill/rig-check.sh` (new)
+
 ## Automated checks (the worker runs these)
 
-```
-PIR_DASHBOARD_STATE=$SCRATCH/x.json pir   # in a scratch WezTerm pane, driven with send-text:
-                                          # open a run, open a worker, back, quit —
-                                          # the file matches DESIGN §2.4 at each step
-bash spikes/pir-pane-test/run.sh && bash spikes/cockpit-test/run.sh
-```
+`bash spikes/pir-pane-drill/rig-check.sh`: on a private headless mux with scratch `HOME` and
+`PIR_HOME`, it starts pir's conversation rig (DESIGN §5.2), runs the installed `pir` with
+`PIR_DASHBOARD_STATE=$SCRATCH/x.json`, and drives it with send-text: open the rig's run, open its
+worker, back, back, quit. The file must match DESIGN §2.4 at each step and be gone after quit.
+It never runs pir against the person's real runs (DESIGN §5.3). Then
+`bash spikes/pir-pane-test/run.sh && bash spikes/cockpit-test/run.sh`.
 
 If the installed pir writes no file, stop: the pir plan has not landed, and the task waits.
 
@@ -32,6 +36,6 @@ Click PIR in the footer. Open a real run, then one of its workers, then go back 
 Click Claude Agents.
 ```
 
-Expect: pir appears in the Claude pane; the diff shows the run against main, then the task's own
+Expect: pir appears in the Claude pane; the diff shows the run from where it split off main, then the task's own
 changes, then the notes view; `claude agents` comes back as it was.
 Tell me: whether each click switched on the first try.

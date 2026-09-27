@@ -33,6 +33,13 @@ async function onEnterKey(key, cwd, label, { source, startMode })
 fleetSwitchable()             // pir: readPirState(...).view === "list"
 ```
 
+`healMissingPanes`, which detaches and leaves the re-attach to the gated `reconcile()`, calls
+`onPirState` instead while pir is shown (DESIGN §2.9). The run key's default `main` is set in
+memory only, never written to `custom-refs.json` (DESIGN §2.6). That default is the fork point:
+`git merge-base main HEAD` in the run's folder, abbreviated with `git rev-parse --short`, run on
+every attach of the run key and passed to `startingMode` as `forkPoint` (null on failure).
+`writeTerminals` writes `reviewable: false` while a `pir.` key is attached (DESIGN §2.7).
+
 `isAlive(pid)` is `process.kill(pid, 0)` in the daemon. `startingMode` gets
 `resolves(ref)` from `git rev-parse --verify` in the key's folder. On switching to pir, the
 current file is read once immediately, so a pir that is already inside a run is followed without
@@ -41,8 +48,14 @@ waiting for its next write.
 ## Tests
 
 - [ ] File says `run` with an existing git cwd → diff slot and terminal slot move to key
-      `pir.{key}`; revdiff launched as custom against `main` with no prompt.
+      `pir.{key}`; revdiff launched as custom against the fork point with no prompt.
+- [ ] `main` advanced past the fork point after the run branched → the diff's base is still the
+      fork point, so `main`'s new commit is absent from the diff.
+- [ ] `terminals.json` has `reviewable:false` with a pir key attached, and not with an agent.
 - [ ] Custom ref stored for the run key → that ref used; unresolvable ref → uncommitted, logged.
+- [ ] Attaching a run key with no stored ref leaves `custom-refs.json` without that key.
+- [ ] `git merge-base` failing (no `main`) → uncommitted, logged.
+- [ ] A pir key's diff pane killed while shown → re-attached by the heal, without a new file write.
 - [ ] File says `worker` → key `pir.{key}.{id}` at the worker cwd, `uncommitted`.
 - [ ] Back to `run` → the run key's parked diff and terminals return without relaunch.
 - [ ] Back to `list` → welcome pane and repo terminals.
