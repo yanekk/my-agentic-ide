@@ -44,6 +44,48 @@ else
   echo "  FAIL the pure model bin/cockpit-pir-model.mjs is missing"; fail=$((fail + 1))
 fi
 
+# --- the installer reports pir as optional (T05) --------------------------------
+# Asserted on the REAL lines of bin/install.sh, the way spikes/auto-name-test does: the
+# installer has no dry run, and a copy of its lines would drift. The pir branch is the block
+# from `PIR_PATH="$(resolve pir)"` to its closing `fi`; it must say "optional", must never
+# die/exit, and must never count pir as MISSING (which makes the install refuse to write).
+INSTALL="$ROOT/bin/install.sh"
+check() { # $1 name, $2 0/1 ok
+  if [ "$2" -eq 1 ]; then pass=$((pass + 1)); [ -n "${VERBOSE:-}" ] && echo "  ok   $1"
+  else echo "  FAIL $1"; fail=$((fail + 1)); fi
+}
+block="$(awk '/PIR_PATH="\$\(resolve pir\)"/{on=1} on{print} on&&/^fi$/{exit}' "$INSTALL")"
+check "install.sh resolves pir through the login-shell resolver" "$([ -n "$block" ] && echo 1 || echo 0)"
+check "the pir check is not a required check_tool" \
+      "$(grep -qE '^[[:space:]]*check_tool[[:space:]]+pir' "$INSTALL" && echo 0 || echo 1)"
+check "the missing-pir branch prints an optional note" \
+      "$(printf '%s\n' "$block" | grep -q 'warn .*optional' && echo 1 || echo 0)"
+check "the pir branch has no die or exit" \
+      "$(printf '%s\n' "$block" | grep -qE '\b(die|exit)\b' && echo 0 || echo 1)"
+check "the pir branch never counts toward MISSING" \
+      "$(printf '%s\n' "$block" | grep -q 'MISSING' && echo 0 || echo 1)"
+# And run the branch itself, both ways, with a stubbed resolver: it must exit 0 each time.
+for present in 1 0; do
+  out="$( (
+    set +e
+    ok()   { echo "ok $*"; }
+    warn() { echo "warn $*"; }
+    die()  { echo "DIED"; }
+    resolve() { [ "$present" -eq 1 ] && echo /opt/pir; }
+    MISSING=0
+    eval "$block"
+    echo "MISSING=$MISSING"
+  ) 2>&1 )"
+  st=$?
+  if [ "$present" -eq 1 ]; then
+    check "pir present: reported ok with its path" "$(printf '%s' "$out" | grep -q '^ok pir *\/opt\/pir' && echo 1 || echo 0)"
+  else
+    check "pir absent: reported as optional" "$(printf '%s' "$out" | grep -q '^warn pir .*optional' && echo 1 || echo 0)"
+  fi
+  check "pir $([ "$present" -eq 1 ] && echo present || echo absent): exits 0, MISSING stays 0" \
+        "$([ "$st" -eq 0 ] && printf '%s' "$out" | grep -q '^MISSING=0$' && ! printf '%s' "$out" | grep -q DIED && echo 1 || echo 0)"
+done
+
 if [ "$fail" -eq 0 ]; then
   echo "pir-pane-test: ALL PASS ($pass checks)"
   exit 0

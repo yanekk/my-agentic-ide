@@ -12,7 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-27
 **Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
 dependencies and may run beside it.
 
@@ -28,11 +28,11 @@ done · ⛔ blocked, needs a human.
 | T02 | footer-switch | — | ✅ | |
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | |
-| T05 | docs | T04 | ⬜ | |
+| T05 | docs | T04 | 🔍 | CLAUDE.md overview, files, state files; docs/cockpit.md "The pir pane"; install.sh reports pir optional, 9 checks (79). Deviations: no new measured row, the fleet-slot/landmark fact extended the "Both slots swap" row to stay at thirty; cockpit-test count 174→750. |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T05
 
 ## Blocked on the user
 

@@ -1115,6 +1115,125 @@ And for the diff slot (`spikes/pane-swap/probe.sh`, same setup):
 | `R` while the annotation editor is open | Typed into the comment: `comment on A` became `comment on AR`. |
 | `R` with a saved annotation, then `R` again | `Annotations will be dropped — press y to confirm` → `Reload canceled`, annotation intact. |
 
+## The pir pane
+
+The bottom-left slot can hold either `claude agents` or the dashboard of `pir`, the
+plan-implement-review engine. pir's workers are headless sessions the fleet view never
+lists, so without this the cockpit had no way to review what a pir run built. The design,
+its decisions and their dates are in `plans/pir-pane/DESIGN.md`; this section is how it
+works.
+
+### The switch
+
+The footer draws `Claude Agents | PIR`, the shown program in reverse video like the
+diff-mode labels. A click appends `fleet-claude` or `fleet-pir` to `cmd` and the daemon
+does the rest (`switchFleet`). There is no key: `⌥[`/`⌥]` keep their routing untouched.
+The segment is omitted when `pir` is not on the daemon's `PATH` (`fleet.available`), and
+drawn dim when the shown program is not on its list screen (`fleet.switchable`): the
+fleet list for claude (`LIST_MARKER`), a reported `view: "list"` for pir. The daemon
+refuses a stray verb in that state with a log line. Switching only at a list means a
+switch never has anything attached, so it never has to decide what happens to a diff.
+
+The pir pane is spawned on the first accepted `fleet-pir`, not at layout time, through
+`/usr/bin/env` naming `PATH` and `COCKPIT_REPO` like a terminal (a split inherits nothing
+from the mux server), and its id is recorded as `panes.pir`. It runs
+`bin/cockpit-pir.sh`, a relaunch loop with `PIR_DASHBOARD_STATE` set: pir quits on Esc and
+Ctrl+C, and a pane whose program exits is closed. Five exits in a row under two seconds
+each stop the loop until Enter, rather than spinning.
+
+From then on the two programs swap exactly as diffs do — split the incoming pane into
+the outgoing one, then park the outgoing one with `move-pane-to-new-tab`:
+
+```
+swap in:   split-pane --left --percent 50 --pane-id <fleet> --move-pane-id <pir>
+           move-pane-to-new-tab --pane-id <fleet>
+swap out:  the mirror, --pane-id <pir> --move-pane-id <fleet>, park pir
+```
+
+Measured on a private headless mux (plan T00, `plans/pir-pane/FINDINGS.md`): pir lands at
+59x22 in a 120x40 window and 39x12 at 80x24, the shell, strip and diff untouched, the
+same over three round trips; both programs came back with identical screens. Every
+rebuild starts on `claude agents`; the shown program is session-only.
+
+### The landmark moved
+
+`panes.fleet` used to be two things: the pane running `claude agents`, and the landmark
+the daemon used to find the cockpit tab and anchor splits and focus. Once that pane can be
+parked, a landmark on it would make a parked tab look like the cockpit. So the tab is
+found through `panes.foot`, which is never parked, split into or restarted, and anchors
+and focus use whatever pane is in the slot now, `slotFleetPane()`.
+
+### The contract: pir-dashboard.json
+
+The cockpit never reads pir's screen for state; pir's headers carry no path, and reading a
+screen for state is what the pane-title row in CLAUDE.md warns about. Instead the
+cockpit's own pir, and only it, has `PIR_DASHBOARD_STATE=~/.claude/cockpit/pir-dashboard.json`
+and keeps that file current (temp-then-rename, on every change of view, run, worker or
+shown path; removed on a clean exit):
+
+```json
+{ "version": 1, "pid": 12345, "view": "list" | "run" | "worker",
+  "run":    { "key", "kind", "slug", "repo", "repoPath", "branch", "cwd" } | null,
+  "worker": { "id", "task", "role", "cwd" } | null,
+  "updatedAt": "…" }
+```
+
+A missing file, bad JSON, an unknown `version` or a dead `pid` all read as `list`
+(`readPirState`), so an old pir without the change is a switchable pane the cockpit never
+follows. `cockpit-layout.sh` deletes the file on every rebuild. The pir side is built in
+pir's own repo, from `plans/pir-pane/PIR-PROMPT.md`.
+
+### Following it
+
+The daemon watches the directory (never the file), debounces 150ms, and maps the latest
+state through the pure `decidePir`:
+
+| Reported | Shown |
+|---|---|
+| `list` | the welcome/notes pane and the repo terminals |
+| `run`, its `cwd` exists | key `pir.{run.key}`, the run's shared worktree |
+| `worker`, its `cwd` exists | key `pir.{run.key}.{worker.id}`, the task's worktree |
+| `worker` whose `cwd` is gone | the run's key and folder (pir removes a task worktree after merging it) |
+| not a git work tree, or nothing left | the welcome/notes pane, logged |
+
+A key attaches through the same `onEnter`/`showDiff`/`showTerminal` path as an agent, so
+every run and worker has its own diff mode, terminals, watches and browse mode, parked and
+resumed like an agent's. The `pir.` prefix keeps them from colliding with a job id and is
+what every pir-only rule tests for (`isPirKey`).
+
+A **run** starts in `custom` against its fork point, `git merge-base main HEAD` in the
+run's folder, recomputed on every attach and held in memory only (`startingMode`): a run's
+shared worktree has its finished tasks merged in as commits and usually nothing
+uncommitted, and pir never merges `main` back, so a diff against `main`'s tip would show
+every later `main` commit reversed. A ref the person stored in `custom-refs.json` for that
+key wins. If neither resolves the key falls back to `uncommitted`, not the prompt. A
+**worker** starts at `uncommitted`, like an agent. The same key reported with a new folder
+(a planning run renamed) is handled like a migrated agent.
+
+### What stays claude-only
+
+- **Reviews.** revdiff still gets `-o review-{key}.md` (without it a flush prints and
+  quits), but the daemon neither injects nor resets the file: it logs
+  `review not sent: pir has no input box`. `terminals.json` says `reviewable: false`, and
+  the footer drops its `O send→claude` hint. `focus-claude` is ignored while pir is shown,
+  because it would pull a parked pane into view.
+- **The BitBucket buttons** type into `claude agents`' new-session box, so with pir shown
+  the daemon switches back first and then spawns; if the switch fails the spawn is dropped
+  and logged rather than typed into pir.
+- **`reconcile()`, the fleet-log tail, `followWorktreeMigration` and the agent reaper.**
+  Reconcile does nothing while pir is shown; the migration follower and the reaper skip
+  `pir.` keys. A pir key is reaped instead when its folder is gone and it is not the key
+  shown (`shouldReapPirKey`). `healMissingPanes` re-runs `onPirState` rather than leaving a
+  re-attach to the gated reconcile.
+
+### Testing it
+
+`spikes/pir-pane-test/run.sh` covers the pure model exhaustively, greps it for anything
+impure, and checks the installer's optional `pir` line. `spikes/cockpit-test/run.sh`
+drives the switch, the swap, following and the claude-only guards with a stubbed wezterm
+and a stubbed `pir` that the tests write the state file for. Neither proves the real pir
+writes the file; that is pir's own tests and a hands-on check (plan T07).
+
 ## Configuration
 
 | Env | Effect |
