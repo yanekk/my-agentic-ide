@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | swap-spike | — | ⬜ | |
-| T01 | pir-model | — | ⬜ | |
+| T01 | pir-model | — | 🔍 | Model + suite, 66 checks, purity and no-import grep. Deviations: worker cwd existing but not a git repo → list (table's last row), not fallback to run; key with no recorded cwd is never reaped; run/worker without key/id reads as list; worker label falls back to id. |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
@@ -32,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 
