@@ -13,7 +13,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T05 (docs); T07 waits on T05.
+**Next `pir-work` will:** T07 (live-check), with the person: a rebuild of the live cockpit window.
 
 ## Tasks
 
@@ -27,7 +27,7 @@ done · ⛔ blocked, needs a human.
 | T02 | footer-switch | — | ✅ | |
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | |
-| T05 | docs | T04 | ⬜ | |
+| T05 | docs | T04 | ✅ | |
 | T06 | pir-pane-drill | T02, T04 | ✅ | Review clean, no fix commit. Reran drill.sh on a private mux: 184 pass, teardown clean; both suites pass. Reverting the daemon fixes turns 15k2, 16i2 and 16k red. Probed the lock-ordering of queued footer verbs, the folder-gone re-read loop, and cutTo on escapes; nothing found. Footer trim and cut were the person's choice.
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
