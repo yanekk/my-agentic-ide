@@ -12,9 +12,8 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
-**Last updated:** 2026-09-26
-**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
-dependencies and may run beside it.
+**Last updated:** 2026-09-27
+**Next `pir-work` will:** implement T05 (docs); T07 waits on T05.
 
 ## Tasks
 
@@ -29,10 +28,10 @@ done · ⛔ blocked, needs a human.
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | |
 | T05 | docs | T04 | ⬜ | |
-| T06 | pir-pane-drill | T02, T04 | 🔍 | `drill.sh` on a private mux, 184 checks pass at 120×40 and 80×24, RESULTS.md. Three fixes, each in cockpit-test (12c, 15k2, 16i2): footer usage trim then cut (person chose), folder-gone re-read, switch race. 16k rewritten: the shown run detaches when its folder goes. |
+| T06 | pir-pane-drill | T02, T04 | ✅ | Review clean, no fix commit. Reran drill.sh on a private mux: 184 pass, teardown clean; both suites pass. Reverting the daemon fixes turns 15k2, 16i2 and 16k red. Probed the lock-ordering of queued footer verbs, the folder-gone re-read loop, and cutTo on escapes; nothing found. Footer trim and cut were the person's choice.
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** T06
+**Review queue:** empty
 
 ## Blocked on the user
 
