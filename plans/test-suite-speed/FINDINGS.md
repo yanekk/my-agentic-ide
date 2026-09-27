@@ -9,7 +9,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
-| 2026-09-27 | 🐞 | 3b cause (baseline "first flush injected", "the diff is reset (relaunched clean) on send"): re-attach re-arms the annotation watch by emptying the review file, wiping a flush written earlier. Reproduced by cutting that wait to 0.3s. T03 polls for the emptied file. |
+| 2026-09-27 | 🐞 | 3b baseline flake ("first flush injected"): re-attach re-arms the annotation watch by emptying the review file, wiping a flush written earlier. Reproduced by cutting that wait to 0.3s. T03 polls for the emptied file. |
 | 2026-09-27 | 🐞 | A wait ending at an attach's relaunch let section 10 rewrite `$PANESTATE` while the attach's later stub calls rewrote it too; the edit was lost and no heal came. Wait for terminals.json's `agent`, the attach's last write. |
 | 2026-09-27 | 📌 | T03: sections 1–10 went 82.5s (load 3) to 27.6s quiet, 32.5s at load 25; 152 checks. Full run ALL PASS 767 at load 22–28. Under 8 copies plus 16 `yes` burners: new 16/16 pass, old failed 1–2. |
 | 2026-09-27 | 📌 | T01 review: `ONLY="11c'''"` failed section 7 "the vanished agent's diff pane too" at load 28. T03 made that wait a poll on the reap log. |

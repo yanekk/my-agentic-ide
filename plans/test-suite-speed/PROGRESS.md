@@ -25,7 +25,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | section-runner | — | ✅ | |
 | T02 | waituntil | — | ✅ | |
-| T03 | convert-main-early | T01, T02 | 🔍 | Sections 1–10: 62 fixed waits became 60 polls and 5 `nap` windows; 5g/6b/8/9d/10 log checks count-based; 152 checks, 82.5s to 27.6s. 3b cause in FINDINGS. Deviations: negated polls use `sh -c '! grep'` (no new helper); the startup `sleep 1` before section 1 is left, it is shared setup. |
+| T03 | convert-main-early | T01, T02 | ✅ | 62 waits in 1–10 became polls or stated `nap` windows; 3b flake fixed; 152 checks. Review clean, no fix commit: full run ALL PASS 767, 4 concurrent `ONLY=10` 4/4; mutations (healer trusts title, terminal-focused ⌥] switches mode, file-not-dir watch) each still fail 5, 5c, 3b. |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
 | T06 | convert-dashboard | T01, T02 | ⬜ | |
@@ -34,7 +34,7 @@ done · ⛔ blocked, needs a human.
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** empty
 
 ## Blocked on the user
 
