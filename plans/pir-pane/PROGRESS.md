@@ -25,14 +25,14 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | swap-spike | — | ⬜ | |
 | T01 | pir-model | — | ⬜ | |
-| T02 | footer-switch | — | ⬜ | |
+| T02 | footer-switch | — | 🔍 | Switch segment, `fleet-*` clicks, `reviewable:false` drops `O`; cockpit-test §12c, 47 checks, 592 green; no-fleet frame pinned by pre-T02 hashes. Deviation: at 140 cols the switch overflowed (145), so a fifth trim level drops the `Diff mode:` caption (person, 2026-09-27). Dimmed shown label keeps reverse video. |
 | T03 | program-swap | T00 | ⬜ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
 | T05 | docs | T04 | ⬜ | |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 

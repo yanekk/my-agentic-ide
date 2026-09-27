@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🔄 | T02: the switch pushed the 140-col footer to 145. The person chose a fifth trim level dropping the `Diff mode:` caption (not wrapping, not shorter labels). |
+| 2026-09-27 | 🐞 | cockpit-test leaks two `cockpitd` per run (COCKPIT_DIR `…/agenda2/state`, `…/agenda3/state`), orphaned to init; seen in every worktree. Pre-existing, not fixed in T02. |
 | 2026-09-27 | 📌 | pir `d4f2e7e` publishes `PIR_DASHBOARD_STATE` (installed). Driven on its conversation rig: list, run, worker, back twice, quit all match §2.4; file removed on Esc. Back is ←; Esc in a worker view interrupts, not back. |
 | 2026-09-27 | 📌 | pir's run key is `{repo}__{record.slug}`, and a planning run's slug is its run id until the rename, so the rename changes the key, not only `cwd` (§2.11). The cockpit sees a new run; the old key is reaped. |
 | 2026-09-27 | 📌 | pir moved to `4e209ad` (plan-only: a new-plan box on the runs list); the installed engine matches its source. The engine parser keeps YAML-style quotes on a test line, so a quoted line runs as one command name (exit 127). |
