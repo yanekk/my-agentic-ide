@@ -3542,12 +3542,12 @@ tail(CMD_FILE, (line) => {
     }
     return;
   }
-  // Clicking a terminal's [x] in the strip appends this (see cockpit-strip.mjs); it
-  // names the terminal outright, so unlike ⌥w it can close a parked one, not only
-  // the one on screen.
   // Clicking `Claude Agents` / `PIR` in the footer (DESIGN 2.1). Refused unless the
   // shown program is at its list (DESIGN 2.2); switchFleet says why in the log.
   if (verb === "fleet-claude" || verb === "fleet-pir") { switchFleet(verb.slice("fleet-".length)); return; }
+  // Clicking a terminal's [x] in the strip appends this (see cockpit-strip.mjs); it
+  // names the terminal outright, so unlike ⌥w it can close a parked one, not only
+  // the one on screen.
   if (/^close-\d+$/.test(verb)) { terminalCommand(verb); return; }
   // Clicking a terminal's label area in the strip appends this; like close-<n> it
   // names the terminal outright, so it can jump straight to any one, not just cycle.
