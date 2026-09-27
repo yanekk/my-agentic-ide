@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
-**Status:** T01 done, T02 awaiting review.
+**Status:** T01, T02 done.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** review T02 (cockpit-test-adopt).
+**Next `pir-work` will:** implement T03 (owner-backstop) or T04 (other-suites-tripwire).
 
 ## Tasks
 
@@ -22,12 +22,12 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | test-daemons-lib | — | ✅ | |
-| T02 | cockpit-test-adopt | T01 | 🔍 | One EXIT trap with sweep, every daemon stop via `daemon_stop`, tripwire counted as a check (546). Leak probe verified. Deviation: fixed T01 helper to call `/bin/ps` and `/usr/bin/pgrep`, because cockpit-test stubs `ps` on PATH and the tripwire passed a real leak. `sleep 0.5` after stops dropped. |
+| T02 | cockpit-test-adopt | T01 | ✅ | Review clean, no fix commit. ALL PASS (546), no new daemon of its run left. Own probe: dropped the D3 stop (the wrapper shape that leaked) and got LEAK naming agenda3/state, FAILURES, exit 1, nothing left, $T gone. Accepted the absolute `/bin/ps` deviation; daemon-leak-test 31/31. One trap, no stopbb, no early exits. |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
 | T04 | other-suites-tripwire | T01 | ⬜ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** T02
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
