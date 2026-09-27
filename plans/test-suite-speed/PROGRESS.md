@@ -25,7 +25,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | section-runner | — | ✅ | |
 | T02 | waituntil | — | ✅ | |
-| T03 | convert-main-early | T01, T02 | ⬜ | |
+| T03 | convert-main-early | T01, T02 | ✅ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ✅ | |
 | T06 | convert-dashboard | T01, T02 | ✅ | |
