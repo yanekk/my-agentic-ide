@@ -26,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | T00 | swap-spike | — | ✅ | |
 | T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ⬜ | |
-| T03 | program-swap | T00 | ⬜ | |
+| T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
 | T05 | docs | T04 | ⬜ | |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
