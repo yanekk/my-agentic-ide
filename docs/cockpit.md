@@ -1272,9 +1272,10 @@ daemon's 4s timeout on *every* poll, which looks exactly like a dead mux.
 ### Test daemons, and why no suite leaves one behind
 
 `cockpit-test` starts up to six real `cockpitd.mjs` daemons against scratch
-state folders. Four of them used to be launched through a shell function in the
-background, which makes `$!` a bash subshell with node as its child; `kill $!`
-ended the subshell and node was reparented to launchd, polling for ever. By
+state folders. Five of them are launched through a shell function in the
+background, which makes `$!` a bash subshell with node as its child. The two
+agenda sections stopped theirs with a plain `kill $!`, which ended the subshell
+and left node reparented to launchd, polling for ever. By
 2026-09-27 twenty-two had piled up and pushed the load average from ~4.4 to ~7.
 Three layers now stop that, all in `spikes/lib/test-daemons.sh`, which every
 `spikes/*-test/run.sh` sources (plans/test-daemon-leaks/DESIGN.md §2):
