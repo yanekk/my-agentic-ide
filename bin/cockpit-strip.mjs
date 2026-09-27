@@ -312,8 +312,9 @@ function renderFooter() {
   // The last level also drops the dim `Diff mode:` caption (the reverse-video label
   // still says which mode is on): the program switch's ~27 columns pushed the
   // untrimmable rest past 140 (145 measured), and the person chose the caption as
-  // what gives way (pir-pane T02, 2026-09-27). Without the switch, level four still
-  // fits at 140, so a footer with no `fleet` block trims exactly as before.
+  // what gives way (pir-pane T02, 2026-09-27). That level exists only while the switch
+  // is drawn: below ~115 columns level four overflows with or without it, and a footer
+  // with no `fleet` block must trim exactly as before (the task's "Done when").
   let keysKept = [...PRIMARY, ...SECONDARY];
   let nameKept = true;
   let captionKept = true;
@@ -323,7 +324,7 @@ function renderFooter() {
       { keys: [...PRIMARY], name: true, caption: true },
       { keys: [], name: true, caption: true },
       { keys: [], name: false, caption: true },
-      { keys: [], name: false, caption: false },
+      ...(fleetSeg ? [{ keys: [], name: false, caption: false }] : []),
     ];
     let chosen = levels[levels.length - 1];
     for (const lv of levels) {

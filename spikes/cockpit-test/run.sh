@@ -2191,6 +2191,12 @@ refute "narrow: the Diff mode: caption gives way"     "Diff mode:" "$PLAIN"
 # so a daemon that writes no fleet block trims exactly as before.
 ffooter "test agent" "" 140
 check  "narrow, no switch: the caption is kept"       "Diff mode:  Uncommitted Changes" "$PLAIN"
+# ...and below 140, where level four already overflows, the fifth level must still
+# not engage without the switch: the pre-T02 footer kept its caption at any width.
+ffooter "test agent" "" 100
+check  "narrower (100), no switch: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
+ffooter "test agent" "$FL_GONE" 100
+check  "narrower (100), available:false: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
 # At the live window's width nothing is trimmed, switch or not.
 ffooter "test agent" "$FL_CLAUDE" 319
 check  "wide (319): the full legend is kept with the switch" "drag copy" "$PLAIN"
