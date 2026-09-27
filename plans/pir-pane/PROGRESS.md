@@ -10,10 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
-**Status:** T00 done; build under way. The pir-side change is a separate plan started from
+**Status:** T00 and T01 done; build under way. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T01 (pir-model), T02 (footer-switch) or T03 (program-swap), all unblocked.
+**Next `pir-work` will:** implement T02 (footer-switch) or T03 (program-swap), both unblocked.
 
 ## Tasks
 
@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | swap-spike | — | ✅ | Six FINDINGS rows on swap geometry, landmark and redraw. Review clean, no fix commit: an independent probe on a private mux reproduced every size at 120x40 and 80x24, foot in the cockpit tab, pir and less identical over three trips (trailing spaces aside), pir state file written. Nothing left running. |
-| T01 | pir-model | — | ⬜ | |
+| T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
