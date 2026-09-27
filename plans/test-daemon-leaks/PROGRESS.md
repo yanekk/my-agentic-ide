@@ -24,11 +24,11 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ✅ | |
-| T03 | owner-backstop | T01, T02 | ⬜ | |
+| T03 | owner-backstop | T01, T02 | 🔍 | `COCKPIT_OWNER_PID` check in cockpitd on the reconcile interval, before `reconcile()`; owner `$$` on cockpit-test's six launches; 25 new daemon-leak-test checks (58 total), incl. SIGKILL mini-suite and both fences. Deviation: launch fence also asserts cockpit-test has six launches, so it cannot pass by counting none. |
 | T04 | other-suites-tripwire | T01 | ✅ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 
