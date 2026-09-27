@@ -9,6 +9,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T06 review: 14's in-flight window is a fixed 1.5s but `BB_TICK_MS` grows with SPEED; at 1.0 (800ms) about one tick lands behind the held pass, at 2.0 none, making the check vacuous. Mutant still caught at 1.0; left. |
 | 2026-09-27 | 📌 | T06 dashboard chain, `TIMINGS=1`, load ~3: before 14 33.5s, 14d 24.5s, 14b 10.2s, total 68.4s; after 9.5, 3.9, 2.1, 16.0s. 85 checks unchanged. `ONLY=14c` 5 serial and 3×4 concurrent runs passed, load up to 11. |
 | 2026-09-27 | 📌 | bitbucket `refreshPRs` logs each repo, then writes the cache once at pass end. A poll on the log line can read the previous pass's cache; T06 polls the cache (`bqtrue`) or waits for a second log line. |
 | 2026-09-27 | 📌 | T01 review: `ONLY="11c'''"` failed section 7 "the vanished agent's diff pane too" at load 28 while a full run passed beside it. Section body untouched by T01; another load flake for T03. |
