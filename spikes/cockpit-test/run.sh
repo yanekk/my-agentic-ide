@@ -415,6 +415,12 @@ chmod +x "$T/bin/claude"
 SPEED="${COCKPIT_TEST_SPEED:-0.5}"
 # nap N: sleep N seconds scaled by SPEED, with a small floor so it never hits zero.
 nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }
+# The dashboard daemons' tick (D4, D6). cockpitd reads COCKPIT_BITBUCKET_TICK_MS
+# as-is, NOT through COCKPIT_TIME_SCALE, so it is scaled here by the same factor
+# as `nap`: a nap that proves "N ticks went by" must shrink with the tick, or a
+# lower SPEED would prove it against a tick that no longer fits (DESIGN 3.2).
+# 400ms at the default 0.5, as it was when it was a literal. D5 keeps its hour.
+BB_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
 
 # --- state -----------------------------------------------------------------
 echo '{"diff":10,"fleet":20,"shell":30,"foot":9,"repo":"'"$WT"'"}' > "$T/state/panes.json"
@@ -3381,6 +3387,11 @@ same "the fake BitBucket is listening on loopback" "$([ -n "$BBPORT" ] && echo y
 bq() {  # bq <state-dir> <expression over c>
   node -e 'const fs=require("fs");let c={meUuid:null,repos:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
 }
+# bqtrue <state-dir> <expression over c>: exit 0 when it is true. For waituntil:
+# the cache is written ONCE, at the END of a pass, after the per-repo log lines,
+# so a wait on a log line can still read the previous pass's cache -- poll the
+# cache itself for the state the checks after it read.
+bqtrue() { [ "$(bq "$1" "$2")" = true ]; }
 # The four config settings are plain files under COCKPIT_DIR (DESIGN 3.5); `config`
 # writes them, and readSetting/readConfig read them, so a test writes them directly.
 bbconf() {  # bbconf <state-dir> <repos-csv>   (workspace/key fixed; team left empty)
@@ -3406,12 +3417,14 @@ d4env() {
   NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
   PSBUSY="$A4/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   "$@"
 }
 d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
 D4PID=$!
-sleep 2
+waitfor "cockpitd up" "$A4/daemon.log" 10 "D4 to start"
+# Window: an unconfigured daemon ticking for 2.5 ticks (BB_TICK_MS) must call nothing.
+nap 2
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5, 2.n).
 same "no config: nothing was requested"     "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
@@ -3423,7 +3436,8 @@ same "no config: no cache file was written" "$([ -e "$S4/bitbucket-cache.json" ]
 # fetches no repo -- a dead token would only repeat the 401.
 echo user-auth > "$BBMODE"
 bbconf "$S4" "bad,alpha"
-sleep 2
+# refreshPRs writes the auth signal to the cache BEFORE it logs the failure.
+waitfor "bitbucket tick: getUser failed, auth" "$A4/daemon.log" 10 "the getUser auth failure"
 check "a bad token on /user is logged as an auth failure" "bitbucket tick: getUser failed, auth" "$A4/daemon.log"
 same  "...and meUuid is left unset so it is retried"       "$(bq "$S4" 'c.meUuid')" "null"
 same  "...the whole-dashboard auth signal is on every repo" "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
@@ -3432,7 +3446,8 @@ same  "...and no repo pullrequests call was made"          "$(grep -c '/pullrequ
 # Recover: a good token now identifies the user ONCE and fetches every repo. The raw
 # PRs pass through untouched (DESIGN 3.1); the model normalises them later (T06).
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
+  bqtrue "$S4" 'c.meUuid==="ME-UUID" && !!c.repos.alpha && c.repos.alpha.error===null'
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
 check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
@@ -3464,7 +3479,7 @@ check "...the log counts the diffstat fetches"      "1 comment fetches, 1 diffst
 # for the handful shown.
 : > "$BBHITS"
 echo two-prs > "$BBMODE"
-sleep 2
+waituntil 10 "a two-prs pass in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===2'
 same  "both raw PRs are cached"                    "$(bq "$S4" 'c.repos.alpha.prs.length')" "2"
 check "the PR I review still gets a comment read"  "/pullrequests/7/comments" "$BBHITS"
 same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/comments' "$BBHITS")" "0"
@@ -3476,13 +3491,16 @@ same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/d
 same  "...and it carries no diffstatSummary"       "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).diffstatSummary')" "undefined"
 check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches, 1 diffstat fetches" "$A4/daemon.log"
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass back in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===1'
 same  "back to one PR when the extra one closes"   "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 # meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
 # repos are re-fetched but /2.0/user is not called again.
 : > "$BBHITS"
-sleep 2
+# Two list calls for alpha is at least one whole pass since the clear (a pass
+# lists bad, then alpha), so /2.0/user had a full tick in which to be called.
+hits_at_least() { [ "$(grep -cF -- "$1" "$BBHITS")" -ge "$2" ]; }   # re-counted on every poll
+waituntil 10 "two more passes' alpha list calls" hits_at_least '/alpha/pullrequests?' 2
 same "meUuid is not re-fetched every tick" "$(grep -c '/2.0/user' "$BBHITS")" "0"
 same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBHITS")" -gt 0 ] && echo yes || echo no)" "yes"
 
@@ -3490,7 +3508,8 @@ same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBH
 # BEFORE it in the pass (bad) failing must not stop the one after it (alpha). Each
 # repo is cached independently (DESIGN 2.n).
 echo one-bad > "$BBMODE"
-sleep 2
+waituntil 10 "a one-bad pass in the cache" \
+  bqtrue "$S4" '!!c.repos.bad.error && c.repos.bad.error.kind==="transient"'
 same "a transient repo failure keeps its previous PRs" "$(bq "$S4" 'c.repos.bad.prs.length')" "1"
 same "...and records a transient error"                "$(bq "$S4" 'c.repos.bad.error.kind')" "transient"
 same "...while the repo after it still refreshes"      "$(bq "$S4" 'c.repos.alpha.error')" "null"
@@ -3499,12 +3518,13 @@ same "...with a fresh fetchedAt of its own"            "$(bq "$S4" 'c.repos.alph
 # A repo-level auth (the token expired mid-life) is the whole-dashboard signal too,
 # recorded per repo, previous PRs kept (DESIGN 2.7/2.n).
 echo auth > "$BBMODE"
-sleep 2
+waituntil 10 "an auth pass in the cache" \
+  bqtrue "$S4" '!!c.repos.alpha.error && c.repos.alpha.error.kind==="auth"'
 same "a repo auth failure classifies as auth"     "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
 same "...and still keeps the previous PRs"         "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass clearing the auth error" bqtrue "$S4" 'c.repos.alpha.error===null'
 same "a success after a failure clears the error" "$(bq "$S4" 'c.repos.alpha.error')" "null"
 # A later tick ran and wrote after passes that threw nothing but returned errors --
 # the daemon is still alive behind its window.
@@ -3515,7 +3535,11 @@ same "...which is a later tick running"           "$(bq "$S4" 'c.repos.alpha.fet
 # thread count and reshuffle the sort for a tick (DESIGN 2.3, 2.n). alpha's list still
 # succeeds, so the repo itself is not an error.
 echo comment-net > "$BBMODE"
-sleep 2
+# The cache already reads what the checks want (1 comment, no error), so only the
+# log can say a comment-net pass happened -- and it logs before it writes the
+# cache. A SECOND such line means the first pass's write is done (one pass at a
+# time), and every pass since has been comment-net too.
+waitmore "alpha ok, 1 prs, 0 comment fetches" "$A4/daemon.log" 1 10 "two comment-net passes"
 same "a dropped comment fetch keeps the PR's previous comments" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 same "...and the repo itself stays a success"                   "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
@@ -3525,7 +3549,8 @@ echo ok > "$BBMODE"
 # file/line counts out and back. The prior tick cached { files:2, added:10, removed:3 };
 # a dropped diffstat call this tick must leave that triple intact, not zero or drop it.
 echo diffstat-net > "$BBMODE"
-sleep 2
+# As for comment-net: the cache already holds the triple, so wait for two passes.
+waitmore "alpha ok, 1 prs, 1 comment fetches, 0 diffstat fetches" "$A4/daemon.log" 1 10 "two diffstat-net passes"
 same "a dropped diffstat fetch keeps the PR's previous summary: files"   "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.files')" "2"
 same "...added"                                                          "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.added')" "10"
 same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
@@ -3535,15 +3560,21 @@ echo ok > "$BBMODE"
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
 # to age), then `slow` holds the first repo open while ~3 ticks fire behind it.
-echo slow > "$BBMODE"
+# Unconfigured while still `ok`, so a pass caught in flight is a loopback one that
+# ends in milliseconds: the drain is a 1s window, where unconfiguring AFTER `slow`
+# had to outwait a whole held pass (~4s). Stub hold times are real seconds, so
+# neither window is scaled by SPEED.
 printf '' > "$S4/bitbucket-repos"    # unconfigure -> passes no-op; any in-flight one drains
-sleep 5                              # longer than one full slow pass (~4s), so nothing is in flight
+sleep 1                              # window: an ok pass in flight ends well inside it
+echo slow > "$BBMODE"
 : > "$BBHITS"                        # cleared while nothing is fetching
+ALPHA_OK="$(countof "alpha ok" "$A4/daemon.log")"
 printf 'bad,alpha' > "$S4/bitbucket-repos"   # the next tick starts exactly one pass
-sleep 1.5                            # under slow's 2s hold: only the FIRST repo is requested
+sleep 1.5                            # window: under slow's 2s hold, only the FIRST repo is requested
 same "a pass entered while one is in flight starts nothing" "$(grep -c '/pullrequests' "$BBHITS")" "1"
 echo ok > "$BBMODE"
-sleep 4                             # drain the held request
+# The held pass ends when alpha's (still slow) list call returns and it logs alpha.
+waitmore "alpha ok" "$A4/daemon.log" "$ALPHA_OK" 10 "the held slow pass to finish"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9).
 refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
@@ -3584,6 +3615,18 @@ chmod +x "$A6/opener.sh"
 vq() {  # vq <state-dir> <expression over v>
   node -e 'const fs=require("fs");let v={};try{v=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-view.json","utf8"));}catch{}let r;try{r=eval(process.argv[2]);}catch(e){r="<error>";}process.stdout.write(String(r===undefined?"undefined":r));' "$1" "$2"
 }
+vqtrue() { [ "$(vq "$1" "$2")" = true ]; }   # for waituntil, like bqtrue
+# bbverb <verb> <what> <condition...>: append a click verb and wait for its effect.
+# The daemon handles the cmd channel one line at a time, in order, so a verb whose
+# only effect is to do NOTHING (a clamp) is followed by `bb-sync-<n>`, an unknown
+# verb the daemon logs and otherwise ignores: once that line is logged, every verb
+# before it has been handled.
+BBSYNC=0
+bbverb() { local v=$1 what=$2; shift 2; echo "$v" >> "$S6/cmd"; waituntil 10 "$what" "$@"; }
+bbsync() {
+  BBSYNC=$((BBSYNC + 1)); echo "bb-sync-$BBSYNC" >> "$S6/cmd"
+  waitfor "unknown verb bb-sync-$BBSYNC" "$A6/daemon.log" 10 "the cmd channel to reach bb-sync-$BBSYNC"
+}
 
 d6env() {
   HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
@@ -3592,28 +3635,29 @@ d6env() {
   NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
   TITLELAG="$A6/titlelag" ACTIVE="$A6/active" PANECWD="$A6/panecwd" \
   PSBUSY="$A6/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   BITBUCKET_BROWSER="$A6/opener.sh" \
   "$@"
 }
 d6env node "$ROOT/bin/cockpitd.mjs" > "$A6/daemon.log" 2>&1 &
 D6PID=$!
-sleep 2
+waituntil 10 "D6's first pass in the cache" bqtrue "$S6" '!!c.repos.alpha && c.repos.alpha.prs.length===1'
 # The one PR (id 7) concerns me as a reviewer, so it is on the To-review tab.
 same "the dashboard's PR is cached before any click" "$(bq "$S6" 'c.repos.alpha.prs.length')" "1"
 
 # --- tabs: a bb-tab verb rewrites the active tab in the view file (DESIGN 2.8) ---
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
 same "clicking the Mine tab rewrites the view's active tab" "$(vq "$S6" 'v.tab')" "mine"
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "clicking To-review switches the active tab back"      "$(vq "$S6" 'v.tab')" "toReview"
 
 # --- Open: the daemon hands the cached PR's htmlUrl to the fake opener (DESIGN 2.7) ---
-echo bb-open:alpha/7 >> "$S6/cmd"; sleep 1
+bbverb bb-open:alpha/7 "the opener to record PR 7's url" grep -qF "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 check "clicking Open launches the browser at the PR's htmlUrl" "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 # An id not in the cache (a stale click after a refetch) is a safe no-op, not a crash.
 CNT_BEFORE="$(wc -l < "$OPENLOG" | tr -d ' ')"
-echo bb-open:alpha/999 >> "$S6/cmd"; sleep 1
+# The no-op's own log line marks it handled: it never spawns, so nothing can follow.
+bbverb bb-open:alpha/999 "Open's no-op on alpha/999" grep -qF "bitbucket open: no cached PR alpha/999" "$A6/daemon.log"
 same "Open on an absent PR id launches nothing"               "$(wc -l < "$OPENLOG" | tr -d ' ')" "$CNT_BEFORE"
 check "...and says so rather than crashing"                   "no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
@@ -3625,7 +3669,10 @@ same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID
 # from the cache by slug/id, exactly as Open is; an absent id is the same safe no-op.
 CR="$(printf '\r')"
 : > "$A6/calls.log"
-echo bb-review:alpha/7 >> "$S6/cmd"; sleep 1
+# spawnAgent logs AFTER both sends (text, then Enter).
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-review:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Review spawn"
 check "a Review click types the review directive + url to the fleet box" \
       "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...to the fleet pane (pane 20), twice: the text then the Enter" \
@@ -3638,7 +3685,9 @@ refute "no PR url reaches the log via a spawn (DESIGN 2.9)" \
       "bitbucket.org/ws/pr/7" "$A6/daemon.log"
 
 : > "$A6/calls.log"
-echo bb-address:alpha/7 >> "$S6/cmd"; sleep 1
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-address:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Address spawn"
 check "an Address click types the address directive + url to the fleet box" \
       "STDIN:@alpha Address the review comments on Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...also submitted with a real Enter (text + Enter = two sends)" \
@@ -3647,10 +3696,13 @@ same  "...also submitted with a real Enter (text + Enter = two sends)" \
 # A stale click (the id refetched away) resolves no url, so it spawns nothing -- the same
 # safe no-op Open has, never a crash.
 : > "$A6/calls.log"
-echo bb-review:alpha/999 >> "$S6/cmd"; sleep 1
+bbverb bb-review:alpha/999 "Review's no-op on alpha/999" \
+  grep -qF "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "a Review click on an absent PR id types nothing to the fleet box" \
       "$(grep -c -- 'send-text --pane-id 20' "$A6/calls.log")" "0"
-check "...and says so rather than crashing"        "no cached PR alpha/999" "$A6/daemon.log"
+# Named by its `review:` prefix: Open's no-op above already logged "no cached PR
+# alpha/999", so the bare phrase passed whatever Review did (DESIGN 3.3).
+check "...and says so rather than crashing"        "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op" \
       "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
@@ -3661,23 +3713,24 @@ same  "...the daemon is still alive after the no-op" \
 # (k PRs cost 3k-1 lines; 3k-1 <= 7 -> k=2) -> ceil(20/2)=10. The daemon reads `pages`
 # from the model at the live geometry and clamps a click to [1, pages], so a next past
 # the end never writes an out-of-range page (the model's own shrink->page-1 reset is separate).
-echo many > "$BBMODE"; sleep 2
+echo many > "$BBMODE"
+waituntil 10 "the 20-PR pass in the cache" bqtrue "$S6" 'c.repos.alpha.prs.length===20'
 same "the overflowing tab is cached (20 PRs)" "$(bq "$S6" 'c.repos.alpha.prs.length')" "20"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+bbverb bb-page:next "page 2" vqtrue "$S6" 'v.page.toReview===2'
 same "bb-page:next advances to page 2"        "$(vq "$S6" 'v.page.toReview')" "2"
 # Walk the rest of the way to the last page (10).
-for _ in 3 4 5 6 7 8 9 10; do echo bb-page:next >> "$S6/cmd"; sleep 1; done
+for n in 3 4 5 6 7 8 9 10; do bbverb bb-page:next "page $n" vqtrue "$S6" "v.page.toReview===$n"; done
 same "bb-page:next reaches the last page (10)"  "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+echo bb-page:next >> "$S6/cmd"; bbsync   # a clamp writes nothing: sync past it
 same "bb-page:next past the last page is clamped (stays 10)" "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:prev >> "$S6/cmd"; sleep 1
+bbverb bb-page:prev "page 9" vqtrue "$S6" 'v.page.toReview===9'
 same "bb-page:prev steps back to page 9"      "$(vq "$S6" 'v.page.toReview')" "9"
 
 # Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is deep in the
 # list now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back
 # in the middle of a list you switched away from.
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toReview')" "1"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9): a click path logs no title.
@@ -3714,22 +3767,29 @@ d5env() {
 }
 d5env node "$ROOT/bin/cockpitd.mjs" > "$A5/daemon.log" 2>&1 &
 D5PID=$!
-sleep 2
+waituntil 10 "the start-up pass in the cache" \
+  bqtrue "$S5" '!!c.repos.alpha && c.repos.alpha.fetchedAt>0 && c.meUuid==="ME-UUID"'
 check "the start-up trigger fetched a configured repo" "bitbucket start: alpha ok" "$A5/daemon.log"
 same  "...and filled the cache"                        "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
 same  "...resolving 'me' at start"                     "$(bq "$S5" 'c.meUuid')" "ME-UUID"
 
-# An hour-long tick fetches nothing on its own.
+# An hour-long tick fetches nothing on its own. Window: 2.5 of the ticks D4 and D6
+# run on (BB_TICK_MS), so a tick at the test cadence would have fetched twice.
 : > "$BBHITS"
-sleep 2
+nap 2
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/pullrequests' "$BBHITS")" "0"
 
 # The return to the fleet LIST is the trigger (DESIGN 2.9) -- attach, then step back
 # out, which is what makes reconcile call onExit.
-echo "test agent" > "$A5/fleetstate"; sleep 3
-echo list > "$A5/fleetstate"; sleep 3
+# The return's pass must REWRITE the cache: fetchedAt was already > 0 from the start,
+# so the check compares against the start pass's stamp (DESIGN 3.3).
+FETCHED_START="$(bq "$S5" 'c.repos.alpha.fetchedAt')"
+echo "test agent" > "$A5/fleetstate"
+waitfor "enter abc12345" "$A5/daemon.log" 10 "D5 to attach the agent"
+echo list > "$A5/fleetstate"
+waituntil 10 "the return's pass in the cache" bqtrue "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START"
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
-same  "...and the cache was rewritten"                   "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
+same  "...and the cache was rewritten"                   "$(bq "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START")" "true"
 
 daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
