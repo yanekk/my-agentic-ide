@@ -9,6 +9,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T01 review: `ONLY="11c'''"` failed section 7 "the vanished agent's diff pane too" at load 28 while a full run passed beside it. Section body untouched by T01; another load flake for T03. |
 | 2026-09-27 | 📌 | T01 baseline, merged script, 0 orphans: 557s, 767 checks. Chains: main 303s, footer 134s, dashboard 69s, agenda 49s. Top ten: 12c 109, 14 34, 13 33, 14d 25, 12 20, 13b 16, 11k 12, 16n 11, 11p 11, 14b 10. |
 | 2026-09-27 | 📌 | That baseline ran beside another suite, load 2.8 rising to 24; a load-5 run with six orphans took 560s, so wall time is wait-bound. Section 12c (pir-pane footer switch, ~0.8s per frame) alone is 109s. |
 | 2026-09-27 | 🐞 | The EXIT trap named `D7PID`, set only in 15m; any run skipping 15m died on `set -u` in the trap, skipping `daemon_sweep` and `rm -rf $T`. T01 initialises it with the others. |

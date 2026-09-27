@@ -10,9 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** T01 implemented, awaiting review. T02 can build in parallel.
+**Status:** T01 done. T02 next; T03–T07 wait on it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** review T01.
+**Next `pir-work` will:** implement T02.
 
 ## Tasks
 
@@ -21,7 +21,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | section-runner | — | 🔍 | `section`/`CHAIN_OF`, `ONLY`/`SECTIONS`/`TIMINGS`; 767 checks, identical list. Deviations: headings 12c and 13 now get the blank line the others had; a startup check refuses a `CHAIN_OF` out of step with headings; `D7PID` initialised (trap crashed on partial runs). Baseline in FINDINGS. |
+| T01 | section-runner | — | ✅ | Review clean, no fix commit. Full run 767, ALL PASS at load ~15–28. Probed: `ONLY` nope/partial-nope exit 2, a forced FAIL under `ONLY=12` exits 1 with FAILURES, `ONLY=14c` prefix, a renamed heading refused by the `CHAIN_OF` check, no orphans left. Baseline ran beside another suite, not on a quiet machine. |
 | T02 | waituntil | — | ⬜ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
@@ -32,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
