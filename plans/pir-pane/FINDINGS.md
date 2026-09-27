@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | ✅ | T07 verified by hand: live window on the T07 worktree (`config.lua` `repo` pointed there, then restored). PIR, a real run, its worker, back twice, Claude Agents: every click switched first try, diff and notes as expected. |
+| 2026-09-27 | 📌 | The live window runs main's `bin/`, so a feature on a pir branch is live-checked by pointing `~/.claude/cockpit/config.lua` `repo` at its worktree and reopening. Rebuilding closes the terminal a `pir` run may sit in. |
 | 2026-09-27 | 🔄 | T06: at 120 columns the footer's tightest level was 133 wide and wrapped, hiding the switch. The person chose a sixth level (usage without reset times), then cutting at the edge, never wrapping. Switch-only. |
 | 2026-09-27 | 🐞 | T06 drill: a shown worker's folder removed with no pir write left revdiff on a chdir error; the idle reconcile poll now re-reads pir's report. Two footer verbs in one 200ms read dropped the second; checked under the lock now. |
 | 2026-09-27 | 📌 | With no usage reading the footer never trims (usage-limits rule) and wraps below ~190 columns, hiding the switch: a Bedrock-only machine would hit it. Not changed. |
