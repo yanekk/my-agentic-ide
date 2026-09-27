@@ -27,6 +27,13 @@ function strOrNull(v) {
   return nonEmptyString(v) ? v : null;
 }
 
+// §2.4 promises absolute paths. A relative one would be resolved against the daemon's own
+// working directory by every exists()/cd downstream and attach some unrelated folder, so it
+// reads as absent (null): the table then falls back or shows the list, which is safe.
+function absPathOrNull(v) {
+  return nonEmptyString(v) && v.startsWith("/") ? v : null;
+}
+
 function normaliseRun(r) {
   // The key is what every per-key map in the daemon is indexed by; without one there is
   // nothing to attach, so the run is treated as missing.
@@ -38,7 +45,7 @@ function normaliseRun(r) {
     repo: strOrNull(r.repo),
     repoPath: strOrNull(r.repoPath),
     branch: strOrNull(r.branch),
-    cwd: strOrNull(r.cwd),
+    cwd: absPathOrNull(r.cwd),
   };
 }
 
@@ -48,7 +55,7 @@ function normaliseWorker(w) {
     id: w.id,
     task: strOrNull(w.task),
     role: strOrNull(w.role),
-    cwd: strOrNull(w.cwd),
+    cwd: absPathOrNull(w.cwd),
   };
 }
 

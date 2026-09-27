@@ -77,6 +77,10 @@ check("readPirState: run.cwd null stays null",
   readPirState(doc({ view: "run", run: { ...RUN, cwd: null } }), alive).run.cwd, null);
 check("readPirState: a non-string cwd reads as null",
   readPirState(doc({ view: "worker", run: RUN, worker: { ...WORKER, cwd: 42 } }), alive).worker.cwd, null);
+check("readPirState: a relative run cwd reads as null",
+  readPirState(doc({ view: "run", run: { ...RUN, cwd: "bin" } }), alive).run.cwd, null);
+check("readPirState: a relative worker cwd reads as null",
+  readPirState(doc({ view: "worker", run: RUN, worker: { ...WORKER, cwd: "./wt" } }), alive).worker.cwd, null);
 check("readPirState: extra fields are dropped",
   Object.keys(readPirState(doc({ view: "run", run: { ...RUN, extra: 1 } }), alive).run).sort(),
   ["branch", "cwd", "key", "kind", "repo", "repoPath", "slug"]);
@@ -136,6 +140,10 @@ check("decidePir: a worker with no task is labelled by its id",
   decidePir(workerState({ ...WORKER, task: null }), facts([RUN.cwd, WORKER.cwd])).label, "pir-pane / w-T01");
 check("decidePir: a folder in another repo is followed (§2.11)",
   decidePir(runState({ ...RUN, cwd: "/elsewhere/other" }), facts(["/elsewhere/other"])).cwd, "/elsewhere/other");
+check("decidePir: end to end, a relative run cwd is never followed even if it exists",
+  decidePir(readPirState(doc({ view: "run", run: { ...RUN, cwd: "bin" } }), alive), facts(["bin"])).mode, "list");
+check("decidePir: end to end, a relative worker cwd falls back to the run",
+  decidePir(readPirState(doc({ view: "worker", run: RUN, worker: { ...WORKER, cwd: "wt" } }), alive), facts([RUN.cwd, "wt"])), RUN_FOLLOW);
 check("decidePir: end to end from the file, dead pid → list",
   decidePir(readPirState(doc({ pid: 7, view: "run", run: RUN }), alive), facts([RUN.cwd])), { mode: "list" });
 
