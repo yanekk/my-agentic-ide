@@ -26,13 +26,13 @@ done · ⛔ blocked, needs a human.
 | T00 | swap-spike | — | ✅ | |
 | T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ⬜ | |
-| T03 | program-swap | T00 | ⬜ | |
+| T03 | program-swap | T00 | 🔍 | switchFleet, cockpit-pir.sh, landmark on panes.foot, 72 new checks (15a–15o). Deviations: landmark falls back to panes.fleet when panes.json lacks foot; switch also refused while attached; spawnAgent refuses unless claude shown; dead claude pane refused, not respawned; pir-shown split anchors untested until T04 attaches. |
 | T04 | pir-follow | T01, T03 | ⬜ | |
 | T05 | docs | T04 | ⬜ | |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 

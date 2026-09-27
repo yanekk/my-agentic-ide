@@ -403,10 +403,12 @@ const COCKPIT_BIN = path.join(DIR, "bin");
 // nowhere else, so the shadow reaches broot alone. cockpit-layout.sh builds it.
 const COCKPIT_BROWSE_BIN = path.join(DIR, "browse-bin");
 function spawnTerminal(cwd) {
+  return ["--cwd", cwd, "--", ...cockpitEnv(), LOGIN_SHELL, "-l"];
+}
+/** `/usr/bin/env` plus the two variables every pane the daemon spawns must be handed. */
+function cockpitEnv() {
   const rest = (process.env.PATH ?? "").split(":").filter((p) => p && p !== COCKPIT_BIN);
-  return ["--cwd", cwd, "--", "/usr/bin/env",
-          `COCKPIT_REPO=${panes.repo}`, `PATH=${[COCKPIT_BIN, ...rest].join(":")}`,
-          LOGIN_SHELL, "-l"];
+  return ["/usr/bin/env", `COCKPIT_REPO=${panes.repo}`, `PATH=${[COCKPIT_BIN, ...rest].join(":")}`];
 }
 // Tests drive this down so two strikes take seconds rather than half a minute.
 const REAP_MS = Number(process.env.COCKPIT_REAP_MS) || 15000;
@@ -819,8 +821,63 @@ function disposePair(jobId, keep) {
   browsePairs.delete(jobId);
 }
 
-/** The cockpit's own tab -- the one the fleet pane is in. */
-const cockpitTabId = (table) => table?.find((p) => p.pane_id === panes.fleet)?.tab_id;
+// ---------------------------------------------------------------------------
+// The fleet slot holds one of two programs (pir-pane DESIGN 2.3, 2.10)
+//
+// The bottom-left slot shows either `claude agents` (panes.fleet, the layout's own
+// pane) or the pir dashboard (panes.pir, spawned on the first `fleet-pir`). The one
+// not shown is PARKED in a tab of its own, never killed, exactly like a diff.
+//
+// That splits panes.fleet's old two roles apart. As "the pane running claude
+// agents" it stays panes.fleet (paneState, injectReview, spawnAgent). As the
+// LANDMARK for finding the cockpit tab it becomes panes.foot, the one pane that is
+// never parked, split into or restarted -- a landmark on a parkable pane makes the
+// daemon take a parked tab for the cockpit. As the ANCHOR for splits and the target
+// of the focus hand-back it becomes whichever pane is in the slot (slotFleetPane).
+// ---------------------------------------------------------------------------
+
+/** Which program the fleet slot shows. Session-only: every rebuild starts on claude. */
+let fleetProgram = "claude";
+/**
+ * Whether the SHOWN program is on its list screen, as the footer draws it. Written
+ * from the reconcile poll for claude (a non-repo agent's header attaches nothing yet
+ * is not a list, so "nothing attached" is not the test); true while pir is shown
+ * until T04 reads pir's own report.
+ */
+let fleetSwitchableNow = false;
+/** pir's dashboard state file (pir-pane DESIGN 2.4); the layout deletes it on rebuild. */
+const PIR_STATE = path.join(DIR, "pir-dashboard.json");
+/** The relaunch loop the pir pane runs (DESIGN 2.3). */
+const PIR_LOOP = path.join(HERE, "cockpit-pir.sh");
+/**
+ * The absolute path of `pir` on the daemon's PATH at start, or null. Resolved once:
+ * a footer segment that appears and vanishes as PATH is edited would be noise, and
+ * with no pir the segment is not drawn at all (DESIGN 2.1).
+ */
+const PIR_BIN = (() => {
+  for (const d of (process.env.PATH ?? "").split(":")) {
+    if (!d) continue;
+    const f = path.join(d, "pir");
+    try {
+      if (fs.statSync(f).isFile()) { fs.accessSync(f, fs.constants.X_OK); return f; }
+    } catch { /* not here */ }
+  }
+  return null;
+})();
+
+/** The pane in the fleet slot right now: the anchor for splits and the focus hand-back. */
+function slotFleetPane() {
+  return fleetProgram === "pir" && panes.pir !== undefined ? panes.pir : panes.fleet;
+}
+/**
+ * The pane whose tab IS the cockpit tab. panes.foot is never parked; the fallback
+ * to panes.fleet only serves a panes.json written before the footer was recorded,
+ * where pir cannot have parked claude yet either.
+ */
+const cockpitLandmark = () => panes.foot ?? panes.fleet;
+
+/** The cockpit's own tab -- the one the footer pane is in. */
+const cockpitTabId = (table) => table?.find((p) => p.pane_id === cockpitLandmark())?.tab_id;
 
 /**
  * Park the pair's VIEWER beside its already-parked BROWSER, so the two sit
@@ -1235,7 +1292,11 @@ function writeTerminals(table = paneTable()) {
   const cref = visibleKey === REPO_KEY ? null : (customRef.get(visibleKey) ?? null);
   try {
     const tmp = `${TERMS}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode: dmode, customRef: cref, terminals: list })}\n`);
+    // `fleet` is what the footer's `Claude Agents | PIR` segment draws (DESIGN 2.1,
+    // 3.5): which program is shown, whether a click may switch it, and whether pir
+    // exists at all (absent -> the segment is not drawn).
+    const fleet = { program: fleetProgram, switchable: fleetSwitchableNow, available: PIR_BIN !== null };
+    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode: dmode, customRef: cref, terminals: list, fleet })}\n`);
     fs.renameSync(tmp, TERMS);
   } catch { /* the strip just keeps its last frame */ }
 }
@@ -1296,7 +1357,7 @@ function insertIntoSlot(anchor, spec, cockpitTab) {
   } else {
     const strip = panes.strip;
     if (strip !== undefined) parkPane(strip, "strip", cockpitTab);
-    out = wez(["split-pane", "--right", "--percent", "50", "--pane-id", String(panes.fleet), ...tail]);
+    out = wez(["split-pane", "--right", "--percent", "50", "--pane-id", String(slotFleetPane()), ...tail]);
     const gap = Number.parseInt((out ?? "").trim(), 10);
     if (strip !== undefined && Number.isInteger(gap)) {
       wez(["split-pane", "--right", "--percent", "20", "--pane-id", String(gap), "--move-pane-id", String(strip)]);
@@ -1326,7 +1387,7 @@ function inCockpit(id, table, cockpitTab) {
  */
 function diffPaneFocused(table = paneTable()) {
   if (!table) return false;
-  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  const cockpitTab = cockpitTabId(table);
   const active = table.find((p) => p.tab_id === cockpitTab && p.is_active);
   if (active === undefined) return false;
   return active.pane_id === panes.diff
@@ -1342,7 +1403,7 @@ async function showTerminal(key, cwd, label) {
   if (!table) return log("cannot read the pane list; leaving the terminal alone");
 
   const live = new Set(table.map((p) => p.pane_id));
-  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  const cockpitTab = cockpitTabId(table);
 
   // Panes die with their window, and this daemon outlives windows. Forget the
   // ghosts before trying to move any of them.
@@ -1378,7 +1439,7 @@ async function showTerminal(key, cwd, label) {
   visibleKey = key;
   // split-pane activates whatever it put in the slot. Switching agents happens in
   // the fleet view, so that is where the next keystroke belongs.
-  wez(["activate-pane", "--pane-id", String(panes.fleet)]);
+  wez(["activate-pane", "--pane-id", String(slotFleetPane())]);
   publishPanes({ shell: incoming });
   writeTerminals();
 }
@@ -1416,7 +1477,7 @@ async function terminalCommand(verb, attempt = 0) {
     const table = paneTable();
     if (!table) return;
     const live = new Set(table.map((p) => p.pane_id));
-    const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+    const cockpitTab = cockpitTabId(table);
     pruneDeadTerminals(live);
     const entry = terminals.get(key);
     if (!entry) return;
@@ -1767,18 +1828,18 @@ function rebuildDiffSlot(cockpitTab) {
   if (term !== undefined) parkPane(term, "rebuilding", cockpitTab);
   if (strip !== undefined) parkPane(strip, "strip", cockpitTab);
   const out = wez(["split-pane", "--top", "--percent", "42",
-                   "--pane-id", String(panes.fleet), "--cwd", panes.repo,
+                   "--pane-id", String(slotFleetPane()), "--cwd", panes.repo,
                    "--", LOGIN_SHELL, "-l"]);
   // Restore the bottom row: fleet | terminal | strip. The strip clings to
   // whichever pane now forms the right edge -- the terminal if there is one,
   // otherwise the fleet pane.
   if (term !== undefined) {
     wez(["split-pane", "--right", "--percent", "50",
-         "--pane-id", String(panes.fleet), "--move-pane-id", String(term)]);
+         "--pane-id", String(slotFleetPane()), "--move-pane-id", String(term)]);
   }
   if (strip !== undefined) {
     wez(["split-pane", "--right", "--percent", "20",
-         "--pane-id", String(term ?? panes.fleet), "--move-pane-id", String(strip)]);
+         "--pane-id", String(term ?? slotFleetPane()), "--move-pane-id", String(strip)]);
   }
   const id = Number.parseInt((out ?? "").trim(), 10);
   if (!Number.isInteger(id)) {
@@ -1812,7 +1873,7 @@ async function showDiff(key, cwd, label) {
   }
 
   const live = new Set(table.map((p) => p.pane_id));
-  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  const cockpitTab = cockpitTabId(table);
   for (const [k, id] of diffs) if (!live.has(id)) { diffs.delete(k); diffLaunchedMode.delete(k); diffLaunchedRef.delete(k); diffLaunchedCwd.delete(k); diffLaunchedAt.delete(k); diffModeByAgent.delete(k); }
   // A parked revdiff whose shell was exited is simply forgotten: leaving browse
   // then hands the slot a fresh pane instead of chasing a pane that is gone.
@@ -1901,7 +1962,7 @@ async function showDiff(key, cwd, label) {
   visibleDiff = key;
   // split-pane activates whatever it put in the slot. Switching agents happens in
   // the fleet view, so that is where the next keystroke belongs.
-  wez(["activate-pane", "--pane-id", String(panes.fleet)]);
+  wez(["activate-pane", "--pane-id", String(slotFleetPane())]);
   // All four together: the viewer keys must never outlive the pair they name, and
   // an agent that is not browsing has to clear the ones the last one published.
   publishPanes({
@@ -2024,7 +2085,7 @@ function healMissingPanes() {
   const table = paneTable();
   if (!table) return;
   const live = new Set(table.map((p) => p.pane_id));
-  const cockpitTab = table.find((p) => p.pane_id === panes.fleet)?.tab_id;
+  const cockpitTab = cockpitTabId(table);
 
   const diff = diffs.get(attached.jobId);
   if (diff === undefined || !live.has(diff)) {
@@ -3166,6 +3227,9 @@ function bitbucketOpen(slug, id) {
  * The prompt is NOT logged -- it carries the PR URL; only the repo slug is (DESIGN 2.9).
  */
 function spawnAgent({ repo, prompt }) {
+  // panes.fleet is claude's pane whether or not it is shown, and a parked one takes
+  // keystrokes as readily as a visible one. Callers switch first; this is the fence.
+  if (fleetProgram !== "claude") return log(`not spawning in ${safeText(repo)}: claude agents is not shown`);
   // Focus the fleet pane first: at the list it holds the new-session box, and unattached
   // the daemon otherwise never types there. Activate, then type, as a person would.
   wez(["activate-pane", "--pane-id", String(panes.fleet)]);
@@ -3219,6 +3283,16 @@ function bitbucketVerb(verb) {
     const prompt = kind === "review"
       ? `Review Bitbucket PR ${url}`
       : `Address the review comments on Bitbucket PR ${url}`;
+    // The spawn types into claude's new-session box, so claude has to be the program
+    // shown: switch first (DESIGN 2.8) so one click still launches the agent. A
+    // switch that fails drops the spawn -- typing it into pir would drive pir.
+    if (fleetProgram !== "claude") {
+      switchFleet("claude").then((ok) => {
+        if (ok) spawnAgent({ repo: slug, prompt });
+        else log(`bitbucket ${kind}: not spawned, could not switch to claude agents`);
+      });
+      return;
+    }
     spawnAgent({ repo: slug, prompt });
     return;
   }
@@ -3269,12 +3343,120 @@ async function paneState() {
 
 let reconciling = false;
 
+/**
+ * Take the reconcile lock, waiting for it the way the keypress paths do (20 tries,
+ * 100ms apart) but as a promise, so a caller can act on the outcome -- spawnAgent
+ * must know whether the switch back to claude happened before it types anything.
+ */
+async function acquireReconcileLock() {
+  for (let i = 0; i < 20; i++) {
+    if (!reconciling) { reconciling = true; return true; }
+    await sleep(100);
+  }
+  return false;
+}
+
+/**
+ * May the fleet slot switch programs right now? Only with the shown program on its
+ * list screen (DESIGN 2.2), so a switch always happens with nothing attached.
+ * Claude: its pane says so. pir: always, until T04 reads pir's own report.
+ */
+async function fleetSwitchable() {
+  if (attached) return false;
+  if (fleetProgram === "pir") return true;
+  const state = await paneState();
+  return state?.mode === "list";
+}
+
+/** Keep the footer's `switchable` honest; rewrites terminals.json only on a change. */
+function noteSwitchable(v) {
+  if (v === fleetSwitchableNow) return;
+  fleetSwitchableNow = v;
+  writeTerminals();
+}
+
+/**
+ * Show `target` ("claude" | "pir") in the fleet slot, parking the other program.
+ * Returns true when `target` is in the slot afterwards (including "already was").
+ *
+ * The order is T00's, measured on wezterm 20240203 (FINDINGS 2026-09-27): split the
+ * incoming pane INTO the outgoing one at 50%, then park the outgoing one, so the
+ * incoming inherits the slot at its exact size and the terminal and strip beside it
+ * keep theirs -- the diff slot's trick, applied to the bottom-left. The pir pane is
+ * spawned the first time only (a person who never clicks PIR pays nothing), and
+ * again only if it has died.
+ */
+async function switchFleet(target) {
+  if (target === fleetProgram) return true;
+  if (target === "pir" && PIR_BIN === null) {
+    log("refusing fleet-pir: pir is not on the daemon's PATH");
+    return false;
+  }
+  if (!(await acquireReconcileLock())) {
+    log(`refusing fleet-${target}: the panes are busy`);
+    return false;
+  }
+  try {
+    if (!(await fleetSwitchable())) {
+      log(`refusing fleet-${target}: ${fleetProgram} is not at its list`);
+      return false;
+    }
+    const table = paneTable();
+    if (!table) { log(`refusing fleet-${target}: cannot read the pane list`); return false; }
+    const live = new Set(table.map((p) => p.pane_id));
+    const cockpitTab = cockpitTabId(table);
+    const outgoing = slotFleetPane();
+    let incoming = target === "pir" ? panes.pir : panes.fleet;
+
+    if (incoming !== undefined && live.has(incoming)) {
+      const moved = wez(["split-pane", "--left", "--percent", "50",
+                         "--pane-id", String(outgoing), "--move-pane-id", String(incoming)]);
+      if (moved === null) { log(`could not restore the ${target} pane ${incoming}`); return false; }
+      log(`restored the ${target} pane ${incoming} into the fleet slot`);
+    } else if (target === "pir") {
+      // Through /usr/bin/env for the reason every terminal is: a split inherits the
+      // mux server's environment, not ours, so PATH and COCKPIT_REPO are named here
+      // or runs pir starts would lose `note` and the session namer (DESIGN 2.3).
+      const out = wez(["split-pane", "--left", "--percent", "50", "--pane-id", String(outgoing),
+                       "--cwd", panes.repo, "--", ...cockpitEnv(), PIR_LOOP, PIR_BIN, PIR_STATE]);
+      const id = Number.parseInt((out ?? "").trim(), 10);
+      if (!Number.isInteger(id)) { log("could not open the pir pane"); return false; }
+      incoming = id;
+      publishPanes({ pir: id });
+      log(`opened the pir pane ${id} (${PIR_BIN})`);
+    } else {
+      // The claude pane is the layout's own and is never respawned here: its
+      // relaunch loop lives in cockpit-layout.sh, and a rebuild is the way back.
+      log(`refusing fleet-claude: the claude agents pane ${incoming} is gone`);
+      return false;
+    }
+
+    parkPane(outgoing, fleetProgram === "pir" ? "pir" : "claude agents", cockpitTab);
+    fleetProgram = target;
+    // The person clicked to see this program, so the keyboard goes with it.
+    wez(["activate-pane", "--pane-id", String(incoming)]);
+    // Both programs are at their list: claude could only be parked from there, and a
+    // pir that has just been shown is taken as at its list until T04 reads its file.
+    fleetSwitchableNow = true;
+    writeTerminals();
+    log(`fleet slot now shows ${target}`);
+    return true;
+  } finally {
+    reconciling = false;
+  }
+}
+
 async function reconcile() {
   if (reconciling) return;
+  // Everything below reads the CLAUDE pane. While pir is shown that pane is parked
+  // at its list and cannot change, so a poll would only re-read a frozen screen --
+  // and a stale header there must never attach anything (DESIGN 2.9).
+  if (fleetProgram === "pir") return;
   reconciling = true;
   try {
     const state = await paneState();
     if (!state) return;
+    noteSwitchable(state.mode === "list");
 
     if (state.mode === "list") {
       unreviewableName = null;
@@ -3352,6 +3534,9 @@ tail(CMD_FILE, (line) => {
   // focus gate is needed -- unlike the old shell-focused version, this lands in
   // panes.fleet (the Claude session), not panes.shell (the terminal).
   if (verb === "focus-claude") {
+    // Not while pir is shown: the claude pane is then parked in a tab of its own,
+    // and activating it would fill the window with it (DESIGN 2.7).
+    if (fleetProgram === "pir") return log("focus-claude ignored: pir is shown");
     if (panes.fleet !== undefined) {
       wez(["activate-pane", "--pane-id", String(panes.fleet)]);
     }
@@ -3360,6 +3545,9 @@ tail(CMD_FILE, (line) => {
   // Clicking a terminal's [x] in the strip appends this (see cockpit-strip.mjs); it
   // names the terminal outright, so unlike ⌥w it can close a parked one, not only
   // the one on screen.
+  // Clicking `Claude Agents` / `PIR` in the footer (DESIGN 2.1). Refused unless the
+  // shown program is at its list (DESIGN 2.2); switchFleet says why in the log.
+  if (verb === "fleet-claude" || verb === "fleet-pir") { switchFleet(verb.slice("fleet-".length)); return; }
   if (/^close-\d+$/.test(verb)) { terminalCommand(verb); return; }
   // Clicking a terminal's label area in the strip appends this; like close-<n> it
   // names the terminal outright, so it can jump straight to any one, not just cycle.
