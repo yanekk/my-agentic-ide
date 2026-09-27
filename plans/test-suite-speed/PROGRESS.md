@@ -10,11 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
-`test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
+**Status:** T01 implemented, awaiting review. T02 can build in parallel.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** T01, once pir-pane and then test-daemon-leaks have merged (the person
-starts it); it re-takes the baseline on the merged script.
+**Next `pir-work` will:** review T01.
 
 ## Tasks
 
@@ -23,7 +21,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | section-runner | — | ⬜ | |
+| T01 | section-runner | — | 🔍 | `section`/`CHAIN_OF`, `ONLY`/`SECTIONS`/`TIMINGS`; 767 checks, identical list. Deviations: headings 12c and 13 now get the blank line the others had; a startup check refuses a `CHAIN_OF` out of step with headings; `D7PID` initialised (trap crashed on partial runs). Baseline in FINDINGS. |
 | T02 | waituntil | — | ⬜ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
@@ -34,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** empty
+**Review queue:** T01
 
 ## Blocked on the user
 

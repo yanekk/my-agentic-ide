@@ -129,12 +129,13 @@ daemon change to become observable, that is a finding for the person, not a quie
 
 ### 4.1 Chains
 
-Measured by reading the script on 2026-09-27, before pir-pane merged:
+Re-read by T01 on the merged script (pir-pane and test-daemon-leaks in), 2026-09-27. The
+table in the script is `CHAIN_OF`, and the script refuses to run if it and the headings differ.
 
-| Chain | Sections | Starts | Depends on |
+| Chain | Sections, in heading order | Starts | Depends on |
 |---|---|---|---|
-| main | 1 … 11p, and pir-pane's 15a–15o once merged | the main daemon `DPID` | each section on the ones before it (pane ids 31–34, `MOVED*`, `BR`/`VW`, the attached agent) |
-| footer | 12, 12b | nothing; runs `cockpit-strip.mjs` directly | 12b on 12's `footer`/`SD` helpers |
+| main | 1 … 11p, 15a … 15l, 16a … 16p, 15m, 15n, 15o | the main daemon `DPID`; 15m its own `D7PID` | each section on the ones before it (pane ids 31–34, `MOVED*`, `BR`/`VW`, the attached agent). 15m–15o use only the shared setup |
+| footer | 12, 12b, 12c | nothing; runs `cockpit-strip.mjs` directly | 12b and 12c on 12's `SD`/`RAW`/`PLAIN`/`STRIP_ANSI` |
 | agenda | 13, 13b, 13c | the Google stub, daemons D2, D3 | 13b on 13's stub and `cq`; 13c is static |
 | dashboard | 14, 14d, 14b, 14c | the BitBucket stub, daemons D4, D6, D5 | 14d and 14b on 14's stub, `bq`, `bbconf`, `stopbb`; 14c is static |
 
@@ -142,8 +143,7 @@ Section 13 redefines `same()` for every later section. T05 moves that definition
 helper a chain defines inside its first section (`cq`, `bq`, `stopbb`, `footer`), to the top of
 its chain, so skipping one chain cannot change another's behaviour.
 
-pir-pane inserts 15a–15o between 11p and 12 (main chain) and 12c after 12b (footer chain, no
-daemon). The chain table is re-checked by T01 on the merged script and corrected there.
+pir-pane put 15a–15l, 16a–16p and 15m–15o between 11p and 12, and 12c after 12b.
 
 ## 5. Environment — read this before running anything
 
