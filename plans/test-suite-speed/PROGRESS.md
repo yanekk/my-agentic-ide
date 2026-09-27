@@ -27,8 +27,8 @@ done · ⛔ blocked, needs a human.
 | T02 | waituntil | — | ✅ | |
 | T03 | convert-main-early | T01, T02 | ✅ | 62 waits in 1–10 became polls or stated `nap` windows; 3b flake fixed; 152 checks. Review clean, no fix commit: full run ALL PASS 767, 4 concurrent `ONLY=10` 4/4; mutations (healer trusts title, terminal-focused ⌥] switches mode, file-not-dir watch) each still fail 5, 5c, 3b. |
 | T04 | convert-browse | T01, T02 | ⬜ | |
-| T05 | convert-footer-agenda | T01, T02 | ⬜ | |
-| T06 | convert-dashboard | T01, T02 | ⬜ | |
+| T05 | convert-footer-agenda | T01, T02 | ✅ | |
+| T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |

@@ -415,6 +415,12 @@ chmod +x "$T/bin/claude"
 SPEED="${COCKPIT_TEST_SPEED:-0.5}"
 # nap N: sleep N seconds scaled by SPEED, with a small floor so it never hits zero.
 nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }
+# The dashboard daemons' tick (D4, D6). cockpitd reads COCKPIT_BITBUCKET_TICK_MS
+# as-is, NOT through COCKPIT_TIME_SCALE, so it is scaled here by the same factor
+# as `nap`: a nap that proves "N ticks went by" must shrink with the tick, or a
+# lower SPEED would prove it against a tick that no longer fits (DESIGN 3.2).
+# 400ms at the default 0.5, as it was when it was a literal. D5 keeps its hour.
+BB_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
 
 # --- state -----------------------------------------------------------------
 echo '{"diff":10,"fleet":20,"shell":30,"foot":9,"repo":"'"$WT"'"}' > "$T/state/panes.json"
@@ -428,6 +434,16 @@ mkdir -p "$T/home"
 # SPEED like everything else (never below 50ms); COCKPIT_TIME_SCALE scales the
 # daemon's own poll/debounce/settle constants to match the naps below.
 REAP_MS="$(awk -v s="$SPEED" 'BEGIN{ v=700*s; if (v<50) v=50; printf "%d", v }')"
+# The agenda daemons' tick (sections 13, 13b) has its own env seam and is NOT
+# scaled by COCKPIT_TIME_SCALE, so it is scaled here: 800*SPEED is the old fixed
+# 400ms at the default 0.5, and `nap 0.8` is one tick at any SPEED (same 50ms floor
+# as REAP_MS). Without this a lower SPEED would shrink the naps that prove "no
+# fetch within N ticks" below the tick itself, and they would pass vacuously.
+AGENDA_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
+# Staleness must outlast the whole agenda section (nothing may go stale unless a
+# line zeroes its fetchedAt), and the section's length is mostly unscaled polls --
+# so it scales UP with SPEED but never drops below the old 60s.
+AGENDA_STALE_MS="$(awk -v s="$SPEED" 'BEGIN{ v=120000*s; if (v<60000) v=60000; printf "%d", v }')"
 # AGENDA_ORIGIN points at a port nothing listens on. This daemon never has a
 # calendar configured so it never fetches at all -- but a later edit that gave it
 # one must fail loudly here rather than open a real socket to Google on whatever
@@ -2696,11 +2712,11 @@ PKF="pkill -f"
 check  "the harness intercepted pkill"            "$PKF cockpitd.mjs" "$T/layout-calls"
 fi
 
-if section 12 "the footer draws -- and clicks -- a fourth label"; then
-# The strip renderer is a separate process reading terminals.json, so this section
-# runs it directly rather than through the daemon. It never exits on its own (it
-# watches the state dir), so every run is backgrounded and killed.
-SD="$T/strip"; mkdir -p "$SD"
+# --- the footer chain's helpers (12, 12b, 12c) ------------------------------
+# Defined here, above the chain's first heading and outside every section, so
+# what a section sees never depends on which sections ran before it
+# (plans/test-suite-speed DESIGN 4.1). Nothing here starts a process.
+SD="$T/strip"
 # The capture goes OUTSIDE the state dir: the renderer watches that directory, so a
 # capture file written into it makes the renderer repaint on its own output for ever.
 RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
@@ -2709,16 +2725,134 @@ RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
 # ←↑↓→) that a byte-oriented reader counts several times over, which lands the
 # click ~35 columns to the right of the label it was aimed at.
 STRIP_ANSI='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(process.argv[2] ? String(s.indexOf(process.argv[2]) + 1) : s)'
+# Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
+# code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
+# points equal columns here -- which is what the one-row width assertion needs.
+LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
+SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
+# The renderer's start-up writes, in order: hide the cursor, the frame, then turn on
+# mouse reporting (and, on a tty, raw mode straight after). So MOUSE_ON in the
+# output means the first frame is complete and a click can be read. CURSOR_ON is
+# what its SIGTERM handler writes on the way out.
+MOUSE_ON=$'\033[?1006h'
+CURSOR_ON=$'\033[?25h'
 
+# strip_frame [cols]: render ONE footer frame of $SD/terminals.json into $RAW and
+# $PLAIN. It used to sleep 0.8s and kill; now it polls for the finished frame. The
+# kill must land after the renderer has registered its SIGTERM handler, or the
+# frame loses its exit bytes (which 12c's hashes include), so a frame without them
+# is simply rendered again. The single-command subshells matter: bash execs node,
+# so the kill reaches node rather than a wrapper. No [cols] leaves COLUMNS as
+# inherited, exactly as section 12's frames always ran.
+strip_frame() {
+  local p try
+  for try in 1 2 3; do
+    : > "$RAW"
+    if [ $# -gt 0 ]; then
+      ( COCKPIT_DIR="$SD" COLUMNS="$1" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+    else
+      ( COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+    fi
+    p=$!
+    waituntil 10 "the footer to draw a frame" grep -qF -- "$MOUSE_ON" "$RAW"
+    kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+    grep -qF -- "$CURSOR_ON" "$RAW" && break
+  done
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
 footer() {   # footer <diffMode>: render one frame with that mode into $RAW/$PLAIN
   printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' \
       "$1" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!
-  sleep 0.8
-  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+  strip_frame
 }
+useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
+# ufooter <mode> <cols>: render one frame at a forced width (no TTY under the pipe,
+# so COLUMNS is how the narrow-window trim is exercised).
+ufooter() {
+  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' "$1" > "$SD/terminals.json"
+  strip_frame "$2"
+}
+# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
+# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
+ffooter() {
+  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
+      "$1" "$2" > "$SD/terminals.json"
+  strip_frame "${3:-}"
+}
+has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
+
+# press <cols|-> <label> [<sentinel-label> <sentinel-verb>]: left-press <label> in
+# the frame last rendered into $RAW, through $CLICKER under script(1) (the footer
+# needs a real terminal to read a mouse report), and echo the verbs it appended.
+# `-` runs without COLUMNS, as section 12's clicks always did.
+#
+# This used to be `sleep 1; click; sleep 0.8` and then up to 4s waiting for
+# script(1) to notice its input had closed, which it never did. Now each step is a
+# poll: the press is sent once the renderer has drawn and turned on mouse input,
+# and the result is read once the verb is in $SD/cmd.
+#
+# A press that must append NOTHING cannot end on a poll for a verb. So it is
+# followed by a SENTINEL press on a label that does append one: the renderer reads
+# its input in order, so once the sentinel's verb is in the file the first press
+# has been handled, and whatever came before the sentinel's line is its result.
+# That proves the absence without a timed window.
+press() {
+  local cols=$1 label=$2 sl=${3:-} sv=${4:-} col scol="" p i=0
+  local out="$T/press-out" go="$T/press-go" done="$T/press-done"
+  col=$(node -e "$STRIP_ANSI" "$RAW" "$label")
+  [ -n "$sl" ] && scol=$(node -e "$STRIP_ANSI" "$RAW" "$sl")
+  : > "$SD/cmd"; : > "$out"; rm -f "$go" "$done"
+  # The feeder holds script's stdin open until told the result is in: closed early,
+  # script(1) could take the renderer down before the press was read. Its own
+  # loops are bounded so it can never outlive the helper by more than ~30s.
+  feed() {
+    local j=0
+    until [ -e "$go" ] || [ "$j" -ge 300 ]; do sleep 0.05; j=$((j + 1)); done
+    printf '\033[<0;%d;1M' "$col"
+    [ -n "$scol" ] && printf '\033[<0;%d;1M' "$scol"
+    j=0
+    until [ -e "$done" ] || [ "$j" -ge 300 ]; do sleep 0.05; j=$((j + 1)); done
+  }
+  if [ "$cols" = - ]; then
+    feed | ( COCKPIT_DIR="$SD" script -q /dev/null node "$CLICKER" footer > "$out" 2>&1 ) &
+  else
+    feed | ( COCKPIT_DIR="$SD" COLUMNS="$cols" script -q /dev/null node "$CLICKER" footer > "$out" 2>&1 ) &
+  fi
+  p=$!
+  # Inside $(...) a wait's FAIL line would become part of the result, so it goes
+  # to stderr; the `same` on the result is what fails the run.
+  waituntil 10 "the clicked footer to draw and read the mouse" grep -qF -- "$MOUSE_ON" "$out" >&2
+  : > "$go"
+  if [ -n "$sv" ]; then
+    waituntil 10 "the sentinel press on $sl to append $sv" grep -qxF -- "$sv" "$SD/cmd" >&2
+  else
+    waituntil 10 "a press on $label to append a verb" grep -q . "$SD/cmd" >&2
+  fi
+  : > "$done"
+  pkill -f "$CLICKER" 2>/dev/null
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  wait "$p" 2>/dev/null
+  if [ -n "$sv" ]; then
+    # Called inside $(...), where a timed-out wait's `fail=1` is lost: so a missing
+    # sentinel is written INTO the result, and the `same` after it fails on it
+    # rather than passing on an empty file that proved nothing.
+    awk -v s="$sv" '$0 == s { exit } { printf "%s", $0 }' "$SD/cmd"
+    grep -qxF -- "$sv" "$SD/cmd" || printf '<no %s: the press was never shown to be handled>' "$sv"
+  else
+    tr -d '\n' < "$SD/cmd"
+  fi
+}
+click() { press - "$@"; }                    # section 12: no forced width
+fclick() {  # fclick <label> <cols> [<sentinel-label> <sentinel-verb>]
+  local l=$1 c=$2; shift 2; press "$c" "$l" "$@"
+}
+
+if section 12 "the footer draws -- and clicks -- a fourth label"; then
+# The strip renderer is a separate process reading terminals.json, so this section
+# runs it directly rather than through the daemon. It never exits on its own (it
+# watches the state dir), so every run is backgrounded and killed.
+mkdir -p "$SD"
 
 footer browse
 check  "the footer draws a Browse label"          "Browse" "$PLAIN"
@@ -2755,20 +2889,6 @@ cp "$ROOT/bin/cockpit-usage-store.mjs" "$T/cockpit-usage-store.mjs"
 cp "$ROOT/bin/cockpit-usage-model.mjs" "$T/cockpit-usage-model.mjs"
 
 footer uncommitted                        # Browse drawn plain, as it would be clicked
-click() {  # click <label>: send a left-click at that label's column, echo the verb
-  local col p i=0
-  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
-  : > "$SD/cmd"
-  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
-  | ( COCKPIT_DIR="$SD" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
-  p=$!
-  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
-  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
-  wait "$p" 2>/dev/null
-  pkill -f "$CLICKER" 2>/dev/null
-  tr -d '\n' < "$SD/cmd"
-}
-
 same "clicking Browse appends diff-browse"        "$(click Browse)" "diff-browse"
 # The three that were already there must keep their columns and their hit zones: a
 # fourth label inserted anywhere but the end would silently move them.
@@ -2794,19 +2914,6 @@ NOW_MS=$(( NOW_S * 1000 ))
 STALE_MS=$(( (NOW_S - 1200) * 1000 ))
 R5=$(( NOW_S + 3600 ))
 R7=$(( NOW_S + 3 * 86400 ))
-# Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
-# code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
-# points equal columns here -- which is what the one-row width assertion needs.
-LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
-useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
-# ufooter <mode> <cols>: render one frame at a forced width (no TTY under the pipe,
-# so COLUMNS is how the narrow-window trim is exercised).
-ufooter() {
-  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' "$1" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" COLUMNS="$2" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
-}
 
 # A fresh cache: the 5h / 1d / 7d windows with their percentages, coloured by role.
 # R7 is NOW+3 days, so the weekly window started NOW-4 days -> we are in daily slice
@@ -2873,16 +2980,6 @@ if section 12c "the footer's program switch: Claude Agents | PIR (pir-pane T02)"
 # 3.5) and draws `Claude Agents | PIR` leftmost; a click on the label NOT shown,
 # while switchable, appends fleet-claude / fleet-pir. The daemon starts writing the
 # block in T03, so here terminals.json is hand-written, as in sections 12 and 12b.
-# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
-# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
-ffooter() {
-  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
-      "$1" "$2" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" COLUMNS="${3:-}" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
-}
-SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
 FL_CLAUDE=',"fleet":{"program":"claude","switchable":true,"available":true}'
 FL_PIR=',"fleet":{"program":"pir","switchable":true,"available":true}'
 FL_LOCKED=',"fleet":{"program":"claude","switchable":false,"available":true}'
@@ -2942,7 +3039,6 @@ check  "narrow: the diff labels are kept"             "Browse" "$PLAIN"
 NW=$(node -e "$LEN" "$RAW")
 if [ "${NW:-0}" -le 140 ]; then okline "narrow: the switch footer stays one row ($NW <= 140)"
 else echo "  FAIL the switch footer wrapped: width $NW > 140 columns"; fail=1; fi
-has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
 LV="$(has 'drag copy')$(has '⌥t new')$(has 'test agent')"
 case "$LV" in 111|011|001|000) okline "narrow: trimming stays in its order ($LV)";;
   *) echo "  FAIL narrow trim is out of order: sec/pri/name = $LV"; fail=1;; esac
@@ -2990,19 +3086,6 @@ rm -f "$SD/usage-cache.json"
 
 # The click path, under script(1) exactly like section 12's click().
 if command -v script >/dev/null; then
-fclick() {  # fclick <label> [cols]: left-press that label in the current frame, echo the verb
-  local col p i=0
-  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
-  : > "$SD/cmd"
-  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
-  | ( COCKPIT_DIR="$SD" COLUMNS="${2:-}" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
-  p=$!
-  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
-  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
-  wait "$p" 2>/dev/null
-  pkill -f "$CLICKER" 2>/dev/null
-  tr -d '\n' < "$SD/cmd"
-}
 cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it
 # Both sizes the task names: 319 (the live window) and the 140 narrow one, the
 # latter with usage present so the trim is in play.
@@ -3010,22 +3093,58 @@ for W in 319 140; do
   if [ "$W" = 140 ]; then useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"; fi
   ffooter "test agent" "$FL_CLAUDE" "$W"
   same "[$W] claude shown: clicking PIR appends fleet-pir"           "$(fclick PIR "$W")" "fleet-pir"
-  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W" Browse diff-browse)" ""
   same "[$W] the diff labels still land behind the switch"           "$(fclick Browse "$W")" "diff-browse"
   same "[$W] ...and Uncommitted Changes too"                         "$(fclick 'Uncommitted Changes' "$W")" "diff-uncommitted"
   ffooter "test agent" "$FL_PIR" "$W"
   same "[$W] pir shown: clicking Claude Agents appends fleet-claude" "$(fclick 'Claude Agents' "$W")" "fleet-claude"
-  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W")" ""
+  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W" Browse diff-browse)" ""
   ffooter "test agent" "$FL_LOCKED" "$W"
-  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W")" ""
-  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W" Browse diff-browse)" ""
+  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W" Browse diff-browse)" ""
   ffooter "repo" "$FL_CLAUDE" "$W"
   same "[$W] at the fleet list the switch still clicks (fleet-pir)"  "$(fclick PIR "$W")" "fleet-pir"
-  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W")" ""
+  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W" PIR fleet-pir)" ""
 done
 rm -f "$SD/usage-cache.json"
 fi
 fi
+
+# --- the agenda chain's helpers (13, 13b, 13c) ------------------------------
+# Above the chain's first heading and outside every gate, like the footer chain's.
+#
+# `same` is REDEFINED here for the rest of the file, with the expected/actual
+# failure format. It used to be redefined inside section 13, so the sections after
+# it (the dashboard chain) printed a different failure format depending on whether
+# 13 had run: `ONLY=14c` got `want [..] got [..]`, a full run `expected:/actual:`.
+# Out here, and ungated, every run prints what a full run always printed. It must
+# stay below every main-chain and footer section, which use the first format.
+same() {  # same <description> <actual> <expected>
+  if [ "$2" = "$3" ]; then
+    okline "$1"
+  else
+    echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
+  fi
+}
+# Read one value out of a cache file; `c` is the parsed agenda-cache.json.
+cq() {  # cq <state-dir> <expression over c>
+  node -e 'const fs=require("fs");let c={calendars:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/agenda-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
+}
+# Zero the fetchedAt the daemon compares against, which is the only way anything
+# here becomes stale. Written directly rather than through the store: nothing is
+# stale at the moment this is called, so the daemon is not holding the lock.
+makestale() {  # makestale <state-dir> <slug>...
+  node -e 'const fs=require("fs");const p=process.argv[1]+"/agenda-cache.json";const c=JSON.parse(fs.readFileSync(p,"utf8"));for(const s of process.argv.slice(2))if(c.calendars[s])c.calendars[s].fetchedAt=0;fs.writeFileSync(p,JSON.stringify(c));' "$@"
+}
+# ghits_ge <n> <fragment>...: has the fake Google logged at least n requests
+# for EACH fragment? A poll condition for waituntil.
+ghits_ge() {
+  local n=$1 f; shift
+  for f; do [ "$(grep -c -- "$f" "$GHITS")" -ge "$n" ] || return 1; done
+}
+# The fake Google's `slow` hold: five agenda ticks, so the in-flight window below
+# (two and a half ticks) always closes before the held request is released.
+GSLOW_MS="$(awk -v t="$AGENDA_TICK_MS" 'BEGIN{ printf "%d", t * 5 }')"
 
 if section 13 "the agenda: the daemon keeps the event cache current"; then
 # T07. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.5), so the refresh is
@@ -3036,20 +3155,14 @@ if section 13 "the agenda: the daemon keeps the event cache current"; then
 # the pane table the sections above assert on. The stub takes those paths from the
 # environment, which is what makes the isolation a matter of env vars alone.
 #
-#   D2  a 400ms tick: everything the tick itself does.
+#   D2  an $AGENDA_TICK_MS tick (400ms at the default speed): everything the tick
+#       itself does. Every window below is a `nap` counted in those ticks.
 #   D3  a tick an hour long, so it can never fire in-test: whatever D3 refreshes
 #       is the ON-RETURN trigger and cannot be confused for a tick.
 #
-# AGENDA_STALE_MS is 60s in both -- longer than this section runs -- so nothing is
+# $AGENDA_STALE_MS (60s or more) in both -- longer than this section runs -- so nothing is
 # ever re-fetched by accident. A calendar goes stale only when a line below zeroes
 # its fetchedAt, and that is what makes every assertion here deterministic.
-same() {  # same <description> <actual> <expected>
-  if [ "$2" = "$3" ]; then
-    okline "$1"
-  else
-    echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
-  fi
-}
 
 # --- a loopback stand-in for Google ----------------------------------------
 # The seatbelt DESIGN 5.2 names: the client is pointed at 127.0.0.1, so a call
@@ -3064,7 +3177,9 @@ import fs from "node:fs";
 // argv[1] is this script's own path (it is run as a file, not with -e), so the
 // two arguments start at 2. Getting this wrong is silent: the mode file is never
 // read, every request looks like a success, and the hit log lands somewhere else.
-const [, , MODE, HITS] = process.argv;
+// The third, the `slow` hold in ms, is scaled with the daemon's tick by the suite.
+const [, , MODE, HITS, SLOW_ARG] = process.argv;
+const SLOW = Number(SLOW_ARG) || 2000;
 const mode = () => { try { return fs.readFileSync(MODE, "utf8").trim(); } catch { return "ok"; } };
 const json = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -3093,28 +3208,18 @@ const server = http.createServer((req, res) => {
   if (m === "net") return req.socket.destroy();     // a dropped socket -> kind network
   if (m === "gone") return json(res, 404, { error: { message: "Not Found" } });
   if (m === "one-bad" && cal === "bad-cal") return json(res, 404, { error: { message: "Not Found" } });
-  if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), 2000);
+  if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), SLOW);
   json(res, 200, EVENTS);
 });
 server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
 GSTUB
-node "$T/gstub.mjs" "$GMODE" "$GHITS" > "$T/gstub.out" 2>&1 &
+node "$T/gstub.mjs" "$GMODE" "$GHITS" "$GSLOW_MS" > "$T/gstub.out" 2>&1 &
 GPID=$!
 for _ in $(seq 1 60); do grep -q '^PORT ' "$T/gstub.out" 2>/dev/null && break; sleep 0.1; done
 GPORT="$(sed -n 's/^PORT //p' "$T/gstub.out" | head -1)"
 ORIGIN="http://127.0.0.1:$GPORT"
 same "the fake Google is listening on loopback" "$([ -n "$GPORT" ] && echo yes || echo no)" "yes"
 
-# Read one value out of a cache file; `c` is the parsed agenda-cache.json.
-cq() {  # cq <state-dir> <expression over c>
-  node -e 'const fs=require("fs");let c={calendars:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/agenda-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
-}
-# Zero the fetchedAt the daemon compares against, which is the only way anything
-# here becomes stale. Written directly rather than through the store: nothing is
-# stale at the moment this is called, so the daemon is not holding the lock.
-makestale() {  # makestale <state-dir> <slug>...
-  node -e 'const fs=require("fs");const p=process.argv[1]+"/agenda-cache.json";const c=JSON.parse(fs.readFileSync(p,"utf8"));for(const s of process.argv.slice(2))if(c.calendars[s])c.calendars[s].fetchedAt=0;fs.writeFileSync(p,JSON.stringify(c));' "$@"
-}
 
 # --- D2: the tick ----------------------------------------------------------
 A2="$T/agenda2"; S2="$A2/state"
@@ -3137,12 +3242,17 @@ d2env() {
   NEXTPANE="$A2/nextpane" NEXTTAB="$A2/nexttab" EDITING="$A2/editing" \
   TITLELAG="$A2/titlelag" ACTIVE="$A2/active" PANECWD="$A2/panecwd" \
   PSBUSY="$A2/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=400 COCKPIT_AGENDA_STALE_MS=60000 \
+  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS="$AGENDA_TICK_MS" COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
 d2env node "$ROOT/bin/cockpitd.mjs" > "$A2/daemon.log" 2>&1 &
 D2PID=$!
-sleep 2
+# Booted: it has reached the wezterm stub. Nothing is configured yet, so whether
+# the start-up refresh has run by then does not matter here (D3's boot below is
+# where it does). Then two and a half ticks with nothing configured is the window
+# that proves a tick asks for nothing.
+waituntil 10 "the agenda daemon D2 to boot" test -s "$A2/calls.log"
+nap 2   # window: 2.5 x AGENDA_TICK_MS
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5).
 same "no calendars: nothing was requested"     "$(wc -l < "$GHITS" | tr -d ' ')" "0"
@@ -3155,7 +3265,7 @@ d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{
 # comparison is against dayBounds rather than against a hand-written stamp.
 WINDOW="$(TZ=Europe/Warsaw node -e 'import(process.argv[1]+"/bin/cockpit-agenda-model.mjs").then(m=>{const b=m.dayBounds(Date.now(),{tz:"Europe/Warsaw"});process.stdout.write(new Date(b.todayStart).toISOString()+" "+new Date(b.dayAfterStart).toISOString());});' "$ROOT")"
 WMIN="${WINDOW%% *}"; WMAX="${WINDOW##* }"
-sleep 2
+waitfor "agenda tick: work ok" "$A2/daemon.log" 10 "the first tick to fetch work"
 
 check "a stale calendar is fetched"                  "agenda tick: work ok, 1 events" "$A2/daemon.log"
 same  "...and its fetchedAt is set"                  "$(cq "$S2" 'c.calendars.work.fetchedAt > 0')" "true"
@@ -3173,15 +3283,18 @@ refute "...and no raw summary field either"          '"summary"'  "$S2/agenda-ca
 
 # Younger than AGENDA_STALE_MS: left alone, however many ticks pass.
 : > "$GHITS"
-sleep 2
+nap 2   # window: 2.5 x AGENDA_TICK_MS, every tick finding work fresh
 same "a fresh calendar is not re-fetched" "$(grep -c '/events' "$GHITS")" "0"
 
 # Two calendars, both stale, one pass.
 d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.putCalendar({slug:"home",account:"me@x.test",calendarId:"home-cal",title:"Home",colour:2},1);});' "$ROOT"
-sleep 2                       # let the new calendar's first fetch land and settle
-makestale "$S2" work home     # ...so this pass is the one being asserted on
+# Let the new calendar's first fetch land (its cache entry is written before the
+# log line), so the pass after makestale is the one being asserted on.
+waitfor "agenda tick: home ok" "$A2/daemon.log" 10 "the first tick to fetch home"
+makestale "$S2" work home
 : > "$GHITS"
-sleep 2
+waituntil 10 "one pass to request both work and home" \
+    ghits_ge 1 /calendars/work-cal/events /calendars/home-cal/events
 check "two calendars are both refreshed in one pass" "/calendars/work-cal/events" "$GHITS"
 check "...the second one too"                        "/calendars/home-cal/events" "$GHITS"
 
@@ -3189,7 +3302,9 @@ check "...the second one too"                        "/calendars/home-cal/events
 # is added AFTER `bad` and asserted on.
 echo one-bad > "$GMODE"       # before the add: a new calendar is stale at once
 d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.putCalendar({slug:"bad",account:"me@x.test",calendarId:"bad-cal",title:"Bad",colour:3},1);s.putCalendar({slug:"late",account:"me@x.test",calendarId:"late-cal",title:"Late",colour:4},1);});' "$ROOT"
-sleep 3
+# The pass is sequential, bad before late, and late's cache entry is written before
+# its log line -- so late's line means bad's error is on disk too.
+waitfor "agenda tick: late ok" "$A2/daemon.log" 10 "the pass to reach the calendar after the failing one"
 same "a failing calendar records its error"                 "$(cq "$S2" 'c.calendars.bad.error.kind')" "gone"
 same "...and does not stop the NEXT one being refreshed"    "$(cq "$S2" 'c.calendars.late.fetchedAt > 0')" "true"
 same "...which has no error of its own"                     "$(cq "$S2" 'c.calendars.late.error')" "null"
@@ -3198,23 +3313,26 @@ same "...which has no error of its own"                     "$(cq "$S2" 'c.calen
 # error is added.
 echo net > "$GMODE"
 makestale "$S2" work
-sleep 3
+waitfor "agenda tick: work failed, network" "$A2/daemon.log" 10 "work to fail on the dropped socket"
 same "a network failure keeps the previous events" "$(cq "$S2" 'c.calendars.work.events.length')" "1"
 same "...and sets error.kind = network"            "$(cq "$S2" 'c.calendars.work.error.kind')" "network"
 SINCE1="$(cq "$S2" 'c.calendars.work.error.since')"
 same "...and stamps when it broke"                 "$([ "${SINCE1:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no)" "yes"
 # A failure keeps the previous fetchedAt, so `work` is still stale and retries on
 # every tick -- which is exactly the repeat this asserts `since` survives.
-sleep 2
+waitmore "agenda tick: work failed, network" "$A2/daemon.log" \
+    "$(countof "agenda tick: work failed, network" "$A2/daemon.log")" 10 "a repeat of the network failure"
 same "error.since is preserved across repeats"     "$(cq "$S2" 'c.calendars.work.error.since')" "$SINCE1"
 
 echo auth > "$GMODE"
-sleep 3
+waitfor "agenda tick: work failed, auth" "$A2/daemon.log" 10 "work to fail on the refused token"
 same "an auth failure classifies as auth"          "$(cq "$S2" 'c.calendars.work.error.kind')" "auth"
 same "...and still keeps the previous events"      "$(cq "$S2" 'c.calendars.work.events.length')" "1"
 
+# Counted before the switch: while the stub refuses tokens no new "ok" can appear.
+OKN=$(countof "agenda tick: work ok" "$A2/daemon.log")
 echo ok > "$GMODE"
-sleep 3
+waitmore "agenda tick: work ok" "$A2/daemon.log" "$OKN" 10 "work to recover"
 same "a success after a failure clears the error entirely" "$(cq "$S2" 'c.calendars.work.error')" "null"
 # Three passes have now thrown inside them. The daemon runs unattended behind a
 # window; dying silently means the panes just stop following and nothing says why.
@@ -3228,10 +3346,17 @@ same "...which is a later tick running after three thrown passes" \
 echo slow > "$GMODE"
 : > "$GHITS"                  # cleared FIRST: the pass below must stay recorded
 makestale "$S2" work home
-sleep 1.5
+# The pass is in flight once its first events call is held. From there, two and a
+# half ticks fire behind it; each would add an events call if the guard let a
+# second pass in. The window closes well inside the stub's hold of five ticks.
+waituntil 10 "a pass to enter the held events call" ghits_ge 1 /events
+nap 2   # window: 2.5 x AGENDA_TICK_MS, inside the GSLOW_MS (5-tick) hold
 same "a pass entered while one is in flight starts nothing" "$(grep -c '/events' "$GHITS")" "1"
+HOMEN=$(countof "agenda tick: home ok" "$A2/daemon.log")
 echo ok > "$GMODE"
-sleep 4
+# The held pass ends with home, the calendar after work: wait for it, so nothing is
+# still writing when the log and the state file are read below.
+waitmore "agenda tick: home ok" "$A2/daemon.log" "$HOMEN" 10 "the held pass to finish"
 
 # daemon.log gets pasted into conversations.
 refute "no access token ever reaches the log"  "TOKEN-MUST-NOT-BE-LOGGED" "$A2/daemon.log"
@@ -3243,7 +3368,7 @@ refute "no meeting title ever reaches the log" "SECRET-MEETING-TITLE"     "$A2/d
 # always win the race and the sign-ins would vanish unannounced. Rescuing is the
 # `agenda` command's alone -- the same defect the T06 review fixed in the pane.
 printf '{"calendars":[' > "$S2/agenda.json"
-sleep 2
+nap 2   # window: 2.5 x AGENDA_TICK_MS, each tick reading the corrupt file
 same "a corrupt agenda.json is NOT quarantined by the daemon" \
      "$(ls "$S2" | grep -c 'agenda.json.corrupt')" "0"
 same "...and the sign-ins are left exactly where they were" \
@@ -3273,29 +3398,51 @@ d3env() {
   NEXTPANE="$A3/nextpane" NEXTTAB="$A3/nexttab" EDITING="$A3/editing" \
   TITLELAG="$A3/titlelag" ACTIVE="$A3/active" PANECWD="$A3/panecwd" \
   PSBUSY="$A3/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=3600000 COCKPIT_AGENDA_STALE_MS=60000 \
+  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=3600000 COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
 d3env node "$ROOT/bin/cockpitd.mjs" > "$A3/daemon.log" 2>&1 &
 D3PID=$!
-sleep 2
+# polls_past <n>: has D3 read the fleet pane more than n times? Only reconcile
+# reads pane 20, and it holds its lock through onExit, so a poll counted AFTER the
+# exit line was made after the on-return refresh had started. Two of them span a
+# full POLL_MS, time for a fetch it started to reach the stub.
+polls_past() { [ "$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")" -gt "$1" ]; }
+
 # Configured only AFTER boot, so the one refresh at start-up finds nothing to do
-# and cannot be mistaken for the on-return trigger below.
+# and cannot be mistaken for the on-return trigger below. Booted means a SECOND
+# fleet poll: the first get-text, and the `list` writeTerminals makes before it, are
+# issued while the module body is still running -- BEFORE refreshAgenda("start")
+# reads the state -- so configuring on the first stub call races the start refresh
+# into fetching w3 (reproduced with a 600ms stall before it). The second poll comes
+# from the POLL_MS interval, which cannot fire until the whole body has run.
+waituntil 10 "the agenda daemon D3 to boot" polls_past 1
 d3env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.writeClient({clientId:"cid",clientSecret:"csec"});s.putAccount("me@x.test","REFRESH-TOKEN",1);s.putCalendar({slug:"w3",account:"me@x.test",calendarId:"w3-cal",title:"W3",colour:1},1);});' "$ROOT"
-sleep 2
+# D3's tick is an hour, so only a return could fetch here, and no return has
+# happened: 2.5 fleet polls (POLL_MS, 800ms scaled by COCKPIT_TIME_SCALE) is the
+# window in which a spurious one would have shown up.
+nap 2   # window: 2.5 x POLL_MS
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/events' "$GHITS")" "0"
 
 # The return to the fleet LIST is the trigger (DESIGN 2.5) -- so attach first,
 # then step back out, which is what makes reconcile call onExit.
-echo "test agent" > "$A3/fleetstate"; sleep 3
-echo list > "$A3/fleetstate"; sleep 3
+echo "test agent" > "$A3/fleetstate"
+waitfor "enter abc12345" "$A3/daemon.log" 10 "D3 to attach the agent"
+echo list > "$A3/fleetstate"
+waitfor "agenda returned: w3 ok" "$A3/daemon.log" 10 "the return to refresh w3"
 check "the return to the fleet list refreshed a stale calendar" "agenda returned: w3 ok" "$A3/daemon.log"
 same  "...and the cache was written"  "$(cq "$S3" 'c.calendars.w3.fetchedAt > 0')" "true"
 
 # The same return, with nothing stale, must fetch nothing at all.
 : > "$GHITS"
-echo "test agent" > "$A3/fleetstate"; sleep 3
-echo list > "$A3/fleetstate"; sleep 3
+ENTN=$(countof "enter abc12345" "$A3/daemon.log")
+EXITN=$(countof "exit abc12345" "$A3/daemon.log")
+echo "test agent" > "$A3/fleetstate"
+waitmore "enter abc12345" "$A3/daemon.log" "$ENTN" 10 "D3 to attach the agent again"
+echo list > "$A3/fleetstate"
+waitmore "exit abc12345" "$A3/daemon.log" "$EXITN" 10 "D3 to see the second return"
+POLLN=$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")
+waituntil 10 "two of D3's fleet polls after the return" polls_past $((POLLN + 1))
 same "...while a return with nothing stale fetches nothing" "$(grep -c '/events' "$GHITS")" "0"
 fi
 
@@ -3438,6 +3585,11 @@ same "the fake BitBucket is listening on loopback" "$([ -n "$BBPORT" ] && echo y
 bq() {  # bq <state-dir> <expression over c>
   node -e 'const fs=require("fs");let c={meUuid:null,repos:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
 }
+# bqtrue <state-dir> <expression over c>: exit 0 when it is true. For waituntil:
+# the cache is written ONCE, at the END of a pass, after the per-repo log lines,
+# so a wait on a log line can still read the previous pass's cache -- poll the
+# cache itself for the state the checks after it read.
+bqtrue() { [ "$(bq "$1" "$2")" = true ]; }
 # The four config settings are plain files under COCKPIT_DIR (DESIGN 3.5); `config`
 # writes them, and readSetting/readConfig read them, so a test writes them directly.
 bbconf() {  # bbconf <state-dir> <repos-csv>   (workspace/key fixed; team left empty)
@@ -3463,12 +3615,14 @@ d4env() {
   NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
   PSBUSY="$A4/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   "$@"
 }
 d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
 D4PID=$!
-sleep 2
+waitfor "cockpitd up" "$A4/daemon.log" 10 "D4 to start"
+# Window: an unconfigured daemon ticking for 2.5 ticks (BB_TICK_MS) must call nothing.
+nap 2
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5, 2.n).
 same "no config: nothing was requested"     "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
@@ -3480,7 +3634,8 @@ same "no config: no cache file was written" "$([ -e "$S4/bitbucket-cache.json" ]
 # fetches no repo -- a dead token would only repeat the 401.
 echo user-auth > "$BBMODE"
 bbconf "$S4" "bad,alpha"
-sleep 2
+# refreshPRs writes the auth signal to the cache BEFORE it logs the failure.
+waitfor "bitbucket tick: getUser failed, auth" "$A4/daemon.log" 10 "the getUser auth failure"
 check "a bad token on /user is logged as an auth failure" "bitbucket tick: getUser failed, auth" "$A4/daemon.log"
 same  "...and meUuid is left unset so it is retried"       "$(bq "$S4" 'c.meUuid')" "null"
 same  "...the whole-dashboard auth signal is on every repo" "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
@@ -3489,7 +3644,8 @@ same  "...and no repo pullrequests call was made"          "$(grep -c '/pullrequ
 # Recover: a good token now identifies the user ONCE and fetches every repo. The raw
 # PRs pass through untouched (DESIGN 3.1); the model normalises them later (T06).
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
+  bqtrue "$S4" 'c.meUuid==="ME-UUID" && !!c.repos.alpha && c.repos.alpha.error===null'
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
 check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
@@ -3521,7 +3677,7 @@ check "...the log counts the diffstat fetches"      "1 comment fetches, 1 diffst
 # for the handful shown.
 : > "$BBHITS"
 echo two-prs > "$BBMODE"
-sleep 2
+waituntil 10 "a two-prs pass in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===2'
 same  "both raw PRs are cached"                    "$(bq "$S4" 'c.repos.alpha.prs.length')" "2"
 check "the PR I review still gets a comment read"  "/pullrequests/7/comments" "$BBHITS"
 same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/comments' "$BBHITS")" "0"
@@ -3533,13 +3689,16 @@ same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/d
 same  "...and it carries no diffstatSummary"       "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).diffstatSummary')" "undefined"
 check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches, 1 diffstat fetches" "$A4/daemon.log"
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass back in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===1'
 same  "back to one PR when the extra one closes"   "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 # meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
 # repos are re-fetched but /2.0/user is not called again.
 : > "$BBHITS"
-sleep 2
+# Two list calls for alpha is at least one whole pass since the clear (a pass
+# lists bad, then alpha), so /2.0/user had a full tick in which to be called.
+hits_at_least() { [ "$(grep -cF -- "$1" "$BBHITS")" -ge "$2" ]; }   # re-counted on every poll
+waituntil 10 "two more passes' alpha list calls" hits_at_least '/alpha/pullrequests?' 2
 same "meUuid is not re-fetched every tick" "$(grep -c '/2.0/user' "$BBHITS")" "0"
 same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBHITS")" -gt 0 ] && echo yes || echo no)" "yes"
 
@@ -3547,7 +3706,8 @@ same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBH
 # BEFORE it in the pass (bad) failing must not stop the one after it (alpha). Each
 # repo is cached independently (DESIGN 2.n).
 echo one-bad > "$BBMODE"
-sleep 2
+waituntil 10 "a one-bad pass in the cache" \
+  bqtrue "$S4" '!!c.repos.bad.error && c.repos.bad.error.kind==="transient"'
 same "a transient repo failure keeps its previous PRs" "$(bq "$S4" 'c.repos.bad.prs.length')" "1"
 same "...and records a transient error"                "$(bq "$S4" 'c.repos.bad.error.kind')" "transient"
 same "...while the repo after it still refreshes"      "$(bq "$S4" 'c.repos.alpha.error')" "null"
@@ -3556,12 +3716,13 @@ same "...with a fresh fetchedAt of its own"            "$(bq "$S4" 'c.repos.alph
 # A repo-level auth (the token expired mid-life) is the whole-dashboard signal too,
 # recorded per repo, previous PRs kept (DESIGN 2.7/2.n).
 echo auth > "$BBMODE"
-sleep 2
+waituntil 10 "an auth pass in the cache" \
+  bqtrue "$S4" '!!c.repos.alpha.error && c.repos.alpha.error.kind==="auth"'
 same "a repo auth failure classifies as auth"     "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
 same "...and still keeps the previous PRs"         "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass clearing the auth error" bqtrue "$S4" 'c.repos.alpha.error===null'
 same "a success after a failure clears the error" "$(bq "$S4" 'c.repos.alpha.error')" "null"
 # A later tick ran and wrote after passes that threw nothing but returned errors --
 # the daemon is still alive behind its window.
@@ -3572,7 +3733,11 @@ same "...which is a later tick running"           "$(bq "$S4" 'c.repos.alpha.fet
 # thread count and reshuffle the sort for a tick (DESIGN 2.3, 2.n). alpha's list still
 # succeeds, so the repo itself is not an error.
 echo comment-net > "$BBMODE"
-sleep 2
+# The cache already reads what the checks want (1 comment, no error), so only the
+# log can say a comment-net pass happened -- and it logs before it writes the
+# cache. A SECOND such line means the first pass's write is done (one pass at a
+# time), and every pass since has been comment-net too.
+waitmore "alpha ok, 1 prs, 0 comment fetches" "$A4/daemon.log" 1 10 "two comment-net passes"
 same "a dropped comment fetch keeps the PR's previous comments" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 same "...and the repo itself stays a success"                   "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
@@ -3582,7 +3747,8 @@ echo ok > "$BBMODE"
 # file/line counts out and back. The prior tick cached { files:2, added:10, removed:3 };
 # a dropped diffstat call this tick must leave that triple intact, not zero or drop it.
 echo diffstat-net > "$BBMODE"
-sleep 2
+# As for comment-net: the cache already holds the triple, so wait for two passes.
+waitmore "alpha ok, 1 prs, 1 comment fetches, 0 diffstat fetches" "$A4/daemon.log" 1 10 "two diffstat-net passes"
 same "a dropped diffstat fetch keeps the PR's previous summary: files"   "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.files')" "2"
 same "...added"                                                          "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.added')" "10"
 same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
@@ -3592,15 +3758,21 @@ echo ok > "$BBMODE"
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
 # to age), then `slow` holds the first repo open while ~3 ticks fire behind it.
-echo slow > "$BBMODE"
+# Unconfigured while still `ok`, so a pass caught in flight is a loopback one that
+# ends in milliseconds: the drain is a 1s window, where unconfiguring AFTER `slow`
+# had to outwait a whole held pass (~4s). Stub hold times are real seconds, so
+# neither window is scaled by SPEED.
 printf '' > "$S4/bitbucket-repos"    # unconfigure -> passes no-op; any in-flight one drains
-sleep 5                              # longer than one full slow pass (~4s), so nothing is in flight
+sleep 1                              # window: an ok pass in flight ends well inside it
+echo slow > "$BBMODE"
 : > "$BBHITS"                        # cleared while nothing is fetching
+ALPHA_OK="$(countof "alpha ok" "$A4/daemon.log")"
 printf 'bad,alpha' > "$S4/bitbucket-repos"   # the next tick starts exactly one pass
-sleep 1.5                            # under slow's 2s hold: only the FIRST repo is requested
+sleep 1.5                            # window: under slow's 2s hold, only the FIRST repo is requested
 same "a pass entered while one is in flight starts nothing" "$(grep -c '/pullrequests' "$BBHITS")" "1"
 echo ok > "$BBMODE"
-sleep 4                             # drain the held request
+# The held pass ends when alpha's (still slow) list call returns and it logs alpha.
+waitmore "alpha ok" "$A4/daemon.log" "$ALPHA_OK" 10 "the held slow pass to finish"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9).
 refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
@@ -3641,6 +3813,18 @@ chmod +x "$A6/opener.sh"
 vq() {  # vq <state-dir> <expression over v>
   node -e 'const fs=require("fs");let v={};try{v=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-view.json","utf8"));}catch{}let r;try{r=eval(process.argv[2]);}catch(e){r="<error>";}process.stdout.write(String(r===undefined?"undefined":r));' "$1" "$2"
 }
+vqtrue() { [ "$(vq "$1" "$2")" = true ]; }   # for waituntil, like bqtrue
+# bbverb <verb> <what> <condition...>: append a click verb and wait for its effect.
+# The daemon handles the cmd channel one line at a time, in order, so a verb whose
+# only effect is to do NOTHING (a clamp) is followed by `bb-sync-<n>`, an unknown
+# verb the daemon logs and otherwise ignores: once that line is logged, every verb
+# before it has been handled.
+BBSYNC=0
+bbverb() { local v=$1 what=$2; shift 2; echo "$v" >> "$S6/cmd"; waituntil 10 "$what" "$@"; }
+bbsync() {
+  BBSYNC=$((BBSYNC + 1)); echo "bb-sync-$BBSYNC" >> "$S6/cmd"
+  waitfor "unknown verb bb-sync-$BBSYNC" "$A6/daemon.log" 10 "the cmd channel to reach bb-sync-$BBSYNC"
+}
 
 d6env() {
   HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
@@ -3649,28 +3833,29 @@ d6env() {
   NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
   TITLELAG="$A6/titlelag" ACTIVE="$A6/active" PANECWD="$A6/panecwd" \
   PSBUSY="$A6/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   BITBUCKET_BROWSER="$A6/opener.sh" \
   "$@"
 }
 d6env node "$ROOT/bin/cockpitd.mjs" > "$A6/daemon.log" 2>&1 &
 D6PID=$!
-sleep 2
+waituntil 10 "D6's first pass in the cache" bqtrue "$S6" '!!c.repos.alpha && c.repos.alpha.prs.length===1'
 # The one PR (id 7) concerns me as a reviewer, so it is on the To-review tab.
 same "the dashboard's PR is cached before any click" "$(bq "$S6" 'c.repos.alpha.prs.length')" "1"
 
 # --- tabs: a bb-tab verb rewrites the active tab in the view file (DESIGN 2.8) ---
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
 same "clicking the Mine tab rewrites the view's active tab" "$(vq "$S6" 'v.tab')" "mine"
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "clicking To-review switches the active tab back"      "$(vq "$S6" 'v.tab')" "toReview"
 
 # --- Open: the daemon hands the cached PR's htmlUrl to the fake opener (DESIGN 2.7) ---
-echo bb-open:alpha/7 >> "$S6/cmd"; sleep 1
+bbverb bb-open:alpha/7 "the opener to record PR 7's url" grep -qF "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 check "clicking Open launches the browser at the PR's htmlUrl" "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 # An id not in the cache (a stale click after a refetch) is a safe no-op, not a crash.
 CNT_BEFORE="$(wc -l < "$OPENLOG" | tr -d ' ')"
-echo bb-open:alpha/999 >> "$S6/cmd"; sleep 1
+# The no-op's own log line marks it handled: it never spawns, so nothing can follow.
+bbverb bb-open:alpha/999 "Open's no-op on alpha/999" grep -qF "bitbucket open: no cached PR alpha/999" "$A6/daemon.log"
 same "Open on an absent PR id launches nothing"               "$(wc -l < "$OPENLOG" | tr -d ' ')" "$CNT_BEFORE"
 check "...and says so rather than crashing"                   "no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
@@ -3682,7 +3867,10 @@ same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID
 # from the cache by slug/id, exactly as Open is; an absent id is the same safe no-op.
 CR="$(printf '\r')"
 : > "$A6/calls.log"
-echo bb-review:alpha/7 >> "$S6/cmd"; sleep 1
+# spawnAgent logs AFTER both sends (text, then Enter).
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-review:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Review spawn"
 check "a Review click types the review directive + url to the fleet box" \
       "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...to the fleet pane (pane 20), twice: the text then the Enter" \
@@ -3695,7 +3883,9 @@ refute "no PR url reaches the log via a spawn (DESIGN 2.9)" \
       "bitbucket.org/ws/pr/7" "$A6/daemon.log"
 
 : > "$A6/calls.log"
-echo bb-address:alpha/7 >> "$S6/cmd"; sleep 1
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-address:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Address spawn"
 check "an Address click types the address directive + url to the fleet box" \
       "STDIN:@alpha Address the review comments on Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...also submitted with a real Enter (text + Enter = two sends)" \
@@ -3704,10 +3894,13 @@ same  "...also submitted with a real Enter (text + Enter = two sends)" \
 # A stale click (the id refetched away) resolves no url, so it spawns nothing -- the same
 # safe no-op Open has, never a crash.
 : > "$A6/calls.log"
-echo bb-review:alpha/999 >> "$S6/cmd"; sleep 1
+bbverb bb-review:alpha/999 "Review's no-op on alpha/999" \
+  grep -qF "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "a Review click on an absent PR id types nothing to the fleet box" \
       "$(grep -c -- 'send-text --pane-id 20' "$A6/calls.log")" "0"
-check "...and says so rather than crashing"        "no cached PR alpha/999" "$A6/daemon.log"
+# Named by its `review:` prefix: Open's no-op above already logged "no cached PR
+# alpha/999", so the bare phrase passed whatever Review did (DESIGN 3.3).
+check "...and says so rather than crashing"        "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op" \
       "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
@@ -3718,23 +3911,24 @@ same  "...the daemon is still alive after the no-op" \
 # (k PRs cost 3k-1 lines; 3k-1 <= 7 -> k=2) -> ceil(20/2)=10. The daemon reads `pages`
 # from the model at the live geometry and clamps a click to [1, pages], so a next past
 # the end never writes an out-of-range page (the model's own shrink->page-1 reset is separate).
-echo many > "$BBMODE"; sleep 2
+echo many > "$BBMODE"
+waituntil 10 "the 20-PR pass in the cache" bqtrue "$S6" 'c.repos.alpha.prs.length===20'
 same "the overflowing tab is cached (20 PRs)" "$(bq "$S6" 'c.repos.alpha.prs.length')" "20"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+bbverb bb-page:next "page 2" vqtrue "$S6" 'v.page.toReview===2'
 same "bb-page:next advances to page 2"        "$(vq "$S6" 'v.page.toReview')" "2"
 # Walk the rest of the way to the last page (10).
-for _ in 3 4 5 6 7 8 9 10; do echo bb-page:next >> "$S6/cmd"; sleep 1; done
+for n in 3 4 5 6 7 8 9 10; do bbverb bb-page:next "page $n" vqtrue "$S6" "v.page.toReview===$n"; done
 same "bb-page:next reaches the last page (10)"  "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+echo bb-page:next >> "$S6/cmd"; bbsync   # a clamp writes nothing: sync past it
 same "bb-page:next past the last page is clamped (stays 10)" "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:prev >> "$S6/cmd"; sleep 1
+bbverb bb-page:prev "page 9" vqtrue "$S6" 'v.page.toReview===9'
 same "bb-page:prev steps back to page 9"      "$(vq "$S6" 'v.page.toReview')" "9"
 
 # Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is deep in the
 # list now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back
 # in the middle of a list you switched away from.
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toReview')" "1"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9): a click path logs no title.
@@ -3771,22 +3965,29 @@ d5env() {
 }
 d5env node "$ROOT/bin/cockpitd.mjs" > "$A5/daemon.log" 2>&1 &
 D5PID=$!
-sleep 2
+waituntil 10 "the start-up pass in the cache" \
+  bqtrue "$S5" '!!c.repos.alpha && c.repos.alpha.fetchedAt>0 && c.meUuid==="ME-UUID"'
 check "the start-up trigger fetched a configured repo" "bitbucket start: alpha ok" "$A5/daemon.log"
 same  "...and filled the cache"                        "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
 same  "...resolving 'me' at start"                     "$(bq "$S5" 'c.meUuid')" "ME-UUID"
 
-# An hour-long tick fetches nothing on its own.
+# An hour-long tick fetches nothing on its own. Window: 2.5 of the ticks D4 and D6
+# run on (BB_TICK_MS), so a tick at the test cadence would have fetched twice.
 : > "$BBHITS"
-sleep 2
+nap 2
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/pullrequests' "$BBHITS")" "0"
 
 # The return to the fleet LIST is the trigger (DESIGN 2.9) -- attach, then step back
 # out, which is what makes reconcile call onExit.
-echo "test agent" > "$A5/fleetstate"; sleep 3
-echo list > "$A5/fleetstate"; sleep 3
+# The return's pass must REWRITE the cache: fetchedAt was already > 0 from the start,
+# so the check compares against the start pass's stamp (DESIGN 3.3).
+FETCHED_START="$(bq "$S5" 'c.repos.alpha.fetchedAt')"
+echo "test agent" > "$A5/fleetstate"
+waitfor "enter abc12345" "$A5/daemon.log" 10 "D5 to attach the agent"
+echo list > "$A5/fleetstate"
+waituntil 10 "the return's pass in the cache" bqtrue "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START"
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
-same  "...and the cache was rewritten"                   "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
+same  "...and the cache was rewritten"                   "$(bq "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START")" "true"
 
 daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
