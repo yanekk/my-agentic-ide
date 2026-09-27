@@ -45,7 +45,7 @@ T="$(cd "$(mktemp -d /tmp/pirrc.XXXX)" && pwd -P)"
 MUXCFG="$T/wezterm.lua"
 H="$T/home"; PH="$T/pirhome"; RIG="$T/rigrepo"; STATE="$T/x.json"
 mkdir -p "$H" "$PH"
-RIGPID=""
+RIGPID=""; PIRPID=""
 
 teardown() {
   if [ -n "$RIGPID" ] && kill -0 "$RIGPID" 2>/dev/null; then
@@ -56,7 +56,12 @@ teardown() {
   kill "$(cat "$T/pid" 2>/dev/null)" 2>/dev/null
   pkill -f "$MUXCFG" 2>/dev/null
   local j; for j in $(seq 1 10); do pgrep -f "$MUXCFG" >/dev/null || break; sleep 0.3; done
-  if pgrep -f "$MUXCFG" >/dev/null || pgrep -f "PIR_HOME=$PH" >/dev/null; then
+  # pir's own pid, read from its state file: its command line carries no PIR_HOME (env is
+  # not argv), so a pgrep on the scratch path could never see a stranded scratch pir.
+  if [ -n "$PIRPID" ] && kill -0 "$PIRPID" 2>/dev/null; then
+    kill -TERM "$PIRPID" 2>/dev/null; sleep 0.5
+  fi
+  if pgrep -f "$MUXCFG" >/dev/null || { [ -n "$PIRPID" ] && kill -0 "$PIRPID" 2>/dev/null; }; then
     echo "  TEARDOWN: mux or scratch pir still running"
   else
     echo "  teardown: rig, mux and scratch pir gone"
