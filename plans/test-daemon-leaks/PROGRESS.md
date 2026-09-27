@@ -10,10 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
-**Status:** Planned. Nothing built.
+**Status:** T01–T04 done; T05 left.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T01 (test-daemons-lib), which everything else needs. Hold T02
-and T03 while another open run edits `spikes/cockpit-test/run.sh`.
+**Next `pir-work` will:** implement T05 (leak-free-check).
 
 ## Tasks
 
@@ -24,11 +23,11 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ✅ | |
-| T03 | owner-backstop | T01, T02 | 🔍 | `COCKPIT_OWNER_PID` check in cockpitd on the reconcile interval, before `reconcile()`; owner `$$` on cockpit-test's six launches; 25 new daemon-leak-test checks (58 total), incl. SIGKILL mini-suite and both fences. Deviation: launch fence also asserts cockpit-test has six launches, so it cannot pass by counting none. |
+| T03 | owner-backstop | T01, T02 | ✅ | Review clean, no fix commit. All nine suites pass (daemon-leak-test 58, cockpit-test 546); pgrep of cockpitd identical before and after. Probed: shutdown is declared before the interval fires, log is synchronous so the gone line lands before exit, the launch fence counts six real launches. Two-miss reset is untested. |
 | T04 | other-suites-tripwire | T01 | ✅ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** empty
 
 ## Blocked on the user
 
