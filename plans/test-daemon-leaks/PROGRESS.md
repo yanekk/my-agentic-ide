@@ -10,10 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
-**Status:** Planned. Nothing built.
+**Status:** T01 done, T02 awaiting review.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T01 (test-daemons-lib), which everything else needs. Hold T02
-and T03 while another open run edits `spikes/cockpit-test/run.sh`.
+**Next `pir-work` will:** review T02 (cockpit-test-adopt).
 
 ## Tasks
 
@@ -23,12 +22,12 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | test-daemons-lib | — | ✅ | |
-| T02 | cockpit-test-adopt | T01 | ⬜ | |
+| T02 | cockpit-test-adopt | T01 | 🔍 | One EXIT trap with sweep, every daemon stop via `daemon_stop`, tripwire counted as a check (546). Leak probe verified. Deviation: fixed T01 helper to call `/bin/ps` and `/usr/bin/pgrep`, because cockpit-test stubs `ps` on PATH and the tripwire passed a real leak. `sleep 0.5` after stops dropped. |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
 | T04 | other-suites-tripwire | T01 | ⬜ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 
