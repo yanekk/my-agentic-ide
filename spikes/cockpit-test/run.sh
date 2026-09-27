@@ -641,6 +641,7 @@ check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
 check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
 check "this agent's mode is now last-commit"      '"diffMode":"lastcommit"' "$T/state/terminals.json"
+check "an attached agent is reviewable (pir-pane)" '"reviewable":true' "$T/state/terminals.json"
 check "the switch was logged"                     "relaunched diff pane 31 for abc12345 in lastcommit" "$T/daemon.log"
 
 echo
@@ -2246,10 +2247,15 @@ pirwrite run "$PRUN"
 nap 3
 in_slot "the run is shown again"                   "$RDIFF"
 H0="$(countof "pir: enter $RK" "$T/daemon.log")"
+O0="$(countof "opened diff pane" "$T/daemon.log")"
 awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
 waitfor "diff pane for $RK is gone; rebuilding" "$T/daemon.log" 6
 waitmore "pir: enter $RK" "$T/daemon.log" "$H0" 6
 grew   "the heal re-ran pir's state"               "pir: enter $RK" "$T/daemon.log" "$H0"
+# "pir: enter" is logged before showDiff splits the new pane, so wait for the open
+# itself before reading its id (read too early, pane_key returned the killed one).
+waitmore "opened diff pane" "$T/daemon.log" "$O0" 6
+nap 0.5
 RDIFF="$(pane_key diff)"
 in_slot "a fresh diff pane holds the slot"         "$RDIFF"
 check  "...opened at the run's folder"            "opened diff pane $RDIFF for slug at $PRUN" "$T/daemon.log"
