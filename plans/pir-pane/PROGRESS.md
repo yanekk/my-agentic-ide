@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | swap-spike | — | ⬜ | |
+| T00 | swap-spike | — | ✅ | |
 | T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
