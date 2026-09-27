@@ -1269,6 +1269,38 @@ only `send-text` carries stdin, and reading stdin for the other subcommands hang
 — node's async `execFile` leaves the stdin pipe open, so `cat` blocks until the
 daemon's 4s timeout on *every* poll, which looks exactly like a dead mux.
 
+### Test daemons, and why no suite leaves one behind
+
+`cockpit-test` starts up to six real `cockpitd.mjs` daemons against scratch
+state folders. Five of them are launched through a shell function in the
+background, which makes `$!` a bash subshell with node as its child. The two
+agenda sections stopped theirs with a plain `kill $!`, which ended the subshell
+and left node reparented to launchd, polling for ever. By
+2026-09-27 twenty-two had piled up and pushed the load average from ~4.4 to ~7.
+Three layers now stop that, all in `spikes/lib/test-daemons.sh`, which every
+`spikes/*-test/run.sh` sources (plans/test-daemon-leaks/DESIGN.md §2):
+
+- **`daemon_stop <pid>`** — SIGTERM the pid and every descendant (collected
+  *before* signalling, or node escapes to pid 1), wait up to ~2s, SIGKILL any
+  survivor. The only way a suite stops a daemon.
+- **`daemon_sweep "$T"`** in the one EXIT trap — stops every cockpitd whose
+  **environment** names a path under this run's `$T/`, so a section that forgot
+  its pid is still cleaned up, including after SIGTERM to the suite shell.
+- **`daemon_tripwire "$T"`** before the result line — any cockpitd still under
+  `$T/` prints `LEAK cockpitd pid …` and fails the suite, so a new leak is caught
+  the day it is written. It reports and never kills; the sweep kills afterwards.
+
+A SIGKILLed suite runs no trap, so every test daemon also carries
+`COCKPIT_OWNER_PID=$$`; cockpitd checks that pid on its reconcile tick and runs
+its normal shutdown after two consecutive misses. The real launch never sets it.
+
+The match is by environment (`ps -E`, macOS), never by script name: the real
+cockpit runs the same `node <checkout>/bin/cockpitd.mjs`, so `pgrep -f`/`pkill -f`
+reach it. The helpers call `/bin/ps` and `/usr/bin/pgrep` by absolute path because
+`cockpit-test` stubs `ps` on its PATH. `spikes/daemon-leak-test/run.sh` proves all
+of this against fake daemons and the real one, including the three interrupt
+paths, and fences `pkill -f cockpitd` out of `spikes/`.
+
 ## Verified live
 
 Driven end to end on 2026-08-23 against a real WezTerm window, not a stub:
