@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T03 review, by reading: a pir pane that dies while shown leaves `fleet-claude` splitting into a dead pane id, so claude agents is unreachable until a rebuild. Only closing the pane triggers it; left alone. |
+| 2026-09-27 | 🐞 | cockpit-test sections 13 and 13b leave two `cockpitd` daemons (agenda2, agenda3) running after `ALL PASS`: `kill $D2PID`/`$D3PID` hit the wrapper subshell, the stopbb problem of section 14. Found and killed by hand in T03. |
 | 2026-09-27 | 📌 | T00 swap in, wezterm 20240203: `split-pane --left --percent 50 --pane-id <fleet> --move-pane-id <pir>` halves the slot (29x22 each at 120x40), then `move-pane-to-new-tab <fleet>`: pir 59x22, sh 47x22, strip 12x22, diff 120x15 unchanged. 80x24: 39x12, 31, 8. |
 | 2026-09-27 | 📌 | T00 swap out is the mirror (`--pane-id <pir> --move-pane-id <fleet>`, park pir): fleet back to 59x22 / 39x12. Three round trips per size, sizes identical each time. The moved-in pane becomes the tab's active pane. |
 | 2026-09-27 | 📌 | T00 landmark: `panes.foot`'s `tab_id` equalled the cockpit tab after all 15 measured steps per size, parked panes each in their own tab. DESIGN §2.10 holds. |
