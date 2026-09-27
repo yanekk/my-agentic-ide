@@ -13,8 +13,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
-dependencies and may run beside it.
+**Next `pir-work` will:** implement T06 (pir-pane-drill); T07 follows once T05 and T06 are done.
 
 ## Tasks
 
@@ -28,11 +27,11 @@ done · ⛔ blocked, needs a human.
 | T02 | footer-switch | — | ✅ | |
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | |
-| T05 | docs | T04 | 🔍 | CLAUDE.md overview, files, state files; docs/cockpit.md "The pir pane"; install.sh reports pir optional, 9 checks (79). Deviations: no new measured row, the fleet-slot/landmark fact extended the "Both slots swap" row to stay at thirty; cockpit-test count 174→750. |
+| T05 | docs | T04 | ✅ | Reviewed clean, no fix commit. Every doc claim checked against cockpitd, layout, cockpit-pir.sh and the model; install.sh --check run for real; a mutation (die + MISSING in the pir branch) turned three installer checks red; table still thirty rows. Suites 79 and 750 pass. |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** T05
+**Review queue:** empty
 
 ## Blocked on the user
 
