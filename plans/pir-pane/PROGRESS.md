@@ -12,7 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-27
 **Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
 dependencies and may run beside it.
 
@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | swap-spike | — | ⬜ | |
+| T00 | swap-spike | — | 🔍 | Probe run on a private headless mux at 120x40 and 80x24, then deleted; six FINDINGS rows. Swap-in/out keep every width, foot stays in the cockpit tab, pir and a less stand-in return identical. No DESIGN contradiction. No code, so no new tests. |
 | T01 | pir-model | — | ⬜ | |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
@@ -32,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T00
 
 ## Blocked on the user
 
