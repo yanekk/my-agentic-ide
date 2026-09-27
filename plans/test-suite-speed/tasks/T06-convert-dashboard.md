@@ -24,7 +24,8 @@ DESIGN §3.1, §3.2, §4.1.
   `bitbucket-view.json` or the log line they produce.
 - 14's slow-repo sequence (`sleep 5`, `1.5`, `4`) keeps its ordering proof: the 1.5 s window
   stays under the stub's 2 s hold.
-- `stopbb` and the `sleep 0.5` after it: replace the sleep with a wait for the node child to exit.
+- Daemon stops are the leak plan's (`daemon_stop`, which waits for death; DESIGN §6) and are not
+  changed here. A `sleep 0.5` still following one is a wait that stop already covers: remove it.
 
 ## Tests
 

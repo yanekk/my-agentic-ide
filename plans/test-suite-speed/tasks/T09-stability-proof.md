@@ -24,8 +24,9 @@ bash spikes/cockpit-test/stress.sh [--serial N] [--parallel K --rounds R]
   # each copy: TMPDIR=<scratch>/<copy>, output to <scratch>/<copy>.out
   # prints one line per copy: "<copy> PASS|FAIL <seconds>s <N> checks"
   # then "stress: <passed>/<total> passed, median <s>s, max <s>s"; exit 1 on any failure
-  # on exit (trap, Ctrl-C included): kill only cockpitd whose `ps eww` env names <scratch>,
-  # then remove <scratch>; never pkill by name
+  # on exit (trap, Ctrl-C included): source spikes/lib/test-daemons.sh and call
+  # `daemon_sweep <scratch>` (the leak plan's, DESIGN §5.2), then remove <scratch>;
+  # never pkill by name, never a matcher of its own
 ```
 
 ## Tests

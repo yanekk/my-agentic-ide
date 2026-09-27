@@ -4,9 +4,9 @@
 
 ## Goal
 
-Convert the waits in the sections pir-pane added to the main chain (15m–15o and 16–16p on the
-pir-pane branch, 2026-09-27), which sit between 11p and 12 and are new since the planning
-baseline.
+Convert the waits in the sections pir-pane added to the main chain (15a–15o on the pir-pane
+branch, 2026-09-27), which sit between 11p and 12 and are new since the planning baseline.
+pir-pane's 12c is in the footer chain and belongs to T05.
 
 ## Design sections this implements
 

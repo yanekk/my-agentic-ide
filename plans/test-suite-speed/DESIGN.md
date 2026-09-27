@@ -133,7 +133,7 @@ Measured by reading the script on 2026-09-27, before pir-pane merged:
 
 | Chain | Sections | Starts | Depends on |
 |---|---|---|---|
-| main | 1 … 11p, and pir-pane's 15m–16p once merged | the main daemon `DPID` | each section on the ones before it (pane ids 31–34, `MOVED*`, `BR`/`VW`, the attached agent) |
+| main | 1 … 11p, and pir-pane's 15a–15o once merged | the main daemon `DPID` | each section on the ones before it (pane ids 31–34, `MOVED*`, `BR`/`VW`, the attached agent) |
 | footer | 12, 12b | nothing; runs `cockpit-strip.mjs` directly | 12b on 12's `footer`/`SD` helpers |
 | agenda | 13, 13b, 13c | the Google stub, daemons D2, D3 | 13b on 13's stub and `cq`; 13c is static |
 | dashboard | 14, 14d, 14b, 14c | the BitBucket stub, daemons D4, D6, D5 | 14d and 14b on 14's stub, `bq`, `bbconf`, `stopbb`; 14c is static |
@@ -142,8 +142,8 @@ Section 13 redefines `same()` for every later section. T05 moves that definition
 helper a chain defines inside its first section (`cq`, `bq`, `stopbb`, `footer`), to the top of
 its chain, so skipping one chain cannot change another's behaviour.
 
-pir-pane inserts its 15/16 sections between 11p and 12. The chain table is re-checked by T01 on
-the merged script and corrected there.
+pir-pane inserts 15a–15o between 11p and 12 (main chain) and 12c after 12b (footer chain, no
+daemon). The chain table is re-checked by T01 on the merged script and corrected there.
 
 ## 5. Environment — read this before running anything
 
@@ -165,11 +165,11 @@ about 2 minutes. T10 updates this line with the measured figure.
 
 **End to end.** Nothing here has a surface: the product is test-script output read by sessions.
 
-**When to build.** Not while a pir run that edits `spikes/cockpit-test/run.sh` is open. pir-pane
-was open on 2026-09-27 with ~530 lines added to the script on its branches. T01 starts after it
-has merged to main. Leaked cockpitd processes from the unfixed agenda sections
-(`docs/pir-prompts/test-daemon-leaks.md`) inflate every timing, so each measuring task first
-kills the test daemons left from earlier runs (§5.2) and records the load average.
+**When to build.** After two plans that edit `spikes/cockpit-test/run.sh` have both merged to
+main: pir-pane (open on 2026-09-27, ~530 lines added to the script on its branches) and then
+`plans/test-daemon-leaks/` (§6). Not while any pir run that edits the script is open. Each
+measuring task records the load average and checks for orphaned test daemons first (§5.2); with
+the leak fix in, finding one is a regression of that plan, recorded in FINDINGS.
 
 ### 5.1 What the test command cannot reach
 
@@ -178,13 +178,17 @@ itself (T09).
 
 ### 5.2 Seatbelts
 
-- **Leaked test daemons.** Until the daemon-leak plan lands, every full run orphans two
-  cockpitd processes. `spikes/cockpit-test/stress.sh` (T09) runs each suite copy with its own
-  `TMPDIR` under one scratch folder and, when it ends, kills only cockpitd processes whose
-  environment (`ps eww`) names that scratch folder. It never matches by script name, because
+- **Leaked test daemons.** The daemon-leak plan lands first and gives every suite its own exit
+  cleanup in `spikes/lib/test-daemons.sh` (`daemon_stop`, `daemon_sweep`). This plan reuses it and
+  builds no second matcher. `spikes/cockpit-test/stress.sh` (T09) runs each suite copy with its
+  own `TMPDIR` under one scratch folder and, when it ends, sources that file and calls
+  `daemon_sweep <scratch>`, which matches on the environment, never on the script name, because
   the real cockpit's daemon runs the same script with the real HOME. Measuring tasks that run
-  the suite by hand use the same matching on the macOS temp folder's `tmp.*` paths, never
-  `pkill -f cockpitd`.
+  the suite by hand kill only **orphans**: cockpitd whose parent is pid 1 and whose environment
+  names a `tmp.*` path under the macOS temp folder, never `pkill -f cockpitd`. A temp-path match
+  alone would also kill the daemons of a suite still running, a sibling conversion's or another
+  plan's worker's, since T03–T07 run at once (measured 2026-09-27: leaked daemons had parent 1, a
+  live pir-pane worker's had its suite as parent).
 - **Network.** Unchanged: every side daemon points at loopback stubs, and 13c/14c fence it.
 
 ### 5.3 Who acts on the outside world
@@ -197,7 +201,11 @@ Nothing. Every action is local to the checkout and a temp folder.
   person chose this over waiting. The numbers in §1 therefore include leak load (2 leaked
   daemons, load average ~4). T01 re-takes the baseline on the merged script on a quiet machine,
   and that baseline is the "before" in the final table.
-- **2026-09-27, the baseline run failed** two checks in section 3 ("first flush injected", "the
+- **2026-09-27, the daemon-leak plan builds before this one** (person's choice at plan review).
+  Both rewrite the script's daemon stops: that plan's `daemon_stop` already waits for a daemon to
+  die, which T06 would otherwise build, and its `daemon_sweep` is the cleanup T09 would otherwise
+  write a second time. Building it first also takes leak load out of every timing measured here.
+- **2026-09-27, the baseline run failed** two checks in section 3b ("first flush injected", "the
   diff is reset (relaunched clean) on send"). The suite is already flaky under load, so T03
   owns diagnosing and fixing that, and T09's zero-failure bar covers it.
 - **Filter by prefix of chain, not by splitting the main chain** (person's choice, 2026-09-27).
@@ -217,8 +225,8 @@ Nothing. Every action is local to the checkout and a temp folder.
 
 - `spikes/browse-test/run.sh` (110 s). A separate suite that pir workers on current plans do not
   run. Worth its own plan if a future plan's test block names it.
-- The daemon-leak fix. Its own prompt, `docs/pir-prompts/test-daemon-leaks.md`. This plan only
-  cleans up after its own stress runs (§5.2).
+- The daemon-leak fix: `plans/test-daemon-leaks/`, built before this plan (§6). This plan changes
+  no daemon stop and no EXIT trap; it only calls that plan's sweep from `stress.sh` (§5.2).
 - Splitting the main chain into chapters (§6).
 - Lowering the default `COCKPIT_TEST_SPEED` below 0.5. Section 9c is documented to flake below
   0.3, and the waits, not the speed factor, are where the time goes.

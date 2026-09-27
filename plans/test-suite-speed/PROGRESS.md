@@ -8,13 +8,13 @@ the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. Whoever writes a cell also fixes the
 over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan` before the first `/pir-work`
+**Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane to merge to main,
-because both edit `spikes/cockpit-test/run.sh` (DESIGN §5).
+**Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
+`test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** T01, once pir-pane has merged; it re-takes the baseline on the merged
-script.
+**Next `pir-work` will:** T01, once pir-pane and then test-daemon-leaks have merged (the person
+starts it); it re-takes the baseline on the merged script.
 
 ## Tasks
 

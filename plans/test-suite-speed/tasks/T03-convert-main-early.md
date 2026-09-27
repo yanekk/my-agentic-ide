@@ -5,7 +5,7 @@
 ## Goal
 
 Convert the waits in sections 1–10 (the start of the main chain) per DESIGN §3.1–§3.3, and fix
-the section-3 flake the planning baseline hit, so the fastest-iterated part of the suite is both
+the section-3b flake the planning baseline hit, so the fastest-iterated part of the suite is both
 quicker and stable under load.
 
 ## Design sections this implements
@@ -27,7 +27,7 @@ or `nap N  # window: <timer>, <why this length>`.
 - [ ] Every `sleep`/`nap` in 1–10 is classified in the commit message: poll, or window with its
   timer. None left unclassified.
 - [ ] The vacuous checks in 5g, 6b, 8 and 9d (FINDINGS) become count-based.
-- [ ] The section-3 flake: reproduce it (e.g. `ONLY=3b` under 4 parallel copies), find the
+- [ ] The section-3b flake: reproduce it (e.g. `ONLY=3b` under 4 parallel copies), find the
   cause, fix the wait. Record cause and fix in FINDINGS.
 - [ ] `ONLY=10` passes 5 times in a row, and 3 times with 4 copies running at once.
 

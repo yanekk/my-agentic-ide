@@ -2,7 +2,7 @@
 
 10 tasks in 4 phases. Each has a file in [tasks/](tasks/). Track state in
 [PROGRESS.md](PROGRESS.md). Read [DESIGN.md](DESIGN.md) first. Do not start T01 until pir-pane
-has merged to main (DESIGN §5).
+and then test-daemon-leaks have merged to main (DESIGN §5).
 
 ## Shape of the build
 
@@ -65,6 +65,6 @@ T01 → T04 → T08 → T09 → T10. T04 is the heaviest conversion: 145 s and t
 
 ## Open
 
-- pir-pane's 15/16 sections do not exist on main yet. T07 is written against their names on the
-  pir-pane branch (2026-09-27, 95 sleeps in the script there). If pir-pane changes them before
-  merging, T07 converts whatever merged.
+- pir-pane's sections do not exist on main yet: 15a–15o (main chain, T07) and 12c (footer chain,
+  T05) on the pir-pane branch, 2026-09-27, with pir-pane T04–T07 still to build. If pir-pane
+  changes them before merging, T07 and T05 convert whatever merged.

@@ -4,7 +4,7 @@
 
 ## Goal
 
-Convert the waits in the footer chain (12, 12b) and the agenda chain (13, 13b, 13c), and make
+Convert the waits in the footer chain (12, 12b, and pir-pane's 12c once merged) and the agenda chain (13, 13b, 13c), and make
 the agenda daemons' ticks scale with `SPEED` so their windows can be `nap`s. Move each chain's
 helpers to the top of its chain so a skipped chain cannot change another's behaviour.
 

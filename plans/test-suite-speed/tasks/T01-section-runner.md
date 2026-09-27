@@ -6,7 +6,8 @@
 
 Give `spikes/cockpit-test/run.sh` a section runner so a worker can run a few sections while
 iterating (`ONLY=`), list them (`SECTIONS=1`) and time them (`TIMINGS=1`), and take the clean
-per-section baseline every later task measures against. Start only after pir-pane has merged.
+per-section baseline every later task measures against. Start only after pir-pane and then
+test-daemon-leaks have merged (DESIGN §5).
 
 ## Design sections this implements
 
