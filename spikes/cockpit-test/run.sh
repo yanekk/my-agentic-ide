@@ -335,7 +335,7 @@ REAP_MS="$(awk -v s="$SPEED" 'BEGIN{ v=700*s; if (v<50) v=50; printf "%d", v }')
 # calendar configured so it never fetches at all -- but a later edit that gave it
 # one must fail loudly here rather than open a real socket to Google on whatever
 # machine happens to be running the suite (DESIGN 5.2).
-HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS="$REAP_MS" \
+HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_OWNER_PID="$$" \
     COCKPIT_TIME_SCALE="$SPEED" SHELL=/bin/zsh \
     AGENDA_ORIGIN="http://127.0.0.1:9" \
     node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
@@ -2217,7 +2217,7 @@ for f in editing titlelag active panecwd psbusy calls.log; do : > "$A2/$f"; done
 # TZ is pinned so "start of today, local" is one string on any machine, the same
 # way the notes-test frame harness pins it (FINDINGS 2026-08-29).
 d2env() {
-  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
   COCKPIT_DIR="$S2" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
   CALLS="$A2/calls.log" FLEETSTATE="$A2/fleetstate" PANESTATE="$A2/panestate" \
   NEXTPANE="$A2/nextpane" NEXTTAB="$A2/nexttab" EDITING="$A2/editing" \
@@ -2353,7 +2353,7 @@ echo list > "$A3/fleetstate"
 for f in editing titlelag active panecwd psbusy calls.log; do : > "$A3/$f"; done
 
 d3env() {
-  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
   COCKPIT_DIR="$S3" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
   CALLS="$A3/calls.log" FLEETSTATE="$A3/fleetstate" PANESTATE="$A3/panestate" \
   NEXTPANE="$A3/nextpane" NEXTTAB="$A3/nexttab" EDITING="$A3/editing" \
@@ -2543,7 +2543,7 @@ echo list > "$A4/fleetstate"
 for f in editing titlelag active panecwd psbusy calls.log; do : > "$A4/$f"; done
 
 d4env() {
-  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
   COCKPIT_DIR="$S4" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
   CALLS="$A4/calls.log" FLEETSTATE="$A4/fleetstate" PANESTATE="$A4/panestate" \
   NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
@@ -2729,7 +2729,7 @@ vq() {  # vq <state-dir> <expression over v>
 }
 
 d6env() {
-  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
   COCKPIT_DIR="$S6" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
   CALLS="$A6/calls.log" FLEETSTATE="$A6/fleetstate" PANESTATE="$A6/panestate" \
   NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
@@ -2846,7 +2846,7 @@ for f in editing titlelag active panecwd psbusy calls.log; do : > "$A5/$f"; done
 bbconf "$S5" "bad,alpha"
 
 d5env() {
-  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw \
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
   COCKPIT_DIR="$S5" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
   CALLS="$A5/calls.log" FLEETSTATE="$A5/fleetstate" PANESTATE="$A5/panestate" \
   NEXTPANE="$A5/nextpane" NEXTTAB="$A5/nexttab" EDITING="$A5/editing" \
