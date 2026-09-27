@@ -26,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | T01 | section-runner | — | ✅ | |
 | T02 | waituntil | — | ✅ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
-| T04 | convert-browse | T01, T02 | ⬜ | |
+| T04 | convert-browse | T01, T02 | 🔍 | 11–11p: every sleep/nap is now a log or terminals.json poll, or a `nap` window sized to its scaled timer. Checks in 11, 11d, 11i, 11m, 11n, 11o made count-based. Deviation: fixed two load races in 11c''' and 11c'''' (FINDINGS). No new helpers. 767 checks; 146s to 47s. |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
 | T06 | convert-dashboard | T01, T02 | ⬜ | |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
@@ -34,7 +34,7 @@ done · ⛔ blocked, needs a human.
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** empty
+**Review queue:** T04
 
 ## Blocked on the user
 
