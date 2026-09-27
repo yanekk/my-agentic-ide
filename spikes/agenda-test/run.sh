@@ -16,7 +16,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+. "$ROOT/spikes/lib/test-daemons.sh"
+trap 'daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 REAL_DIR="${HOME}/.claude/cockpit"
 # Names for the whole directory, plus name+size+mtime for the files that hold the
@@ -175,5 +176,6 @@ same "...while it is not a command outside one" \
      "$(PATH="/usr/bin:/bin" command -v agenda >/dev/null 2>&1 && echo found || echo absent)" "absent"
 
 echo
+daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suites counted above)"; else echo "FAILURES"; fi
 exit "$fail"

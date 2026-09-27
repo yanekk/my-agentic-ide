@@ -24,7 +24,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+. "$ROOT/spikes/lib/test-daemons.sh"
+trap 'daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 fail=0
 pass=0
@@ -422,5 +423,6 @@ same "...and it is the first one whichever order they are in" \
 chmod 644 "$T/vtree/odd/locked" 2>/dev/null   # so the trap can remove it
 fi
 echo
+daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; the node suites counted their own above)"; else echo "FAILURES"; fi
 exit "$fail"

@@ -25,10 +25,10 @@ done · ⛔ blocked, needs a human.
 | T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ⬜ | |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
-| T04 | other-suites-tripwire | T01 | ⬜ | |
+| T04 | other-suites-tripwire | T01 | 🔍 | Seven suites source the helper, sweep in the EXIT trap, tripwire before the result line. Tripwire not counted, so check counts unchanged. Fake daemon in agenda-test printed LEAK and FAILURES, left nothing. No pir-pane-test on main; logged in FINDINGS. |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T04
 
 ## Blocked on the user
 

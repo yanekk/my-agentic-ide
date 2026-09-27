@@ -13,7 +13,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+. "$ROOT/spikes/lib/test-daemons.sh"
+trap 'daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 REPO="$T/repo"
 mkdir -p "$REPO" "$T/state/bin"
@@ -502,5 +503,6 @@ same "a headless paint fabricates no click verb" \
   "$([ -e "$C/cmd" ] && echo yes || echo no)" "no"
 
 echo
+daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; fi
 exit "$fail"
