@@ -30,9 +30,9 @@ done · ⛔ blocked, needs a human.
 | T04 | pir-follow | T01, T03 | ✅ | |
 | T05 | docs | T04 | ✅ | |
 | T06 | pir-pane-drill | T02, T04 | ✅ | |
-| T07 | live-check | T05, T06 | 🔍 | `rig-check.sh`: installed pir on its conversation rig, 47 checks, state file per §2.4 each step, gone on quit. Live window verified by hand 2026-09-27 (clicks first try) by pointing `config.lua` `repo` at the T07 worktree, then restored. Deviation: rig repo `git init`ed so `run.cwd` is a path. |
+| T07 | live-check | T05, T06 | ✅ | Review: rig-check re-run green (47), both suites green (79, 766). Fixed teardown: its scratch-pir check grepped for `PIR_HOME` on the command line and could never match; now checks pir's own pid. Live window verified by hand 2026-09-27, clicks first try. Deviation accepted: rig repo `git init`ed so `run.cwd` is a path. |
 
-**Review queue:** T07
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
