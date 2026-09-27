@@ -9,6 +9,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T04 review: with the fence guard deleted, 11c'''' failed only 8 of 10 runs. Its "still starting" window (nap 1.5) can hold no healer pass, since ticks skip while reconcile holds the lock. Pre-existing; left for T09. |
 | 2026-09-27 | 📌 | T04, load ~3.5, 0 orphans: 11–11p 146s before, 47s after; full run 457s, ALL PASS (767 checks). Agent switches poll `"agent":` in terminals.json, which showTerminal writes last. |
 | 2026-09-27 | 🐞 | T04: 11c'''' "a browser sitting at a shell is never questioned" flaked at load 23. A healer tick that read the pane table before the retitle queried broot after the truncation. Now truncates once the daemon logs the shell status. |
 | 2026-09-27 | 📌 | A wait on a stub ARGV line in `$CALLS` returns before the stub rewrites its pane table, so a test `retitle` just after can be lost (11c'''' never saw broot quit). Wait on the daemon's log line; it logs after the stub returns. |
