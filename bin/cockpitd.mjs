@@ -3588,6 +3588,24 @@ try {
   });
 } catch (e) { log(`could not watch ${DIR} for pir: ${e.message}`); }
 
+/**
+ * The attached pir key's folder has vanished: re-apply decidePir now. pir removes a
+ * task's worktree after merging it while the worker's conversation stays open, and
+ * writes nothing then (the worker's recorded cwd has not changed), so waiting for its
+ * next write left revdiff showing a `chdir` error until the person moved in pir
+ * (pir-pane T06 drill). decidePir's worker → run fallback (DESIGN 2.5) is the answer.
+ * Called from the reconcile poll, which does nothing else while pir is shown.
+ */
+function pirFolderGone() {
+  if (reconciling || !attached || !isPirKey(attached.jobId)) return;
+  if (fs.existsSync(attached.worktree)) return;
+  // Logged once per key; rescheduling every poll is harmless under the debounce.
+  if (pirGoneKey !== attached.jobId) log(`pir: the folder of ${attached.jobId} is gone; re-reading pir's report`);
+  pirGoneKey = attached.jobId;
+  schedulePirState();
+}
+let pirGoneKey = null;
+
 /** Keep the footer's `switchable` honest; rewrites terminals.json only on a change. */
 function noteSwitchable(v) {
   if (v === fleetSwitchableNow) return;
@@ -3607,7 +3625,6 @@ function noteSwitchable(v) {
  * again only if it has died.
  */
 async function switchFleet(target) {
-  if (target === fleetProgram) return true;
   if (target === "pir" && PIR_BIN === null) {
     log("refusing fleet-pir: pir is not on the daemon's PATH");
     return false;
@@ -3617,6 +3634,10 @@ async function switchFleet(target) {
     return false;
   }
   try {
+    // Only under the lock: two clicks read in one tick both start before the first
+    // has switched, and a check made earlier took the second for "already shown"
+    // and dropped it, leaving the first click's program up (pir-pane T06 drill).
+    if (target === fleetProgram) return true;
     if (!(await fleetSwitchable())) {
       log(`refusing fleet-${target}: ${fleetProgram} is not at its list`);
       return false;
@@ -3673,7 +3694,7 @@ async function reconcile() {
   // Everything below reads the CLAUDE pane. While pir is shown that pane is parked
   // at its list and cannot change, so a poll would only re-read a frozen screen --
   // and a stale header there must never attach anything (DESIGN 2.9).
-  if (fleetProgram === "pir") return;
+  if (fleetProgram === "pir") { pirFolderGone(); return; }
   reconciling = true;
   try {
     const state = await paneState();

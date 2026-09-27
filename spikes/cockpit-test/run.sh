@@ -2106,6 +2106,18 @@ nap 2
 in_slot "and claude comes back from it"            20
 
 echo
+echo "== 15k2. PIR then Claude Agents read in one tick: both happen, claude ends up shown =="
+# The T06 drill on a real mux: the daemon reads cmd every 200ms, so two fast clicks
+# arrive together, and the second was checked against the program before the first
+# had switched -- dropped as "already shown", leaving pir up after a Claude click.
+S0="$(countof "fleet slot now shows" "$T/daemon.log")"
+printf 'fleet-pir\nfleet-claude\n' >> "$T/state/cmd"
+nap 3
+same   "both clicks switched"                      "$(countof "fleet slot now shows" "$T/daemon.log")" "$((S0 + 2))"
+in_slot "the last click's program holds the slot"  20
+check  "...and the footer says claude"             '"program":"claude"' "$T/state/terminals.json"
+
+echo
 echo "== 15l. after the swaps, an agent attach still lands in the cockpit tab =="
 : > "$CALLS"
 echo "test agent" > "$FLEETSTATE"
@@ -2272,8 +2284,26 @@ check  "revdiff relaunched in the new folder"      "cd \"$PRUN2\" && revdiff" "$
 in_slot "the same diff pane still holds the slot"  "$RDIFF"
 
 echo
-echo "== 16j. worker folder gone: the run is shown, and the worker key is reaped =="
+echo "== 16i2. the SHOWN worker's folder removed, pir writes nothing: the run is shown =="
+# pir removes a task's worktree after merging it and leaves the worker's
+# conversation open; its recorded cwd has not changed, so it writes no new report.
+# Found by the T06 drill on a real mux: revdiff sat on a chdir error until pir moved.
+pirwrite worker "$PRUN2" "$PWORK"
+nap 3
+in_slot "the worker is shown"                      "$WDIFF"
+E1="$(countof "pir: enter $RK" "$T/daemon.log")"
 git -C "$PREPO" worktree remove --force "$PWORK"
+waitfor "pir: the folder of $WK is gone; re-reading pir's report" "$T/daemon.log" 6
+waitmore "pir: enter $RK" "$T/daemon.log" "$E1" 6
+grew   "the run was entered without a pir write"   "pir: enter $RK" "$T/daemon.log" "$E1"
+nap 1
+in_slot "the run's diff pane holds the slot"       "$RDIFF"
+check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
+same   "the vanished folder was logged once"       "$(countof "the folder of $WK is gone" "$T/daemon.log")" "1"
+
+echo
+echo "== 16j. worker folder gone: the run is shown, and the worker key is reaped =="
+[ ! -d "$PWORK" ] || git -C "$PREPO" worktree remove --force "$PWORK"
 E0="$(countof "pir: enter $WK" "$T/daemon.log")"
 pirwrite worker "$PRUN2" "$PWORK"
 nap 3
@@ -2285,13 +2315,16 @@ gone   "the worker's diff pane was reaped"         "$WDIFF"
 gone   "...and its terminal"                       "$WTERM"
 
 echo
-echo "== 16k. the SHOWN key is never reaped; both folders gone reads as the list =="
+echo "== 16k. the shown run's folder goes too: the list, and only then is the key reaped =="
+# The reaper never takes the SHOWN key. What moves the cockpit off it is the re-read
+# of pir's report when the attached folder vanishes (T06, section 16i2): with both
+# folders gone decidePir answers the list (DESIGN 2.5), and the key, no longer shown,
+# is reaped.
 rm -rf "$PRUN2"
-nap 3
-in_slot "the shown run survives its folder going"  "$RDIFF"
-pirwrite worker "$PRUN2" "$PWORK"
-nap 3
+waitfor "pir: the folder of $RK is gone; re-reading pir's report" "$T/daemon.log" 6
+waitfor "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log" 6
 check  "both gone: the list, and why"              "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log"
+nap 1
 check  "the repo is shown"                         '"agent":"repo"' "$T/state/terminals.json"
 check  "...not switchable: pir is not at its list" '"switchable":false' "$T/state/terminals.json"
 waitfor "reaped diff pane $RDIFF — pir folder $PRUN2 is gone" "$T/daemon.log" 6
@@ -2740,6 +2773,28 @@ check  "wide (319): ...and the caption"               "Diff mode:" "$PLAIN"
 NW=$(node -e "$LEN" "$RAW")
 if [ "${NW:-0}" -le 319 ]; then okline "wide: the switch footer stays one row ($NW <= 319)"
 else echo "  FAIL the wide switch footer wrapped: width $NW > 319 columns"; fail=1; fi
+# Below level five (pir-pane T06): at 120 columns level five measured 133 wide, and a
+# wrapped one-row pane shows the TAIL, so the switch vanished. The usage readout now
+# loses its reset times, then the line is cut at the edge -- never wrapped (the
+# person's choice, 2026-09-27). Switch-only, like level five.
+ffooter "test agent" "$FL_CLAUDE" 140
+check  "140: reset times kept while level five fits"  "↺" "$PLAIN"
+ffooter "test agent" "$FL_CLAUDE" 120
+check  "120: the switch is kept"                      "Claude Agents  | PIR" "$PLAIN"
+check  "120: the diff labels are kept"                "Browse" "$PLAIN"
+check  "120: usage as percentages only"               "5h 80% / 1d " "$PLAIN"
+refute "120: ...no reset times"                       "↺" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 120 ]; then okline "120: the switch footer stays one row ($NW <= 120)"
+else echo "  FAIL the 120 switch footer wrapped: width $NW > 120 columns"; fail=1; fi
+ffooter "test agent" "$FL_CLAUDE" 80
+same   "80: cut, not wrapped -- the switch still leads" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 80 ]; then okline "80: the line is cut at the edge ($NW <= 80)"
+else echo "  FAIL the 80 switch footer wrapped: width $NW > 80 columns"; fail=1; fi
+ffooter "test agent" "" 100
+check  "100, no switch: reset times kept (no new level without the switch)" "↺" "$PLAIN"
 rm -f "$SD/usage-cache.json"
 
 # The click path, under script(1) exactly like section 12's click().

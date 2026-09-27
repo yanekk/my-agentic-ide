@@ -54,6 +54,23 @@ const DIFF_ORDER = ["uncommitted", "lastcommit", "custom", "browse"];
 // visible lengths, not the raw string lengths.
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 const vlen = (s) => stripAnsi(s).length;
+/**
+ * `s` cut to `w` visible columns, escapes copied for free, reset at the end. The
+ * footer's last resort (pir-pane T06): a line that wraps in a one-row pane shows
+ * its TAIL, so the switch and diff labels at the head would vanish; cut, the head
+ * stays and only the right end is lost.
+ */
+function cutTo(s, w) {
+  if (vlen(s) <= w) return s;
+  let out = "", seen = 0;
+  for (let i = 0; i < s.length && seen < w; ) {
+    const esc = /^\x1b\[[0-9;]*[A-Za-z]/.exec(s.slice(i));
+    if (esc) { out += esc[0]; i += esc[0].length; continue; }
+    const ch = String.fromCodePoint(s.codePointAt(i));
+    out += ch; i += ch.length; seen += ch.length;
+  }
+  return `${out}\x1b[0m`;
+}
 
 function read() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
@@ -174,13 +191,14 @@ const FLEET_LABELS = { claude: "Claude Agents", pir: "PIR" };
 // every window and the "as of" stamp -- so a frozen reading reads as frozen, never
 // as a fresh red; the approved prototype does the same (DESIGN 2.4).
 const USAGE_COLOR = { ok: `${ESC}32m`, warn: `${ESC}33m`, crit: `${ESC}31m` };
-function formatUsage(u) {
-  // A window is "5h NN% ↺<reset>"; fresh, the whole window carries its role colour;
+function formatUsage(u, { short = false } = {}) {
+  // A window is "5h NN% ↺<reset>" -- or just "5h NN%" when `short`, the footer's
+  // last trim step before it cuts (pir-pane T06, below); fresh, the whole window carries its role colour;
   // stale, it is left plain here and the whole segment is dimmed below. Windows are
   // joined with " / " (5h / 1d / 7d) and carry no leading glyph -- the keys name
   // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
-    const text = `${w.key} ${w.pct}% ↺${w.reset}`;
+    const text = short ? `${w.key} ${w.pct}%` : `${w.key} ${w.pct}% ↺${w.reset}`;
     return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
   };
   const body = u.windows.map(win).join(" / ");
@@ -297,6 +315,7 @@ function renderFooter() {
   // the suite asserts). The clock is read HERE and handed to the pure model.
   const usage = renderUsage(readCache(), Date.now());
   const usageSeg = usage ? formatUsage(usage) : "";
+  const usageShort = usage ? formatUsage(usage, { short: true }) : "";
 
   // Width for the one-row invariant: the live TTY when there is one, else COLUMNS
   // (so a piped render with no TTY can still be given a width), else 0 = "unknown,
@@ -318,6 +337,7 @@ function renderFooter() {
   let keysKept = [...PRIMARY, ...SECONDARY];
   let nameKept = true;
   let captionKept = true;
+  let usageDrawn = usageSeg;
   if (usageSeg && cols > 0) {
     const levels = [
       { keys: [...PRIMARY, ...SECONDARY], name: true, caption: true },
@@ -325,16 +345,25 @@ function renderFooter() {
       { keys: [], name: true, caption: true },
       { keys: [], name: false, caption: true },
       ...(fleetSeg ? [{ keys: [], name: false, caption: false }] : []),
+      // Past that the usage readout loses its reset times (percentages only), and
+      // whatever still does not fit is cut at the right edge rather than wrapped
+      // (below). At 120 columns the level above measured 133 wide, the wrap left only
+      // the usage tail on screen, and the switch could not be seen or clicked; the
+      // person chose this order (pir-pane T06, 2026-09-27). Switch-only, like the
+      // level above, so a footer without the switch trims exactly as before.
+      ...(fleetSeg ? [{ keys: [], name: false, caption: false, shortUsage: true }] : []),
     ];
     let chosen = levels[levels.length - 1];
     for (const lv of levels) {
       const p = buildPre(lv.keys, lv.name);
       const { diff } = buildDiff(p, lv.caption);
-      if (vlen(p) + vlen(diff) + 1 + vlen(usageSeg) <= cols) { chosen = lv; break; }
+      const u = lv.shortUsage ? usageShort : usageSeg;
+      if (vlen(p) + vlen(diff) + 1 + vlen(u) <= cols) { chosen = lv; break; }
     }
     keysKept = chosen.keys;
     nameKept = chosen.name;
     captionKept = chosen.caption;
+    usageDrawn = chosen.shortUsage ? usageShort : usageSeg;
   }
 
   const pre = buildPre(keysKept, nameKept);
@@ -348,9 +377,12 @@ function renderFooter() {
   // Right-align the usage readout: pad so it ends at the window's right edge when
   // the width is known, else a fixed two-space gap. Never less than one space, so
   // the diff labels and the usage readout never touch.
-  const used = vlen(pre) + vlen(diff) + vlen(usageSeg);
+  const used = vlen(pre) + vlen(diff) + vlen(usageDrawn);
   const gap = cols > 0 ? Math.max(1, cols - used) : 2;
-  process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${" ".repeat(gap)}${usageSeg}${ESC}K`);
+  let line = `${pre}${diff}${" ".repeat(gap)}${usageDrawn}`;
+  // Still too wide at the last level: cut, never wrap (see the levels above).
+  if (fleetSeg && cols > 0) line = cutTo(line, cols);
+  process.stdout.write(`${ESC}2J${ESC}H${line}${ESC}K`);
 }
 
 // A left-click at column `x` on the footer: if it landed on a diff-mode label,
