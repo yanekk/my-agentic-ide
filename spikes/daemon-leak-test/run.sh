@@ -106,6 +106,15 @@ is "daemon_pids finds \$T2's under \$T2" "$(daemon_pids "$T2")" "$B"
 # The trailing slash: $T with one more character appended is a different run.
 is "a folder that merely starts with \$T does not match" \
   "$(daemon_pids "${T%?}")" ""
+# A shell whose own command names cockpitd.mjs and whose environment names $T/
+# (a mini-suite, below) must never find itself: sweeping from its own trap would
+# SIGTERM the shell running the trap.
+is "the calling shell and its ancestors are never matched" \
+  "$(COCKPIT_DIR="$T/state" bash -c '. "$1"; daemon_pids "$2"' _ "$LIB" "$T" cockpitd.mjs)" "$A"
+# macOS's own /bin/bash is 3.2; a suite started from a PATH without Homebrew runs
+# the helpers there, where `local -A` does not exist.
+is "daemon_pids works, silently, under /bin/bash 3.2" \
+  "$(/bin/bash -c '. "$1"; daemon_pids "$2"' _ "$LIB" "$T" 2>&1)" "$A"
 
 out=$(daemon_tripwire "$T"); rc=$?
 is "tripwire returns 1 on a forgotten daemon" "$rc" 1
@@ -169,7 +178,7 @@ echo "-- fence"
 # command line (DESIGN §5.2). `p[k]ill` so this line does not match itself;
 # the footer-click `pkill -f "$CLICKER"` names a scratch path and does not.
 is "no name-match kill of the daemon anywhere under spikes/" \
-  "$(grep -rnE 'p[k]ill[[:space:]]+(-[a-zA-Z0-9]+[[:space:]]+)*-f[^#]*cockpitd' "$ROOT/spikes" | grep -c .)" 0
+  "$(grep -rnE 'p[k]ill[[:space:]]+(-[a-zA-Z0-9]+[[:space:]]+)*-[a-zA-Z]*f[a-zA-Z]*[[:space:]][^#]*cockpitd' "$ROOT/spikes" | grep -c .)" 0
 
 echo "-- nothing of ours left"
 daemon_tripwire "$T" > /dev/null; is "tripwire clean for \$T at the end" "$?" 0

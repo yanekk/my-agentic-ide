@@ -78,12 +78,15 @@ daemon_pids() {
   plain=$(ps -ww -ax -o pid=,command= 2>/dev/null)
   envd=$(ps -E -ww -ax -o pid=,command= 2>/dev/null)
   anc=" $(_daemon_ancestors | tr '\n' ' ') "
-  local -A runs=()
+  # A space-delimited string, not `local -A`: /bin/bash 3.2 has no associative
+  # arrays, and there `local -A` fails and leaves a GLOBAL array that remembers
+  # pids from earlier calls (a reused pid would then match without running cockpitd).
+  local runs=" "
   while read -r pid rest; do
-    [[ $rest == *cockpitd.mjs* ]] && runs[$pid]=1
+    [[ $rest == *cockpitd.mjs* ]] && runs+="$pid "
   done <<<"$plain"
   while read -r pid rest; do
-    [ -n "${runs[$pid]:-}" ] || continue
+    [[ $runs == *" $pid "* ]] || continue
     [[ $anc == *" $pid "* ]] && continue
     [[ $rest == *"=$T/"* ]] && echo "$pid"
   done <<<"$envd"
