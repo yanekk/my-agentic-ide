@@ -10,10 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built. The pir-side change is a separate plan started from
+**Status:** T01 done. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
-**Last updated:** 2026-09-26
-**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
+**Last updated:** 2026-09-27
+**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T02 has no
 dependencies and may run beside it.
 
 ## Tasks
@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | swap-spike | — | ⬜ | |
-| T01 | pir-model | — | 🔍 | Model + suite, 66 checks, purity and no-import grep. Deviations: worker cwd existing but not a git repo → list (table's last row), not fallback to run; key with no recorded cwd is never reaped; run/worker without key/id reads as list; worker label falls back to id. |
+| T01 | pir-model | — | ✅ | Reviewed: one fix, a relative cwd was followed against the daemon's own directory; now reads as absent, 4 checks lock it (70 total). Accepted the four recorded deviations. Probed key collisions, pid edge cases, fallback reasons, reap on missing cwd; both suites green. |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ⬜ | |
 | T04 | pir-follow | T01, T03 | ⬜ | |
@@ -32,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
