@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | section-runner | — | ⬜ | |
-| T02 | waituntil | — | 🔍 | `waituntil` plus optional description on `waitfor`/`waitmore`; shared `waited_fail` line. Throwaway harness (not committed) proved instant, ~1s and timeout cases. Suite ALL PASS 767, no call site changed. Deviation: harness sourced the helpers standalone instead of a run.sh section, same coverage, no 9-minute rerun. |
+| T02 | waituntil | — | ✅ | `waituntil` plus optional description on `waitfor`/`waitmore`, shared `waited_fail` line. Review clean, no fix commit: own harness re-proved instant, 1s, timeout, fractional and zero limits, argument quoting, silent no-description path; confirmed no `set -e` and no existing caller passes a fourth argument. Suite ALL PASS 767 (9 min 16 s). |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
@@ -34,7 +34,7 @@ done · ⛔ blocked, needs a human.
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 
-**Review queue:** T02
+**Review queue:** empty
 
 ## Blocked on the user
 
