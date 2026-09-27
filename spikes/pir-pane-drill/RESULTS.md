@@ -96,3 +96,20 @@ drill judges `reviewable` in `terminals.json` rather than the hint.
 The real mouse click on the footer and the real pir: T07, with the person. Without a
 usage reading the footer never trims (usage-limits rule) and wraps below ~190 columns,
 hiding the switch; logged in FINDINGS, not changed.
+
+## The rig check (T07)
+
+`bash spikes/pir-pane-drill/rig-check.sh`, run 2026-09-27 against the installed pir
+(`~/.local/bin/pir` → `~/.claude/pir-engine`): **RIG CHECK PASS (47 checks)**, teardown
+confirmed. The real pir runs in a private headless mux pane with scratch `HOME`/`PIR_HOME`
+and `PIR_DASHBOARD_STATE=$SCRATCH/x.json`; the run is pir's conversation rig (fake
+`claude`). The rig's repo is `git init`ed and given `.claude/worktrees/pir-rig` so
+`run.cwd` resolves to a path, not null.
+
+Keys: Enter opens the run, → its worker, ← twice back, Esc quits. At each step the file
+matched DESIGN §2.4: `version 1`, the dashboard's live pid, `run` = `rigrepo__rig`, `work`,
+`rig`, `pir/rig`, repoPath and cwd absolute; `worker` = T01, `implement`, cwd the rig repo.
+After Esc pir exited 0, the file was gone, no temp file was left, and the pid was dead.
+
+Do not pipe the script into `head`: SIGPIPE kills it before its teardown and strands the
+rig and the mux.
