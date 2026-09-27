@@ -30,7 +30,7 @@ done · ⛔ blocked, needs a human.
 | T04 | pir-follow | T01, T03 | ✅ | |
 | T05 | docs | T04 | ✅ | |
 | T06 | pir-pane-drill | T02, T04 | ✅ | |
-| T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
+| T07 | live-check | T05, T06 | ✅ | |
 
 **Review queue:** *(empty)*
 
