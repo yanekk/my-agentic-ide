@@ -22,7 +22,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | test-daemons-lib | — | ⬜ | |
+| T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ⬜ | |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
 | T04 | other-suites-tripwire | T01 | ⬜ | |
