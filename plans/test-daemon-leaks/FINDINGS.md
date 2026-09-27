@@ -8,6 +8,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T05 review re-ran every suite: all green (cockpit-test 546). Real cockpitd restarted mid-run (74362 → 86541) by a window rebuild at 13:28, whose `pkill -f cockpitd` also failed that cockpit-test pass (DESIGN §7). Rerun clean, 86541 unchanged. |
+| 2026-09-27 | 📌 | T05 review repeated SIGKILL-to-shell and SIGINT-to-group on cockpit-test ~15s in: zero daemons under `$T` after 6s, no result sentinel. pir-pane worktrees, cut before this plan, still leak ppid-1 daemons until they merge it. |
 | 2026-09-27 | 📌 | T05 checks: all nine suites pass (daemon-leak-test 58, cockpit-test 546). Real cockpitd pid 74362 unchanged before, after and between every check. Interrupting cockpit-test ~20s in by SIGINT to its group, SIGTERM to its shell, or SIGKILL to its shell leaves no daemon (≤1.5s). |
 | 2026-09-27 | 📌 | A suite backgrounded from a non-interactive bash ignores SIGINT, so a scripted Ctrl-C check passes vacuously by running to completion. Reset it (`perl -e '$SIG{INT}="DEFAULT"; setpgrp(0,0); exec @ARGV'`) and confirm the log has no result sentinel. |
 | 2026-09-27 | 📌 | Pre-fix orphans stopped by pid, user-approved after the auto-mode classifier blocked it: 1045 1124 8838 9703 28339 57263 60663 66244 69702 76391 86102 87693 93694 94699 (16m–2h20m, tmp HOME, ppid 1), plus T01's fake `stubborn` 31176. |

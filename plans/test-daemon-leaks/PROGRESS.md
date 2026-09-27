@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
-**Status:** T01–T04 done; T05 awaiting review.
+**Status:** all tasks done.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** review T05 (leak-free-check).
+**Next `pir-work` will:** nothing; the plan is complete.
 
 ## Tasks
 
@@ -25,9 +25,9 @@ done · ⛔ blocked, needs a human.
 | T02 | cockpit-test-adopt | T01 | ✅ | |
 | T03 | owner-backstop | T01, T02 | ✅ | |
 | T04 | other-suites-tripwire | T01 | ✅ | |
-| T05 | leak-free-check | T03, T04 | 🔍 | Stopped 15 pre-fix orphans (14 per the rule, plus T01's fake `stubborn`, whose HOME was real: a deviation). All suites green, three interrupts clean, real pid unchanged; see FINDINGS. docs/cockpit.md section and CLAUDE.md listing added. No measured-facts row: no finding called for one. |
+| T05 | leak-free-check | T03, T04 | ✅ | 15 pre-fix orphans stopped (one, the fake `stubborn`, outside the rule, user-approved). Review: all suites rerun green, SIGKILL and SIGINT interrupts repeated clean, real pid stable across the rerun; one fix commit, the docs leak count (five function-launched daemons, two leaked). |
 
-**Review queue:** T05
+**Review queue:** empty
 
 ## Blocked on the user
 
