@@ -119,6 +119,23 @@ an agent's worktree, and they park and come back on a switch exactly like an
 agent's. A thin full-width **footer** along the bottom always shows
 that key legend, so the gestures are discoverable without memorising them.
 
+The bottom-left pane can hold a **second program**: the dashboard of **`pir`** (the
+plan-implement-review engine), whose workers run headless and so never appear in
+`claude agents`. The footer carries `Claude Agents | PIR`; clicking a label swaps the
+program in that slot — click only, no key, and only while the shown program sits on
+its list screen (the segment is dim otherwise, and absent when `pir` is not
+installed). The two are **parked, not killed**, like diffs, and every rebuild starts
+on `claude agents`. pir runs in `cockpit-pir.sh`, a relaunch loop, with
+`PIR_DASHBOARD_STATE` set, and reports what it has open through
+`pir-dashboard.json`; the daemon follows that file exactly as it follows an attached
+agent — a run opens its shared worktree in `custom` against its fork point from
+`main`, a worker narrows to its task worktree at `uncommitted`, the runs list gives
+back the notes view and the repo terminals. Keys are prefixed `pir.`. Reviews are
+**inert** there (pir has no input box to type into, so `O` sends nothing and the
+footer hides its hint), the BitBucket buttons switch back to `claude agents` before
+they spawn, and because `claude agents` can now be parked, `panes.fleet` is no
+longer the cockpit's landmark — `panes.foot` is. The plan is `plans/pir-pane/`.
+
 The diff has **four modes**, toggled with the same `⌥[` / `⌥]` — but only while the
 **diff pane is focused**; focused on a terminal, those keys still cycle terminals.
 `uncommitted` (the default) is `HEAD` → working tree, the agent's uncommitted work;
@@ -161,7 +178,7 @@ makes typing-without-submitting possible.
 
 ## Running it
 
-Once per machine: `bin/install.sh`. It checks the seven tools, records where this
+Once per machine: `bin/install.sh`. It checks the seven tools (and `pir`, reported but optional), records where this
 checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
 registers three things in `~/.claude/settings.json`: the session-naming hook, the
 usage statusline (`cockpit-usage-tap.mjs`, which feeds the footer's usage segment;
@@ -196,16 +213,19 @@ bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer te
 bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
 bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a PIR worker that finished; still dings when one parks for the person; --install/--uninstall register it (superseding a plain afplay Stop hook)
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
+bin/cockpit-pir-model.mjs      pure: read pir-dashboard.json, decidePir (what to follow), pirKey, startingMode, shouldReapPirKey
+bin/cockpit-pir.sh             the pir pane's program: pir in a relaunch loop with PIR_DASHBOARD_STATE set
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (174 assertions)
+spikes/cockpit-test/    integration test, wezterm stubbed (750 assertions)
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
+spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (79)
 spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
@@ -219,9 +239,15 @@ the footer's height).
 
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
-panes too), `fleet.log`, `daemon.log`, `review-<jobId>.md`, `terminals.json` (what
+panes too, and `pir` once the pir pane has been spawned), `fleet.log`, `daemon.log`,
+`review-<jobId>.md`, `terminals.json` (what
 the strip and footer render — carries the visible agent's own `diffMode` and, in
-custom mode, its `customRef`), `custom-refs.json` (the
+custom mode, its `customRef`; a `fleet` block, `{ program: "claude"|"pir", switchable,
+available }`, that draws the `Claude Agents | PIR` switch; and `reviewable`, false only
+with a `pir.` key attached, which hides the `O` hint), `pir-dashboard.json` (what pir's
+dashboard has open — `view`, `run`, `worker`, `pid` — written temp-then-rename by
+the cockpit's own pir, read by the daemon, deleted on every rebuild; a missing,
+corrupt or dead-pid one reads as the runs list), `custom-refs.json` (the
 per-agent branch/SHA for custom mode — the *only* persisted diff state; the mode
 itself is per-agent and in-memory, so there is no `diff-mode` file any more),
 `custom-ref-pending` (the handoff file the
@@ -276,7 +302,7 @@ this is the index.
 | "Is a pane running X" takes **three** signals, and the pane TITLE is the weakest | The title is not a name for what a pane runs — it is whatever last wrote it. On a headless mux nothing does, so WezTerm falls back to the process name and the title reads `revdiff`; on a real machine the **shell** writes it from a `preexec` hook, as the command's **first word**. Measured 2026-09-02: a pane running revdiff titled `cd` (launched `cd <wt> && revdiff …`), an idle shell titled its cwd. Even where the fallback does apply the title lags the launch by ~1s, longer after a move, and believing a stale `bash` retypes the whole command into a live revdiff where every character is a keybinding. So the **framed screen** is counted (19 lines starting with `│`, 0 at a prompt) and, when neither of those answers, the tty's **foreground process GROUP** (`ps -t`) — a pane is running the program if **any** member of that group is it, never merely the last one. Any one of the three signals is enough. revdiff survives on its frame alone; broot and micro draw none, so for them the title was the whole decision and it was wrong for the entire life of browse mode — the healer retyped broot's launch command into broot's filter box every 3s. Reading only the **last** member of the group left that same symptom behind, intermittently, on every Enter: broot spawns its Enter verb's `cockpit-open` **in its own process group** rather than a new one, so mid-push the pane answers `broot`, `/bin/sh` and `ps`, all three foreground (measured under `script(1)`, 2026-09-04) — and last-wins read a live broot as a quit shell. `terminalIsIdle` makes the same `ps` call and still reads the **last**, deliberately: a terminal's job takes a *new* process group and the shell drops out of the foreground, so there the question really is which single one is in front. |
 | The layout script names every split's program, and `exec`s a shell rather than exiting | A split that names no program inherits `default_prog` and re-runs the layout script for ever. And as `default_prog` the script is the window's only pane, so exiting on a failure closes the window and takes the error message with it. |
 | Panes are **moved**, never restarted — diffs and terminals alike | Starting revdiff costs seconds of git and parsing, once paid on every switch. `move-pane-to-new-tab` parks the outgoing pane and `split-pane --move-pane-id` brings the incoming one back, so WezTerm never tears the PTY down: a parked revdiff returns with its selected file, scroll position and unflushed annotations, and a `sleep 60` left running has ~30s left when you return 30s later (measured: a 1/s counter accrued 21 ticks while parked). Parked diffs keep their worktree watcher, or instant switching would just mean instantly showing something stale. Those parked panes live in **tabs** of the cockpit window, which is why the tab bar is off (`enable_tab_bar = false`) — clicking one would fill the window with a bare shell and look exactly like the cockpit had vanished — and why parking re-activates the cockpit tab, since in the GUI the newly created tab becomes the active one. |
-| Both slots swap by splitting the **incoming** pane into the outgoing one | The diff pane spans the window, so its geometry *is* the slot: park it first and the only thing left to split is the fleet pane's half-width region — revdiff comes back at 59 of 120 columns. Splitting *into* the outgoing pane and disposing of it afterwards makes the incoming one inherit the slot. Same for the terminal, once the strip sits on its right edge (measured: terminal 47 cols, strip 12, fleet 59). Rebuilding an **empty** diff slot is the exception: park the terminal *and* the strip so `split-pane --top` comes off the fleet pane alone, then move both back. The strip is otherwise **never parked** — it is pure display and stays on the right edge for every agent. |
+| Both slots swap by splitting the **incoming** pane into the outgoing one | The diff pane spans the window, so its geometry *is* the slot: park it first and the only thing left to split is the fleet pane's half-width region — revdiff comes back at 59 of 120 columns. Splitting *into* the outgoing pane and disposing of it afterwards makes the incoming one inherit the slot. Same for the terminal, once the strip sits on its right edge (measured: terminal 47 cols, strip 12, fleet 59). Rebuilding an **empty** diff slot is the exception: park the terminal *and* the strip so `split-pane --top` comes off the fleet pane alone, then move both back. The strip is otherwise **never parked** — it is pure display and stays on the right edge for every agent. The **fleet** slot is the third, swapping `claude agents` and pir the same way (measured: pir 59x22 at 120x40, 39x12 at 80x24, shell and strip untouched) — so `panes.fleet` can be parked and is **not** a landmark: the cockpit tab is found through `panes.foot`, never parked, and anchors and focus use `slotFleetPane()`. A landmark on a parkable pane makes the daemon take a parked tab for the cockpit. |
 | Terminal gestures go through the **daemon**, never a raw split, and are **not** agents-only | `⌥t`/`⌥[`/`⌥]`/`⌥w` append a verb to `~/.claude/cockpit/cmd` and the daemon owns every pane swap; a direct `SplitPane` binding (what `⌥t` used to be) makes an untracked pane it then shuffles around. `terminalCommand` used to return early with no agent attached, on the assumption the fleet list held one repo shell — but `terminals` is keyed for the list exactly as for an agent, and the strip drew `[+ add]` and `[x]` off it anyway, so every one of those buttons visibly did nothing. A new list terminal opens at `panes.repo` (the cockpit checkout), never at some agent's worktree. Closing the **last** terminal is refused: the slot must always hold one. |
 | `⌥[`/`⌥]` route by **focus**, but unattached they always mean terminals | The keys append `next`/`prev` to `cmd` unconditionally; the daemon reads the cockpit tab's active pane and sends them to the diff-mode switch when the **diff** pane holds focus **and an agent is attached**, to the terminal cycler otherwise. At the fleet list that pane is the welcome/notes display, not a revdiff — there is no mode to cycle, so focus sitting there used to swallow the keys into a no-op and terminals could be opened up there but not switched between. `⌥t`/`⌥w` are always terminals. |
 | The key legend is a **footer pane** at `--cells 1` that pins itself back by borrowing focus | WezTerm's status bar lives in the tab bar, which is off, so the legend is a thin full-width pane split off the bottom *first*, while the fleet pane still fills the window — every later split happens above it. `--percent` asks for a *share* of the window, re-applied on every resize and font-size change, so the one-line legend crept taller until it ate rows of the fleet view. And `adjust-pane-size --pane-id` is ignored by wezterm 20240203 — it resizes whatever pane is *active*, squashing the bottom row instead — so the footer focuses itself, shrinks, and hands focus straight back. Each drift height is corrected **once** (focus is borrowed ~100ms per attempt; a fix that cannot work must not steal it every tick), debounced 250ms so a window drag is corrected at the size it settles at. |

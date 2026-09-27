@@ -54,6 +54,23 @@ const DIFF_ORDER = ["uncommitted", "lastcommit", "custom", "browse"];
 // visible lengths, not the raw string lengths.
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 const vlen = (s) => stripAnsi(s).length;
+/**
+ * `s` cut to `w` visible columns, escapes copied for free, reset at the end. The
+ * footer's last resort (pir-pane T06): a line that wraps in a one-row pane shows
+ * its TAIL, so the switch and diff labels at the head would vanish; cut, the head
+ * stays and only the right end is lost.
+ */
+function cutTo(s, w) {
+  if (vlen(s) <= w) return s;
+  let out = "", seen = 0;
+  for (let i = 0; i < s.length && seen < w; ) {
+    const esc = /^\x1b\[[0-9;]*[A-Za-z]/.exec(s.slice(i));
+    if (esc) { out += esc[0]; i += esc[0].length; continue; }
+    const ch = String.fromCodePoint(s.codePointAt(i));
+    out += ch; i += ch.length; seen += ch.length;
+  }
+  return `${out}\x1b[0m`;
+}
 
 function read() {
   try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
@@ -154,6 +171,18 @@ function schedulePin() {
 // agent attached there is no diff to re-mode, so the labels are inert.
 let hitZones = [];
 let footerAttached = false;
+// The `Claude Agents | PIR` switch as last drawn (pir-pane DESIGN 2.1, 2.2): its two
+// label zones, which program is shown, and whether a switch is allowed now. Kept
+// apart from `footerAttached`, which gates only the diff labels -- the switch is
+// about the pane, not about a diff, so it is live with or without an agent.
+let fleetZones = [];
+let fleetShown = null;
+let fleetSwitchable = false;
+
+// The two programs the Claude pane can show, in the order the segment draws them.
+// The key is also the verb suffix a click appends (`fleet-claude` / `fleet-pir`).
+const FLEET_ORDER = ["claude", "pir"];
+const FLEET_LABELS = { claude: "Claude Agents", pir: "PIR" };
 
 // --- the usage readout: the pure model's roles turned into terminal colour ---
 // The model (T02) decides WHAT to show -- percent, role, reset, staleness; the
@@ -162,13 +191,14 @@ let footerAttached = false;
 // every window and the "as of" stamp -- so a frozen reading reads as frozen, never
 // as a fresh red; the approved prototype does the same (DESIGN 2.4).
 const USAGE_COLOR = { ok: `${ESC}32m`, warn: `${ESC}33m`, crit: `${ESC}31m` };
-function formatUsage(u) {
-  // A window is "5h NN% ↺<reset>"; fresh, the whole window carries its role colour;
+function formatUsage(u, { short = false } = {}) {
+  // A window is "5h NN% ↺<reset>" -- or just "5h NN%" when `short`, the footer's
+  // last trim step before it cuts (pir-pane T06, below); fresh, the whole window carries its role colour;
   // stale, it is left plain here and the whole segment is dimmed below. Windows are
   // joined with " / " (5h / 1d / 7d) and carry no leading glyph -- the keys name
   // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
-    const text = `${w.key} ${w.pct}% ↺${w.reset}`;
+    const text = short ? `${w.key} ${w.pct}%` : `${w.key} ${w.pct}% ↺${w.reset}`;
     return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
   };
   const body = u.windows.map(win).join(" / ");
@@ -177,9 +207,24 @@ function formatUsage(u) {
 
 // --- the footer: one full-width line of keys, always visible ----------------
 function renderFooter() {
-  const { agent, diffMode, customRef, terminals } = read();
+  const { agent, diffMode, customRef, terminals, fleet, reviewable } = read();
   const attached = agent && agent !== "repo";
   footerAttached = attached;
+  // The program switch (pir-pane DESIGN 2.1, 2.2). Absent when the daemon wrote no
+  // `fleet` block (a daemon from before the switch: the footer is today's, byte for
+  // byte) or when `pir` is not installed (`available: false`: a label that can never
+  // work is noise). Drawn like the diff labels -- the shown program in reverse video
+  // -- and dimmed whole while the shown program is off its list screen, where the
+  // daemon would refuse the switch anyway. Dimmed, the shown label keeps its reverse
+  // video so which program is on screen still reads at a glance.
+  const fleetOn = !!(fleet && typeof fleet === "object" && fleet.available);
+  const shown = fleetOn && fleet.program === "pir" ? "pir" : "claude";
+  const switchable = fleetOn && fleet.switchable === true;
+  const fleetLabel = (key) => key === shown
+    ? `${ESC}${switchable ? "" : "2;"}7m ${FLEET_LABELS[key]} ${ESC}0m`
+    : `${ESC}2m${FLEET_LABELS[key]}${ESC}0m`;
+  const FLEET_SEP = `${ESC}2m | ${ESC}0m`;
+  const fleetSeg = fleetOn ? FLEET_ORDER.map(fleetLabel).join(FLEET_SEP) : "";
   const n = terminals.length;
   const active = DIFF_MODE_LABELS[diffMode] ? diffMode : "uncommitted";
   // Unattached, the left slot is empty: its old "enter an agent" hint stole the
@@ -195,7 +240,11 @@ function renderFooter() {
     `${ESC}1m⌥t${ESC}0m new`,
     `${ESC}1m⌥[ ⌥]${ESC}0m switch`,
     `${ESC}1m⌥w${ESC}0m close`,
-    `${ESC}1mO${ESC}0m send→claude`,
+    // `O` is revdiff's flush-and-send; with a pir key attached it sends nothing
+    // (pir has no input box, DESIGN 2.7), and a legend must not offer a gesture
+    // that cannot happen. Only an explicit `reviewable: false` drops it -- absent
+    // reads as true, so an older daemon's file keeps today's legend.
+    ...(reviewable === false ? [] : [`${ESC}1mO${ESC}0m send→claude`]),
   ];
   const SECONDARY = [
     `${ESC}2m⌥←↑↓→${ESC}0m move`,
@@ -207,10 +256,32 @@ function renderFooter() {
   // that space -- fold it into `pre` so the measured label columns line up with
   // what a mouse click reports. `pre` is byte-for-byte today's when the full key
   // list and the name are kept.
+  // The switch leads, ahead of the agent name: the name appears only with an agent
+  // attached, and anything after it moves when it does -- first, the switch stays
+  // still. It is never trimmed (it is the only way to switch), but it is part of
+  // `pre`, so every trim level below counts its width.
+  const FLEET_GAP = "    ";
   const buildPre = (keys, withName) => {
+    const sw = fleetSeg ? `${fleetSeg}${FLEET_GAP}` : "";
     const lead = withName && nameSeg ? `${nameSeg}    ` : "";
-    return ` ${lead}${keys.join(KEYSEP)}${keys.length ? "    " : ""}`;
+    return ` ${sw}${lead}${keys.join(KEYSEP)}${keys.length ? "    " : ""}`;
   };
+  // The switch's hit zones, 1-indexed like the SGR report: column 1 is the leading
+  // space, so the first label starts at column 2. Nothing before the switch is ever
+  // trimmed, so these do not depend on the trim level chosen below.
+  const zonesF = [];
+  if (fleetSeg) {
+    let col = 2;
+    FLEET_ORDER.forEach((key, i) => {
+      const w = vlen(fleetLabel(key));
+      zonesF.push({ key, start: col, end: col + w - 1 });
+      col += w;
+      if (i < FLEET_ORDER.length - 1) col += vlen(FLEET_SEP);
+    });
+  }
+  fleetZones = zonesF;
+  fleetShown = shown;
+  fleetSwitchable = switchable;
   // All modes are shown with the active one highlighted (reverse video), so the
   // current range is legible at a glance. It doubles as the hint for ⌥[/⌥], and
   // each label is clickable (see the mouse handler below). Custom carries the
@@ -221,8 +292,8 @@ function renderFooter() {
   const opt = (key) => key === active
     ? `${ESC}7m ${label(key)} ${ESC}0m`
     : `${ESC}2m${label(key)}${ESC}0m`;
-  const buildDiff = (pre) => {
-    const modePrefix = `${ESC}2mDiff mode:${ESC}0m `;
+  const buildDiff = (pre, caption = true) => {
+    const modePrefix = caption ? `${ESC}2mDiff mode:${ESC}0m ` : "";
     const sep = `${ESC}2m | ${ESC}0m`;
     let col = vlen(pre) + vlen(modePrefix) + 1;   // 1-indexed column of the first label
     let diff = modePrefix;
@@ -244,6 +315,7 @@ function renderFooter() {
   // the suite asserts). The clock is read HERE and handed to the pure model.
   const usage = renderUsage(readCache(), Date.now());
   const usageSeg = usage ? formatUsage(usage) : "";
+  const usageShort = usage ? formatUsage(usage, { short: true }) : "";
 
   // Width for the one-row invariant: the live TTY when there is one, else COLUMNS
   // (so a piped render with no TTY can still be given a width), else 0 = "unknown,
@@ -256,27 +328,46 @@ function renderFooter() {
   // order (DESIGN 2.2) -- the dim secondary key hints, then the primary key hints,
   // then the agent name -- never the usage readout or the diff labels. Pick the
   // widest level that fits; a minimum one-space spacer keeps diff and usage apart.
+  // The last level also drops the dim `Diff mode:` caption (the reverse-video label
+  // still says which mode is on): the program switch's ~27 columns pushed the
+  // untrimmable rest past 140 (145 measured), and the person chose the caption as
+  // what gives way (pir-pane T02, 2026-09-27). That level exists only while the switch
+  // is drawn: below ~115 columns level four overflows with or without it, and a footer
+  // with no `fleet` block must trim exactly as before (the task's "Done when").
   let keysKept = [...PRIMARY, ...SECONDARY];
   let nameKept = true;
+  let captionKept = true;
+  let usageDrawn = usageSeg;
   if (usageSeg && cols > 0) {
     const levels = [
-      { keys: [...PRIMARY, ...SECONDARY], name: true },
-      { keys: [...PRIMARY], name: true },
-      { keys: [], name: true },
-      { keys: [], name: false },
+      { keys: [...PRIMARY, ...SECONDARY], name: true, caption: true },
+      { keys: [...PRIMARY], name: true, caption: true },
+      { keys: [], name: true, caption: true },
+      { keys: [], name: false, caption: true },
+      ...(fleetSeg ? [{ keys: [], name: false, caption: false }] : []),
+      // Past that the usage readout loses its reset times (percentages only), and
+      // whatever still does not fit is cut at the right edge rather than wrapped
+      // (below). At 120 columns the level above measured 133 wide, the wrap left only
+      // the usage tail on screen, and the switch could not be seen or clicked; the
+      // person chose this order (pir-pane T06, 2026-09-27). Switch-only, like the
+      // level above, so a footer without the switch trims exactly as before.
+      ...(fleetSeg ? [{ keys: [], name: false, caption: false, shortUsage: true }] : []),
     ];
     let chosen = levels[levels.length - 1];
     for (const lv of levels) {
       const p = buildPre(lv.keys, lv.name);
-      const { diff } = buildDiff(p);
-      if (vlen(p) + vlen(diff) + 1 + vlen(usageSeg) <= cols) { chosen = lv; break; }
+      const { diff } = buildDiff(p, lv.caption);
+      const u = lv.shortUsage ? usageShort : usageSeg;
+      if (vlen(p) + vlen(diff) + 1 + vlen(u) <= cols) { chosen = lv; break; }
     }
     keysKept = chosen.keys;
     nameKept = chosen.name;
+    captionKept = chosen.caption;
+    usageDrawn = chosen.shortUsage ? usageShort : usageSeg;
   }
 
   const pre = buildPre(keysKept, nameKept);
-  const { diff, zones } = buildDiff(pre);
+  const { diff, zones } = buildDiff(pre, captionKept);
   hitZones = zones;
 
   if (!usageSeg) {
@@ -286,14 +377,26 @@ function renderFooter() {
   // Right-align the usage readout: pad so it ends at the window's right edge when
   // the width is known, else a fixed two-space gap. Never less than one space, so
   // the diff labels and the usage readout never touch.
-  const used = vlen(pre) + vlen(diff) + vlen(usageSeg);
+  const used = vlen(pre) + vlen(diff) + vlen(usageDrawn);
   const gap = cols > 0 ? Math.max(1, cols - used) : 2;
-  process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${" ".repeat(gap)}${usageSeg}${ESC}K`);
+  let line = `${pre}${diff}${" ".repeat(gap)}${usageDrawn}`;
+  // Still too wide at the last level: cut, never wrap (see the levels above).
+  if (fleetSeg && cols > 0) line = cutTo(line, cols);
+  process.stdout.write(`${ESC}2J${ESC}H${line}${ESC}K`);
 }
 
 // A left-click at column `x` on the footer: if it landed on a diff-mode label,
 // hand the daemon the corresponding verb. Inert with no agent attached.
+// A click on the program switch appends `fleet-<program>` -- only while switching is
+// allowed and only on the program NOT shown (clicking the shown one is no switch).
+// The daemon refuses a stray verb too; this just keeps the channel quiet.
 function onFooterClick(x) {
+  const f = fleetZones.find((z) => x >= z.start && x <= z.end);
+  if (f) {
+    if (!fleetSwitchable || f.key === fleetShown) return;
+    try { fs.appendFileSync(CMD_FILE, `fleet-${f.key}\n`); } catch { /* daemon re-reads on the next click */ }
+    return;
+  }
   if (!footerAttached) return;
   const zone = hitZones.find((z) => x >= z.start && x <= z.end);
   if (!zone) return;

@@ -50,7 +50,9 @@ export ACTIVE="$T/active"
 : > "$TITLELAG"
 : > "$ACTIVE"
 echo list > "$FLEETSTATE"
-printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$PANESTATE"   # diff, fleet, repo shell
+# diff, fleet, repo shell -- and 9, the footer: the daemon's landmark for which tab
+# is the cockpit, since the fleet pane itself can be parked while pir is shown.
+printf '9 0 sh\n10 0 sh\n20 0 sh\n30 0 sh\n' > "$PANESTATE"
 echo 31 > "$NEXTPANE"
 echo 1  > "$NEXTTAB"
 
@@ -246,6 +248,13 @@ BROOT
 chmod +x "$T/bin/broot"
 export BROOTROOT="$T/brootroot"; : > "$BROOTROOT"
 
+# --- stub pir --------------------------------------------------------------
+# Only its PRESENCE matters to the daemon: it resolves `pir` on PATH once at start
+# and hands that path to cockpit-pir.sh on the pir pane's command line. The stub
+# wezterm never runs a pane's program, so this is never executed here.
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/pir"
+chmod +x "$T/bin/pir"
+
 export PATH="$T/bin:$PATH"
 
 # --- a real git repo to act as the agent's worktree -------------------------
@@ -314,7 +323,7 @@ SPEED="${COCKPIT_TEST_SPEED:-0.5}"
 nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }
 
 # --- state -----------------------------------------------------------------
-echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$T/state/panes.json"
+echo '{"diff":10,"fleet":20,"shell":30,"foot":9,"repo":"'"$WT"'"}' > "$T/state/panes.json"
 : > "$T/state/fleet.log"
 
 # HOME is redirected so the daemon's stale-socket repair looks for wezterm
@@ -632,6 +641,7 @@ check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
 check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
 check "this agent's mode is now last-commit"      '"diffMode":"lastcommit"' "$T/state/terminals.json"
+check "an attached agent is reviewable (pir-pane)" '"reviewable":true' "$T/state/terminals.json"
 check "the switch was logged"                     "relaunched diff pane 31 for abc12345 in lastcommit" "$T/daemon.log"
 
 echo
@@ -1937,6 +1947,565 @@ before_last "...and it came BEFORE the reap, not after" \
 in_slot "the attached agent still holds the slot" "$(pane_key diff)"
 
 echo
+echo "== 15a. the fleet slot: PIR is refused with an agent attached, nothing moves =="
+# pir-pane T03. The bottom-left slot can hold claude agents OR the pir dashboard, the
+# other one parked. A switch is only allowed with the shown program at its list
+# (DESIGN 2.2), so it never has to decide what to do with an attached diff.
+: > "$CALLS"
+R0="$(countof "refusing fleet-pir: claude is not at its list" "$T/daemon.log")"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+grew   "the refusal was logged"                    "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0"
+refute "no pir pane was spawned"                   "cockpit-pir.sh" "$CALLS"
+refute "the claude pane was not parked"            "move-pane-to-new-tab --pane-id 20" "$CALLS"
+check  "the footer still says claude"              '"program":"claude"' "$T/state/terminals.json"
+check  "...and draws the switch as not clickable"  '"switchable":false' "$T/state/terminals.json"
+
+echo
+echo "== 15b. a NON-REPO agent attaches nothing, and is still not a list =="
+# An agent left at a folder with no repo keeps the default panes (unreviewableName),
+# so "nothing attached" is not the same as "at the list": the footer must say so from
+# the reconcile poll, not only on attach/exit.
+cat > "$AGENTS_JSON" <<JSON
+[{"pid":1,"id":"abc12345","cwd":"$MOVED7","kind":"background",
+  "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"},
+ {"pid":3,"id":"fff00000","cwd":"$T/home","kind":"background",
+  "sessionId":"s3","name":"stray agent","startedAt":0,"status":"idle","state":"done"}]
+JSON
+echo list > "$FLEETSTATE"
+nap 3
+check  "at the list the switch is clickable"       '"switchable":true' "$T/state/terminals.json"
+echo "stray agent" > "$FLEETSTATE"
+nap 3
+check  "the stray agent was not attached"          "at non-repo $T/home" "$T/daemon.log"
+check  "...the panes stayed on the repo"           '"agent":"repo"' "$T/state/terminals.json"
+check  "...and the switch went dim anyway"         '"switchable":false' "$T/state/terminals.json"
+: > "$CALLS"
+R0="$(countof "refusing fleet-pir: claude is not at its list" "$T/daemon.log")"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+grew   "a stray fleet-pir is refused there too"    "refusing fleet-pir: claude is not at its list" "$T/daemon.log" "$R0"
+refute "...and spawns nothing"                     "cockpit-pir.sh" "$CALLS"
+
+echo
+echo "== 15c. back at the list: claude shown, switchable, pir available =="
+echo list > "$FLEETSTATE"
+nap 3
+check  "terminals.json carries the fleet block"    '"fleet":{"program":"claude","switchable":true,"available":true}' "$T/state/terminals.json"
+
+echo
+echo "== 15d. PIR at the list: the pir pane is spawned into the slot, claude parked =="
+: > "$CALLS"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+PIRP="$(pane_key pir)"
+same   "panes.json names the pir pane"             "$([ -n "$PIRP" ] && echo yes || echo no)" "yes"
+check  "split into the claude pane, T00's order"   "split-pane --left --percent 50 --pane-id 20 --cwd $WT --" "$CALLS"
+check  "...through /usr/bin/env naming COCKPIT_REPO" "/usr/bin/env COCKPIT_REPO=$WT PATH=$T/state/bin:" "$CALLS"
+check  "...running the relaunch loop on pir and the state file" \
+       "$ROOT/bin/cockpit-pir.sh $T/bin/pir $T/state/pir-dashboard.json" "$CALLS"
+before "the pir pane came in before claude was parked" "cockpit-pir.sh" "move-pane-to-new-tab --pane-id 20" "$CALLS"
+parked "the claude pane is parked, not killed"     20
+in_slot "the pir pane holds the slot"              "$PIRP"
+check  "focus went to the pir pane"                "activate-pane --pane-id $PIRP" "$CALLS"
+refute "nothing was killed"                        "kill-pane" "$CALLS"
+check  "the footer says pir"                       '"fleet":{"program":"pir","switchable":true,"available":true}' "$T/state/terminals.json"
+FTAB="$(pane_tab 20)"
+
+echo
+echo "== 15e. while pir is shown, the claude pane's text attaches nothing =="
+E0="$(countof "enter abc12345" "$T/daemon.log")"
+echo "test agent" > "$FLEETSTATE"
+nap 3
+same   "no agent was entered (reconcile is gated)" "$(countof "enter abc12345" "$T/daemon.log")" "$E0"
+check  "the panes stayed on the repo"              '"agent":"repo"' "$T/state/terminals.json"
+in_slot "the pir pane still holds the slot"        "$PIRP"
+echo list > "$FLEETSTATE"
+
+echo
+echo "== 15f. while pir is shown, focus-claude activates nothing =="
+: > "$CALLS"
+echo focus-claude >> "$T/state/cmd"
+nap 1
+refute "no pane was activated"                     "activate-pane" "$CALLS"
+check  "the ignore was logged"                     "focus-claude ignored: pir is shown" "$T/daemon.log"
+
+echo
+echo "== 15g. terminals still land in the cockpit tab with claude parked =="
+# The landmark for "which tab is the cockpit" moved from the fleet pane to the
+# footer. Left on the fleet pane, every park below would re-activate claude's
+# parked tab ($FTAB) and fill the window with it.
+: > "$CALLS"
+echo new >> "$T/state/cmd"
+nap 2
+NEWT="$(grep -oE 'opened terminal pane [0-9]+ for repo' "$T/daemon.log" | tail -1 | grep -oE '[0-9]+')"
+in_slot "the new repo terminal is in the slot"     "$NEWT"
+check  "parking re-activated the cockpit tab"      "activate-tab --tab-id 0" "$CALLS"
+refute "...never claude's parked tab"              "activate-tab --tab-id $FTAB" "$CALLS"
+echo next >> "$T/state/cmd"
+nap 2
+check  "next cycled the repo terminals"            '"n":1,"active":true' "$T/state/terminals.json"
+echo close-2 >> "$T/state/cmd"
+nap 2
+refute "close-2 closed the second"                 '"n":2' "$T/state/terminals.json"
+refute "no park activated claude's tab"            "activate-tab --tab-id $FTAB" "$CALLS"
+in_slot "the pir pane still holds the slot"        "$PIRP"
+
+echo
+echo "== 15h. Claude Agents: claude comes back, pir is parked, not killed =="
+: > "$CALLS"
+echo fleet-claude >> "$T/state/cmd"
+nap 2
+check  "claude split back into the pir pane"      "split-pane --left --percent 50 --pane-id $PIRP --move-pane-id 20" "$CALLS"
+before "...before pir was parked"                  "--move-pane-id 20" "move-pane-to-new-tab --pane-id $PIRP" "$CALLS"
+in_slot "the claude pane holds the slot"           20
+parked "the pir pane is parked"                    "$PIRP"
+refute "nothing was killed"                        "kill-pane" "$CALLS"
+check  "the footer says claude"                    '"program":"claude"' "$T/state/terminals.json"
+
+echo
+echo "== 15i. PIR again restores the SAME pir pane, spawning nothing =="
+: > "$CALLS"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+check  "the parked pir pane was moved back"        "split-pane --left --percent 50 --pane-id 20 --move-pane-id $PIRP" "$CALLS"
+refute "no second pir pane was spawned"            "cockpit-pir.sh" "$CALLS"
+same   "panes.json still names the same pane"      "$(pane_key pir)" "$PIRP"
+in_slot "the pir pane holds the slot"              "$PIRP"
+parked "claude is parked again"                    20
+
+echo
+echo "== 15j. a Review click while pir is shown switches to claude, THEN spawns =="
+# spawnAgent types into claude's new-session box with a real Enter (DESIGN 2.8).
+# Into pir those keys would drive its dashboard, so the switch comes first.
+printf '{"version":1,"meUuid":null,"repos":{"alpha":{"fetchedAt":1,"prs":[{"id":7,"links":{"html":{"href":"https://bitbucket.org/ws/pr/7"}}}]}}}\n' \
+  > "$T/state/bitbucket-cache.json"
+: > "$CALLS"
+echo bb-review:alpha/7 >> "$T/state/cmd"
+nap 2
+before "claude was brought back before anything was typed" "--move-pane-id 20" "send-text --pane-id 20" "$CALLS"
+check  "the review directive went to claude's box" "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$CALLS"
+same   "...as the text then a real Enter"          "$(grep -c -- 'send-text --pane-id 20 --no-paste' "$CALLS")" "2"
+refute "nothing was typed into the pir pane"       "send-text --pane-id $PIRP" "$CALLS"
+in_slot "claude holds the slot"                    20
+parked "pir is parked"                             "$PIRP"
+rm -f "$T/state/bitbucket-cache.json"
+
+echo
+echo "== 15k. a pir pane that died is spawned afresh on the next PIR =="
+awk -v p="$PIRP" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+PIRP2="$(pane_key pir)"
+check  "a new pir pane was spawned"                "cockpit-pir.sh" "$CALLS"
+refute "...not a move of the dead one"             "--move-pane-id $PIRP" "$CALLS"
+in_slot "the new pir pane holds the slot"          "$PIRP2"
+echo fleet-claude >> "$T/state/cmd"
+nap 2
+in_slot "and claude comes back from it"            20
+
+echo
+echo "== 15k2. PIR then Claude Agents read in one tick: both happen, claude ends up shown =="
+# The T06 drill on a real mux: the daemon reads cmd every 200ms, so two fast clicks
+# arrive together, and the second was checked against the program before the first
+# had switched -- dropped as "already shown", leaving pir up after a Claude click.
+S0="$(countof "fleet slot now shows" "$T/daemon.log")"
+printf 'fleet-pir\nfleet-claude\n' >> "$T/state/cmd"
+nap 3
+same   "both clicks switched"                      "$(countof "fleet slot now shows" "$T/daemon.log")" "$((S0 + 2))"
+in_slot "the last click's program holds the slot"  20
+check  "...and the footer says claude"             '"program":"claude"' "$T/state/terminals.json"
+
+echo
+echo "== 15l. after the swaps, an agent attach still lands in the cockpit tab =="
+: > "$CALLS"
+echo "test agent" > "$FLEETSTATE"
+nap 4
+check  "the agent was entered"                     "enter abc12345" "$T/daemon.log"
+in_slot "its diff pane is in the slot"             "$(pane_key diff)"
+in_slot "its terminal is in the slot"              "$(pane_key shell)"
+check  "parks re-activated the cockpit tab"        "activate-tab --tab-id 0" "$CALLS"
+check  "focus handed back to the claude pane"      "activate-pane --pane-id 20" "$CALLS"
+echo list > "$FLEETSTATE"
+nap 3
+
+echo
+echo "== 16a. pir reports a RUN: its shared worktree attaches at custom-against-fork-point =="
+# pir-pane T04. The tests write pir-dashboard.json the way the real pir does (temp +
+# rename). A run branched off main; main then moved on -- the person commits to main
+# during builds -- so the fork point and main's tip differ (DESIGN 2.6).
+PREPO="$T/pirrepo"; mkrepo "$PREPO"
+echo base > "$PREPO/base.txt"; git -C "$PREPO" add -A; git -C "$PREPO" commit -qm fork
+FORK="$(git -C "$PREPO" rev-parse --short HEAD)"
+PRUN="$T/pirrun"; PWORK="$T/pirworker"; PRUN2="$T/pirrun2"
+git -C "$PREPO" worktree add -q -b pir/slug "$PRUN"
+echo run > "$PRUN/runwork.txt"; git -C "$PRUN" add -A; git -C "$PRUN" commit -qm "run work"
+git -C "$PREPO" worktree add -q -b pir/slug-T01 "$PWORK" pir/slug
+echo later > "$PREPO/mainlater.txt"; git -C "$PREPO" add -A; git -C "$PREPO" commit -qm "main later"
+MAINTIP="$(git -C "$PREPO" rev-parse --short HEAD)"
+# pirwrite <view> <run cwd|null> [<worker cwd|null>] [pid]: one atomic write. The pid
+# defaults to this script's own, which is alive for as long as the suite runs.
+pirjson() { [ "$1" = null ] && printf null || printf '"%s"' "$1"; }
+pirwrite() {
+  local view="$1" run="null" worker="null" pid="${4:-$$}"
+  [ "$view" != list ] && run="{\"key\":\"proj__slug\",\"kind\":\"work\",\"slug\":\"slug\",\"repo\":\"proj\",\"repoPath\":\"$PREPO\",\"branch\":\"pir/slug\",\"cwd\":$(pirjson "$2")}"
+  [ "$view" = worker ] && worker="{\"id\":\"w1\",\"task\":\"T01\",\"role\":\"implement\",\"cwd\":$(pirjson "$3")}"
+  printf '{"version":1,"pid":%s,"view":"%s","run":%s,"worker":%s,"updatedAt":"2026-09-27T00:00:00.000Z"}\n' \
+    "$pid" "$view" "$run" "$worker" > "$T/state/pir-dashboard.json.tmp"
+  mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+}
+RK="pir.proj__slug"; WK="pir.proj__slug.w1"
+RFILE="$T/state/review-$RK.md"
+rm -f "$T/state/pir-dashboard.json"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+check  "pir is shown, and with no file it is at its list" '"fleet":{"program":"pir","switchable":true' "$T/state/terminals.json"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "the run key was entered at the run's folder" "pir: enter $RK → $PRUN" "$T/daemon.log"
+RDIFF="$(pane_key diff)"; RTERM="$(pane_key shell)"
+in_slot "its diff pane holds the slot"             "$RDIFF"
+in_slot "its terminal holds the terminal slot"     "$RTERM"
+check  "revdiff cd'd into the run's worktree"      "cd \"$PRUN\" && revdiff" "$CALLS"
+check  "...custom against the fork point"          "--untracked -o \"$RFILE\" \"$FORK\"" "$CALLS"
+refute "...never main's moved-on tip"              "\"$MAINTIP\"" "$CALLS"
+refute "no ref prompt was opened"                  "cockpit-custom-prompt" "$CALLS"
+check  "a terminal opened at the run's worktree"   "--cwd $PRUN --" "$CALLS"
+check  "the footer reads Custom: <fork point>"     "\"diffMode\":\"custom\",\"customRef\":\"$FORK\"" "$T/state/terminals.json"
+check  "...labelled with the run's slug"           '"agent":"slug"' "$T/state/terminals.json"
+check  "reviewable is false with a pir key"        '"reviewable":false' "$T/state/terminals.json"
+check  "the switch is dim while pir is in a run"   '"switchable":false' "$T/state/terminals.json"
+refute "the fork point was never persisted"        "$RK" "$T/state/custom-refs.json"
+R0="$(countof "refusing fleet-claude: pir is not at its list" "$T/daemon.log")"
+echo fleet-claude >> "$T/state/cmd"
+nap 1.5
+grew   "Claude Agents is refused inside a run"     "refusing fleet-claude: pir is not at its list" "$T/daemon.log" "$R0"
+in_slot "...and pir keeps the slot"                "$PIRP2"
+
+echo
+echo "== 16b. main moved on after the fork: its new commit is not in the diff =="
+# What revdiff shows for <ref> -> working tree is git's diff against that ref.
+same   "the fork point is the diff's base, main's commit absent" \
+       "$(git -C "$PRUN" diff --name-only "$FORK" | tr '\n' ' ')" "runwork.txt "
+refute "...where main's tip would have shown it reversed" "$MAINTIP" "$T/state/terminals.json"
+
+echo
+echo "== 16c. a revdiff flush on a pir key: nothing typed, logged, file kept =="
+: > "$CALLS"
+N0="$(countof "review not sent: pir has no input box" "$T/daemon.log")"
+printf '## runwork.txt:1 (+)\nPIR REVIEW STAYS\n' > "$RFILE"
+nap 1.5
+grew   "the inert review was logged"               "review not sent: pir has no input box" "$T/daemon.log" "$N0"
+refute "nothing was typed into any pane"           "send-text" "$CALLS"
+check  "the review file was left as flushed"       "PIR REVIEW STAYS" "$RFILE"
+refute "revdiff was not relaunched to reset it"    "relaunched diff pane $RDIFF for $RK" "$T/daemon.log"
+
+echo
+echo "== 16d. ⌥[ with the diff focused cycles the pir key's own mode =="
+: > "$CALLS"
+echo "$RDIFF" > "$ACTIVE"
+echo prev >> "$T/state/cmd"
+nap 2
+: > "$ACTIVE"
+check  "the run key relaunched in lastcommit"      "relaunched diff pane $RDIFF for $RK in lastcommit mode" "$T/daemon.log"
+check  "the footer shows it"                       '"diffMode":"lastcommit"' "$T/state/terminals.json"
+
+echo
+echo "== 16e. pir reports a WORKER: its own key and folder, at uncommitted =="
+: > "$CALLS"
+pirwrite worker "$PRUN" "$PWORK"
+nap 3
+check  "the worker key was entered"                "pir: enter $WK → $PWORK" "$T/daemon.log"
+WDIFF="$(pane_key diff)"; WTERM="$(pane_key shell)"
+in_slot "its own diff pane holds the slot"         "$WDIFF"
+parked "the run's diff pane is parked"             "$RDIFF"
+parked "...and so is the run's terminal"           "$RTERM"
+check  "revdiff uncommitted in the worker's folder" "cd \"$PWORK\" && revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-$WK.md\" HEAD" "$CALLS"
+check  "the footer: uncommitted, the worker's label" '"agent":"slug / T01","diffMode":"uncommitted"' "$T/state/terminals.json"
+check  "still not reviewable"                      '"reviewable":false' "$T/state/terminals.json"
+check  "still not switchable"                      '"switchable":false' "$T/state/terminals.json"
+
+echo
+echo "== 16f. back to the RUN: its parked panes return untouched =="
+: > "$CALLS"
+RL0="$(countof "relaunched diff pane $RDIFF" "$T/daemon.log")"
+pirwrite run "$PRUN"
+nap 3
+in_slot "the run's diff pane is back"              "$RDIFF"
+in_slot "...and its terminal"                      "$RTERM"
+parked "the worker's diff pane is parked"          "$WDIFF"
+same   "the run's revdiff was not relaunched"      "$(countof "relaunched diff pane $RDIFF" "$T/daemon.log")" "$RL0"
+refute "nothing was typed into it"                 "send-text --pane-id $RDIFF " "$CALLS"
+check  "its own mode came back with it"            '"diffMode":"lastcommit"' "$T/state/terminals.json"
+
+echo
+echo "== 16g. back to the LIST: the welcome pane and the repo terminals =="
+: > "$CALLS"
+pirwrite list
+nap 3
+check  "the run key was left"                      "exit $RK → fleet list" "$T/daemon.log"
+check  "the footer is back on the repo"            '"agent":"repo"' "$T/state/terminals.json"
+check  "...reviewable again"                       '"reviewable":true' "$T/state/terminals.json"
+check  "...and switchable"                         '"switchable":true' "$T/state/terminals.json"
+parked "the run's diff pane is parked, not killed" "$RDIFF"
+in_slot "the repo diff pane holds the slot"        10
+in_slot "pir still holds the fleet slot"           "$PIRP2"
+
+echo
+echo "== 16h. a pir key's diff pane killed while shown is re-attached, no file write =="
+pirwrite run "$PRUN"
+nap 3
+in_slot "the run is shown again"                   "$RDIFF"
+H0="$(countof "pir: enter $RK" "$T/daemon.log")"
+O0="$(countof "opened diff pane" "$T/daemon.log")"
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+waitfor "diff pane for $RK is gone; rebuilding" "$T/daemon.log" 6
+waitmore "pir: enter $RK" "$T/daemon.log" "$H0" 6
+grew   "the heal re-ran pir's state"               "pir: enter $RK" "$T/daemon.log" "$H0"
+# "pir: enter" is logged before showDiff splits the new pane, so wait for the open
+# itself before reading its id (read too early, pane_key returned the killed one).
+waitmore "opened diff pane" "$T/daemon.log" "$O0" 6
+nap 0.5
+RDIFF="$(pane_key diff)"
+in_slot "a fresh diff pane holds the slot"         "$RDIFF"
+check  "...opened at the run's folder"            "opened diff pane $RDIFF for slug at $PRUN" "$T/daemon.log"
+
+echo
+echo "== 16i. the same key at a new folder: revdiff relaunched there, watches moved =="
+git -C "$PREPO" worktree add -q -b pir/slug-renamed "$PRUN2" pir/slug
+: > "$CALLS"
+nap 2   # past the relaunch cooldown of the heal above
+pirwrite run "$PRUN2"
+nap 3
+check  "the move was followed"                     "agent $RK moved worktree $PRUN → $PRUN2" "$T/daemon.log"
+check  "revdiff relaunched in the new folder"      "cd \"$PRUN2\" && revdiff" "$CALLS"
+in_slot "the same diff pane still holds the slot"  "$RDIFF"
+
+echo
+echo "== 16i2. the SHOWN worker's folder removed, pir writes nothing: the run is shown =="
+# pir removes a task's worktree after merging it and leaves the worker's
+# conversation open; its recorded cwd has not changed, so it writes no new report.
+# Found by the T06 drill on a real mux: revdiff sat on a chdir error until pir moved.
+pirwrite worker "$PRUN2" "$PWORK"
+nap 3
+in_slot "the worker is shown"                      "$WDIFF"
+E1="$(countof "pir: enter $RK" "$T/daemon.log")"
+git -C "$PREPO" worktree remove --force "$PWORK"
+waitfor "pir: the folder of $WK is gone; re-reading pir's report" "$T/daemon.log" 6
+waitmore "pir: enter $RK" "$T/daemon.log" "$E1" 6
+grew   "the run was entered without a pir write"   "pir: enter $RK" "$T/daemon.log" "$E1"
+nap 1
+in_slot "the run's diff pane holds the slot"       "$RDIFF"
+check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
+same   "the vanished folder was logged once"       "$(countof "the folder of $WK is gone" "$T/daemon.log")" "1"
+
+echo
+echo "== 16j. worker folder gone: the run is shown, and the worker key is reaped =="
+[ ! -d "$PWORK" ] || git -C "$PREPO" worktree remove --force "$PWORK"
+E0="$(countof "pir: enter $WK" "$T/daemon.log")"
+pirwrite worker "$PRUN2" "$PWORK"
+nap 3
+same   "the worker was not entered"                "$(countof "pir: enter $WK" "$T/daemon.log")" "$E0"
+in_slot "the run stays shown"                      "$RDIFF"
+check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
+waitfor "pir folder $PWORK is gone" "$T/daemon.log" 6
+gone   "the worker's diff pane was reaped"         "$WDIFF"
+gone   "...and its terminal"                       "$WTERM"
+
+echo
+echo "== 16k. the shown run's folder goes too: the list, and only then is the key reaped =="
+# The reaper never takes the SHOWN key. What moves the cockpit off it is the re-read
+# of pir's report when the attached folder vanishes (T06, section 16i2): with both
+# folders gone decidePir answers the list (DESIGN 2.5), and the key, no longer shown,
+# is reaped.
+rm -rf "$PRUN2"
+waitfor "pir: the folder of $RK is gone; re-reading pir's report" "$T/daemon.log" 6
+waitfor "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log" 6
+check  "both gone: the list, and why"              "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log"
+nap 1
+check  "the repo is shown"                         '"agent":"repo"' "$T/state/terminals.json"
+check  "...not switchable: pir is not at its list" '"switchable":false' "$T/state/terminals.json"
+waitfor "reaped diff pane $RDIFF — pir folder $PRUN2 is gone" "$T/daemon.log" 6
+gone   "once not shown, the run key was reaped"    "$RDIFF"
+gone   "...terminal and all"                       "$RTERM"
+git -C "$PREPO" worktree prune
+
+echo
+echo "== 16l. a folder that is not a git work tree reads as the list =="
+mkdir -p "$T/notgit"
+pirwrite run "$T/notgit"
+nap 3
+check  "logged"                                    "pir: run folder is not a git work tree: $T/notgit" "$T/daemon.log"
+check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
+
+echo
+echo "== 16m. a dead pid, a corrupt file and no file all read as the list =="
+sleep 0 & DEADPID=$!; wait "$DEADPID"
+for how in dead corrupt missing; do
+  pirwrite run "$PRUN"
+  nap 3
+  X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
+  case "$how" in
+    dead)    pirwrite run "$PRUN" "" "$DEADPID" ;;
+    corrupt) printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json" ;;
+    missing) rm -f "$T/state/pir-dashboard.json" ;;
+  esac
+  nap 3
+  grew "$how: the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
+  check "$how: switchable again"                  '"switchable":true' "$T/state/terminals.json"
+done
+
+echo
+echo "== 16n. a stored ref wins over the fork point; one that stopped resolving is uncommitted =="
+git -C "$PREPO" branch tmpbase "$FORK"
+pirwrite run "$PRUN"
+nap 3
+RDIFF="$(pane_key diff)"
+echo diff-custom >> "$T/state/cmd"
+nap 2
+check  "the prompt is pre-filled with the fork point" "opened custom-range prompt for $RK (prefill \"$FORK\")" "$T/daemon.log"
+printf '{"jobId":"%s","ref":"tmpbase"}' "$RK" > "$T/state/custom-ref-pending"
+echo custom-ok >> "$T/state/cmd"
+nap 2
+check  "the person's ref is stored for the key"    "\"$RK\":\"tmpbase\"" "$T/state/custom-refs.json"
+pirwrite list; nap 3
+# A parked pane that died is spawned afresh, so the launch line shows the ref used.
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "the stored ref is used"                    "-o \"$RFILE\" \"tmpbase\"" "$CALLS"
+RDIFF="$(pane_key diff)"
+pirwrite list; nap 3
+git -C "$PREPO" branch -D -q tmpbase
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "a stale stored ref is logged"              "$RK starts at uncommitted: stored ref does not resolve: tmpbase" "$T/daemon.log"
+check  "...and the key opens uncommitted"          "-o \"$RFILE\" HEAD" "$CALLS"
+refute "...never the prompt"                       "cockpit-custom-prompt" "$CALLS"
+pirwrite list; nap 3
+
+echo
+echo "== 16o. no main to fork from: uncommitted, logged =="
+NOMAIN="$T/nomain"; mkdir -p "$NOMAIN"; git init -q -b trunk "$NOMAIN"
+git -C "$NOMAIN" config user.email t@t; git -C "$NOMAIN" config user.name t
+git -C "$NOMAIN" commit -q --allow-empty -m base
+printf '{"version":1,"pid":%s,"view":"run","run":{"key":"proj__nomain","slug":"nomain","cwd":"%s"},"worker":null}\n' "$$" "$NOMAIN" \
+  > "$T/state/pir-dashboard.json.tmp" && mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+: > "$CALLS"
+nap 3
+check  "the failed merge-base is logged"           "pir.proj__nomain starts at uncommitted: no fork point from main (git merge-base failed)" "$T/daemon.log"
+check  "...and the key opens uncommitted"          "review-pir.proj__nomain.md\" HEAD" "$CALLS"
+check  "the footer agrees"                         '"diffMode":"uncommitted"' "$T/state/terminals.json"
+pirwrite list; nap 3
+
+echo
+echo "== 16p. while claude is shown, pir's file does nothing =="
+echo fleet-claude >> "$T/state/cmd"
+nap 2
+in_slot "claude is back in the fleet slot"         20
+E0="$(countof "pir: enter" "$T/daemon.log")"
+pirwrite run "$PRUN"
+nap 3
+same   "nothing was entered"                       "$(countof "pir: enter" "$T/daemon.log")" "$E0"
+check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
+rm -f "$T/state/pir-dashboard.json"
+
+echo
+echo "== 15m. no pir on PATH: nothing to switch to =="
+A7="$T/nopir"; S7="$A7/state"
+mkdir -p "$A7/bin" "$S7"
+for b in wezterm ps claude broot; do ln -s "$T/bin/$b" "$A7/bin/$b"; done
+# The suite's own PATH has the pir stub, and this machine may have a real one: keep
+# only directories with no `pir` in them.
+NOPIR_PATH="$A7/bin"
+IFS=: read -ra _pdirs <<< "$PATH"
+for d in "${_pdirs[@]}"; do
+  [ -n "$d" ] && [ "$d" != "$T/bin" ] && [ ! -x "$d/pir" ] && NOPIR_PATH="$NOPIR_PATH:$d"
+done
+NODE_BIN="$(command -v node)"
+echo '{"diff":10,"fleet":20,"shell":30,"foot":9,"repo":"'"$WT"'"}' > "$S7/panes.json"
+: > "$S7/fleet.log"; : > "$S7/cmd"
+printf '9 0 sh\n10 0 sh\n20 0 sh\n30 0 sh\n' > "$A7/panestate"
+echo 31 > "$A7/nextpane"; echo 1 > "$A7/nexttab"
+echo list > "$A7/fleetstate"
+for f in editing titlelag active panecwd psbusy psfg calls.log; do : > "$A7/$f"; done
+PATH="$NOPIR_PATH" HOME="$T/home" SHELL=/bin/zsh \
+  COCKPIT_DIR="$S7" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  AGENDA_ORIGIN="http://127.0.0.1:9" BITBUCKET_ORIGIN="http://127.0.0.1:9" \
+  CALLS="$A7/calls.log" FLEETSTATE="$A7/fleetstate" PANESTATE="$A7/panestate" \
+  NEXTPANE="$A7/nextpane" NEXTTAB="$A7/nexttab" EDITING="$A7/editing" \
+  TITLELAG="$A7/titlelag" ACTIVE="$A7/active" PANECWD="$A7/panecwd" \
+  PSBUSY="$A7/psbusy" PSFG="$A7/psfg" AGENTS_JSON="$AGENTS_JSON" \
+  "$NODE_BIN" "$ROOT/bin/cockpitd.mjs" > "$A7/daemon.log" 2>&1 &
+D7PID=$!
+sleep 2
+check  "the footer is told pir is unavailable"    '"available":false' "$S7/terminals.json"
+echo fleet-pir >> "$S7/cmd"
+sleep 1
+check  "PIR is refused, and says why"             "refusing fleet-pir: pir is not on the daemon's PATH" "$A7/daemon.log"
+refute "...spawning nothing"                      "cockpit-pir.sh" "$A7/calls.log"
+check  "...and claude stays shown"                '"program":"claude"' "$S7/terminals.json"
+kill $(pgrep -P "$D7PID" 2>/dev/null) "$D7PID" 2>/dev/null; D7PID=""
+
+echo
+echo "== 15n. cockpit-pir.sh relaunches pir, and stops after five fast exits =="
+# Closed stdin: an EOF must not count as the Enter it waits for, or a pane with no
+# reader would go straight back to spinning.
+PL="$T/pirloop"; mkdir -p "$PL"; : > "$PL/runs"
+cat > "$PL/pir" <<'PIRSTUB'
+#!/bin/sh
+printf '%s\n' "$PIR_DASHBOARD_STATE" >> "$PIRRUNS"
+exit 3
+PIRSTUB
+chmod +x "$PL/pir"
+PIRRUNS="$PL/runs" bash "$ROOT/bin/cockpit-pir.sh" "$PL/pir" "$PL/state.json" </dev/null > "$PL/out" 2>&1 &
+PLPID=$!
+sleep 3
+same   "five runs, then it stopped relaunching"   "$(wc -l < "$PL/runs" | tr -d ' ')" "5"
+same   "...each handed the state file"            "$(grep -cFx "$PL/state.json" "$PL/runs")" "5"
+check  "it said why"                              "pir exited immediately 5 times in a row (last exit status 3)" "$PL/out"
+check  "...and what it is waiting for"            "until you press Enter" "$PL/out"
+same   "it is still alive, waiting"               "$(kill -0 "$PLPID" 2>/dev/null && echo yes || echo no)" "yes"
+pkill -P "$PLPID" 2>/dev/null; kill "$PLPID" 2>/dev/null; wait "$PLPID" 2>/dev/null
+
+echo
+echo "== 15o. a layout rebuild deletes pir-dashboard.json =="
+# Run for real, with every outside effect a function: bash resolves functions before
+# PATH, so no real wezterm, pkill, daemon or claude agents is reached. pkill and
+# nohup are also stubbed ON PATH, because a real `pkill -f cockpitd.mjs` would take
+# out this suite's daemon and the live cockpit's.
+LH="$T/layouthome"; LB="$T/layoutbin"
+mkdir -p "$LH/.claude/cockpit" "$LB"
+echo '{"version":1,"view":"run"}' > "$LH/.claude/cockpit/pir-dashboard.json"
+: > "$T/layout-calls"
+for b in pkill nohup; do printf '#!/bin/sh\necho "PATH %s $*" >> "$LCALLS"\n' "$b" > "$LB/$b"; chmod +x "$LB/$b"; done
+cat > "$T/layout-run.sh" <<'RUNNER'
+#!/usr/bin/env bash
+wezterm() { echo "wezterm $*" >> "$LCALLS"; [ "${2:-}" = split-pane ] && echo 7; return 0; }
+pkill()   { echo "pkill $*" >> "$LCALLS"; return 0; }
+nohup()   { echo "nohup $*" >> "$LCALLS"; return 0; }
+claude()  { return 0; }
+revdiff() { :; }; micro() { :; }; broot() { :; }
+export -f wezterm pkill nohup claude revdiff micro broot
+exec "$@"
+RUNNER
+chmod +x "$T/layout-run.sh"
+( LCALLS="$T/layout-calls" HOME="$LH" WEZTERM_PANE=1 SHELL=/usr/bin/true PATH="$LB:$PATH" \
+  "$T/layout-run.sh" "$ROOT/bin/cockpit-layout.sh" "$WT" </dev/null >/dev/null 2>"$T/layout.err" ) &
+LPID=$!; i=0
+while kill -0 "$LPID" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+kill -0 "$LPID" 2>/dev/null && kill -9 "$LPID" 2>/dev/null
+wait "$LPID" 2>/dev/null
+same   "the stale pir-dashboard.json is gone"     "$([ -e "$LH/.claude/cockpit/pir-dashboard.json" ] && echo kept || echo gone)" "gone"
+check  "...in a rebuild that got as far as the daemon" "nohup node" "$T/layout-calls"
+check  "the harness intercepted pkill"            "pkill -f cockpitd.mjs" "$T/layout-calls"
+
+echo
 echo "== 12. the footer draws -- and clicks -- a fourth label =="
 # The strip renderer is a separate process reading terminals.json, so this section
 # runs it directly rather than through the daemon. It never exits on its own (it
@@ -2107,6 +2676,164 @@ NW=$(node -e "$LEN" "$RAW")
 if [ "${NW:-0}" -le 140 ]; then okline "the narrow footer stays within the column count ($NW <= 140)"
 else echo "  FAIL the narrow footer wrapped: width $NW > 140 columns"; fail=1; fi
 rm -f "$SD/usage-cache.json"
+
+echo "== 12c. the footer's program switch: Claude Agents | PIR (pir-pane T02) =="
+# The footer reads a `fleet` block from terminals.json (pir-pane DESIGN 2.1, 2.2,
+# 3.5) and draws `Claude Agents | PIR` leftmost; a click on the label NOT shown,
+# while switchable, appends fleet-claude / fleet-pir. The daemon starts writing the
+# block in T03, so here terminals.json is hand-written, as in sections 12 and 12b.
+# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
+# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
+ffooter() {
+  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
+      "$1" "$2" > "$SD/terminals.json"
+  ( COCKPIT_DIR="$SD" COLUMNS="${3:-}" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
+SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
+FL_CLAUDE=',"fleet":{"program":"claude","switchable":true,"available":true}'
+FL_PIR=',"fleet":{"program":"pir","switchable":true,"available":true}'
+FL_LOCKED=',"fleet":{"program":"claude","switchable":false,"available":true}'
+FL_GONE=',"fleet":{"program":"claude","switchable":true,"available":false}'
+rm -f "$SD/usage-cache.json"
+
+# No fleet block: the frame is byte-for-byte the footer from before this task. The
+# hashes are of the pre-T02 renderer's output for exactly these two states (agent
+# attached, and the fleet list), captured before the change -- so "today" is pinned
+# to a real frame, not to whatever the renderer happens to draw now.
+ffooter "test agent" ""
+same "no fleet block: attached footer is byte-identical to pre-T02" \
+     "$(node -e "$SHA" "$RAW")" "6bd86012ba6cae631da6c470ae4c7fd122e65146adc8cf4c33d30d81d65abd48"
+ffooter "repo" ""
+same "no fleet block: fleet-list footer is byte-identical to pre-T02" \
+     "$(node -e "$SHA" "$RAW")" "4d6c5ffb099b94af8754ff325c24b256a5bbfd6e85f7223ed8b4fa0ebf21e08f"
+ffooter "test agent" "$FL_GONE"
+same "available:false draws no segment (the pre-T02 frame again)" \
+     "$(node -e "$SHA" "$RAW")" "6bd86012ba6cae631da6c470ae4c7fd122e65146adc8cf4c33d30d81d65abd48"
+refute "...and no PIR label"                          "PIR" "$PLAIN"
+
+# The O hint (DESIGN 2.7): only an explicit reviewable:false drops it.
+ffooter "test agent" ',"reviewable":false'
+refute "reviewable:false drops the O send→claude hint" "O send→claude" "$PLAIN"
+check  "...and keeps the other primary keys"          "⌥w close  ·  ⌥←↑↓→ move" "$PLAIN"
+ffooter "test agent" ',"reviewable":true'
+check  "reviewable:true keeps the O hint"             "O send→claude" "$PLAIN"
+
+# Drawn: leftmost, the shown program reversed, the other plain dim.
+ffooter "test agent" "$FL_CLAUDE"
+check  "the segment reads Claude Agents | PIR"        "Claude Agents  | PIR" "$PLAIN"
+same   "...leftmost, ahead of the agent name" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+check  "...Claude Agents reversed while claude is shown" "$(printf '\033[7m Claude Agents ')" "$RAW"
+check  "...PIR drawn dim"                             "$(printf '\033[2mPIR\033[0m')" "$RAW"
+check  "...the agent name still follows"              "PIR    test agent · 1 terminal" "$PLAIN"
+ffooter "test agent" "$FL_PIR"
+check  "PIR reversed while pir is shown"              "$(printf '\033[7m PIR ')" "$RAW"
+check  "...Claude Agents drawn dim"                   "$(printf '\033[2mClaude Agents\033[0m')" "$RAW"
+ffooter "test agent" "$FL_LOCKED"
+check  "switchable:false dims the shown label too (reverse kept)" "$(printf '\033[2;7m Claude Agents ')" "$RAW"
+refute "...no bright reverse label left"              "$(printf '\033[7m Claude Agents ')" "$RAW"
+ffooter "repo" "$FL_CLAUDE"
+same   "the segment is drawn at the fleet list too, still leftmost" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+
+# Narrow window with usage (the 12b width): one row, the switch kept, and the
+# existing parts trimmed in their existing order -- whatever is kept is one of the
+# four levels (all keys+name, primary+name, name, nothing), never a mix. The switch
+# pushes the untrimmable rest to ~145 columns, so a fifth level drops the dim
+# `Diff mode:` caption as well (the person's choice, 2026-09-27).
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"
+ffooter "test agent" "$FL_CLAUDE" 140
+check  "narrow: the switch is kept"                   "Claude Agents  | PIR" "$PLAIN"
+check  "narrow: the usage readout is kept"            "1d " "$PLAIN"
+check  "narrow: the diff labels are kept"             "Browse" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 140 ]; then okline "narrow: the switch footer stays one row ($NW <= 140)"
+else echo "  FAIL the switch footer wrapped: width $NW > 140 columns"; fail=1; fi
+has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
+LV="$(has 'drag copy')$(has '⌥t new')$(has 'test agent')"
+case "$LV" in 111|011|001|000) okline "narrow: trimming stays in its order ($LV)";;
+  *) echo "  FAIL narrow trim is out of order: sec/pri/name = $LV"; fail=1;; esac
+refute "narrow: the Diff mode: caption gives way"     "Diff mode:" "$PLAIN"
+# Without the switch the 140 footer still fits at level four: the caption stays,
+# so a daemon that writes no fleet block trims exactly as before.
+ffooter "test agent" "" 140
+check  "narrow, no switch: the caption is kept"       "Diff mode:  Uncommitted Changes" "$PLAIN"
+# ...and below 140, where level four already overflows, the fifth level must still
+# not engage without the switch: the pre-T02 footer kept its caption at any width.
+ffooter "test agent" "" 100
+check  "narrower (100), no switch: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
+ffooter "test agent" "$FL_GONE" 100
+check  "narrower (100), available:false: the caption is still kept" "Diff mode:  Uncommitted Changes" "$PLAIN"
+# At the live window's width nothing is trimmed, switch or not.
+ffooter "test agent" "$FL_CLAUDE" 319
+check  "wide (319): the full legend is kept with the switch" "drag copy" "$PLAIN"
+check  "wide (319): ...and the caption"               "Diff mode:" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 319 ]; then okline "wide: the switch footer stays one row ($NW <= 319)"
+else echo "  FAIL the wide switch footer wrapped: width $NW > 319 columns"; fail=1; fi
+# Below level five (pir-pane T06): at 120 columns level five measured 133 wide, and a
+# wrapped one-row pane shows the TAIL, so the switch vanished. The usage readout now
+# loses its reset times, then the line is cut at the edge -- never wrapped (the
+# person's choice, 2026-09-27). Switch-only, like level five.
+ffooter "test agent" "$FL_CLAUDE" 140
+check  "140: reset times kept while level five fits"  "↺" "$PLAIN"
+ffooter "test agent" "$FL_CLAUDE" 120
+check  "120: the switch is kept"                      "Claude Agents  | PIR" "$PLAIN"
+check  "120: the diff labels are kept"                "Browse" "$PLAIN"
+check  "120: usage as percentages only"               "5h 80% / 1d " "$PLAIN"
+refute "120: ...no reset times"                       "↺" "$PLAIN"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 120 ]; then okline "120: the switch footer stays one row ($NW <= 120)"
+else echo "  FAIL the 120 switch footer wrapped: width $NW > 120 columns"; fail=1; fi
+ffooter "test agent" "$FL_CLAUDE" 80
+same   "80: cut, not wrapped -- the switch still leads" \
+       "$(node -e "$STRIP_ANSI" "$RAW" "Claude Agents")" "3"
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 80 ]; then okline "80: the line is cut at the edge ($NW <= 80)"
+else echo "  FAIL the 80 switch footer wrapped: width $NW > 80 columns"; fail=1; fi
+ffooter "test agent" "" 100
+check  "100, no switch: reset times kept (no new level without the switch)" "↺" "$PLAIN"
+rm -f "$SD/usage-cache.json"
+
+# The click path, under script(1) exactly like section 12's click().
+if command -v script >/dev/null; then
+fclick() {  # fclick <label> [cols]: left-press that label in the current frame, echo the verb
+  local col p i=0
+  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
+  : > "$SD/cmd"
+  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
+  | ( COCKPIT_DIR="$SD" COLUMNS="${2:-}" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
+  p=$!
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  wait "$p" 2>/dev/null
+  pkill -f "$CLICKER" 2>/dev/null
+  tr -d '\n' < "$SD/cmd"
+}
+cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it
+# Both sizes the task names: 319 (the live window) and the 140 narrow one, the
+# latter with usage present so the trim is in play.
+for W in 319 140; do
+  if [ "$W" = 140 ]; then useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"; fi
+  ffooter "test agent" "$FL_CLAUDE" "$W"
+  same "[$W] claude shown: clicking PIR appends fleet-pir"           "$(fclick PIR "$W")" "fleet-pir"
+  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] the diff labels still land behind the switch"           "$(fclick Browse "$W")" "diff-browse"
+  same "[$W] ...and Uncommitted Changes too"                         "$(fclick 'Uncommitted Changes' "$W")" "diff-uncommitted"
+  ffooter "test agent" "$FL_PIR" "$W"
+  same "[$W] pir shown: clicking Claude Agents appends fleet-claude" "$(fclick 'Claude Agents' "$W")" "fleet-claude"
+  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W")" ""
+  ffooter "test agent" "$FL_LOCKED" "$W"
+  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W")" ""
+  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W")" ""
+  ffooter "repo" "$FL_CLAUDE" "$W"
+  same "[$W] at the fleet list the switch still clicks (fleet-pir)"  "$(fclick PIR "$W")" "fleet-pir"
+  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W")" ""
+done
+rm -f "$SD/usage-cache.json"
+fi
 
 echo "== 13. the agenda: the daemon keeps the event cache current =="
 # T07. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.5), so the refresh is
