@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 6 fixed, 1 decided with the user
 
-**Status:** T01 built, awaiting review.
+**Status:** T01 done.
 **Last updated:** 2026-09-27
-**Next `pir-work` will:** review T01. Hold T02
+**Next `pir-work` will:** implement T02 or T04. Hold T02
 and T03 while another open run edits `spikes/cockpit-test/run.sh`.
 
 ## Tasks
@@ -22,13 +22,13 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | test-daemons-lib | — | 🔍 | Helpers plus daemon-leak-test, 29 checks, all suites green. Deviations: `cockpitd.mjs` must be in the process's own command, not merely its env (stricter than §2.7, so a shell whose env mentions it never matches); `daemon_stop` walks descendants recursively; zombies count as gone. |
+| T01 | test-daemons-lib | — | ✅ | Reviewed: one fix commit. `local -A` broke daemon_pids under /bin/bash 3.2 (reproduced), now a pid string with a check; ancestor exclusion was untested, now checked; fence also catches `pkill -lf`. Probed by mutating the helpers, each mutation goes red. Deviations (command-line match, recursive tree, zombies gone) accepted. 31 checks. |
 | T02 | cockpit-test-adopt | T01 | ⬜ | |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
 | T04 | other-suites-tripwire | T01 | ⬜ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
