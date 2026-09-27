@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🔄 | T02: the switch pushed the 140-col footer to 145. The person chose a fifth trim level dropping the `Diff mode:` caption (not wrapping, not shorter labels). |
 | 2026-09-27 | 📌 | T03 review, by reading: a pir pane that dies while shown leaves `fleet-claude` splitting into a dead pane id, so claude agents is unreachable until a rebuild. Only closing the pane triggers it; left alone. |
 | 2026-09-27 | 🐞 | cockpit-test sections 13 and 13b leave two `cockpitd` daemons (agenda2, agenda3) running after `ALL PASS`: `kill $D2PID`/`$D3PID` hit the wrapper subshell, the stopbb problem of section 14. Found and killed by hand in T03. |
 | 2026-09-27 | 📌 | T00 swap in, wezterm 20240203: `split-pane --left --percent 50 --pane-id <fleet> --move-pane-id <pir>` halves the slot (29x22 each at 120x40), then `move-pane-to-new-tab <fleet>`: pir 59x22, sh 47x22, strip 12x22, diff 120x15 unchanged. 80x24: 39x12, 31, 8. |
