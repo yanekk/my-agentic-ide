@@ -9,6 +9,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🐞 | T05 review: cockpitd calls the wezterm stub (`list`, first `get-text`) before `refreshAgenda("start")` reads state, so "stub was called" is not "booted". D3 now waits for a second fleet poll. Other daemon-boot polls should use the same signal. |
+| 2026-09-27 | 📌 | T05 TIMINGS before→after (load 3–26): 12 20.0→1.6, 12b 5.9→1.2, 12c 110.5→10.7, 13 32.4→8.9, 13b 16.2→3.4; footer+agenda 185s→26s. Full run 402s, 767 checks. Old clicks waited 4s each for script(1) to exit. |
+| 2026-09-27 | 📌 | T05 stability: `ONLY=13c` and `ONLY=12b` 5× serial, and 13c/12b/12c 3 rounds of 4 concurrent, all passed at load 6–14. Mutants (stale 300ms, in-flight guard removed, stale w3 on return, a live press expected empty) all failed. |
 | 2026-09-27 | 📌 | T06 review: 14's in-flight window is a fixed 1.5s but `BB_TICK_MS` grows with SPEED; at 1.0 (800ms) about one tick lands behind the held pass, at 2.0 none, making the check vacuous. Mutant still caught at 1.0; left. |
 | 2026-09-27 | 📌 | T06 dashboard chain, `TIMINGS=1`, load ~3: before 14 33.5s, 14d 24.5s, 14b 10.2s, total 68.4s; after 9.5, 3.9, 2.1, 16.0s. 85 checks unchanged. `ONLY=14c` 5 serial and 3×4 concurrent runs passed, load up to 11. |
 | 2026-09-27 | 📌 | bitbucket `refreshPRs` logs each repo, then writes the cache once at pass end. A poll on the log line can read the previous pass's cache; T06 polls the cache (`bqtrue`) or waits for a second log line. |
