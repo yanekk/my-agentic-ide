@@ -25,7 +25,7 @@ done · ⛔ blocked, needs a human.
 | T01 | test-daemons-lib | — | ✅ | |
 | T02 | cockpit-test-adopt | T01 | ⬜ | |
 | T03 | owner-backstop | T01, T02 | ⬜ | |
-| T04 | other-suites-tripwire | T01 | ⬜ | |
+| T04 | other-suites-tripwire | T01 | ✅ | |
 | T05 | leak-free-check | T03, T04 | ⬜ | |
 
 **Review queue:** *(empty)*
