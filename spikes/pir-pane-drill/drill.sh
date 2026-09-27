@@ -12,8 +12,8 @@
 # Seatbelts (pir-pane DESIGN 5.2): a private wezterm-mux-server with its own socket,
 # pid file and config; HOME, COCKPIT_DIR and PIR_HOME in a scratch dir; PATH without
 # ~/.local/bin, so neither the real claude nor the real pir can be reached; and a
-# `pkill` shim, because the layout script's `pkill -f cockpitd.mjs` would otherwise
-# kill the LIVE cockpit's daemon. Teardown kills the mux by its pid file and config
+# `pkill` shim, because the layout script kills cockpitd.mjs by name (pkill -f) and
+# would otherwise kill the LIVE cockpit's daemon. Teardown kills the mux by its pid file and config
 # path, kills the scratch daemon, and confirms both are gone.
 #
 # Prints one line per check and ends with `DRILL PASS (N checks)` or
@@ -169,7 +169,7 @@ done
 PIR
   cat > "$T/bin/pkill" <<SHIM
 #!/bin/sh
-# The layout script's pkill -f cockpitd.mjs would kill the LIVE cockpit's daemon.
+# The layout script kills cockpitd.mjs by name, which would take the LIVE cockpit's daemon.
 echo "pkill shim: ignored \$*" >> "$T/pkill.log"
 exit 1
 SHIM

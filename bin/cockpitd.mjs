@@ -3810,7 +3810,37 @@ tail(CMD_FILE, (line) => {
     diffModeCommand(verb);
   } else terminalCommand(verb);
 });
-setInterval(reconcile, POLL_MS);
+// The owner backstop (plans/test-daemon-leaks DESIGN 2.4). TEST-ONLY: the real
+// cockpit never sets COCKPIT_OWNER_PID (cockpit-layout.sh does not), so there it
+// is inert. A suite sets it to its own shell's pid, and when that shell is gone
+// -- including SIGKILLed, where no EXIT trap runs to stop us -- this daemon ends
+// itself rather than polling for ever as an orphan of launchd. Checked from the
+// reconcile interval but BEFORE reconcile(), never behind its `reconciling`
+// guard: a reconcile stuck on a slow `claude agents` must not stall the backstop.
+const OWNER_RAW = process.env.COCKPIT_OWNER_PID ?? "";
+const OWNER_PID = /^[1-9][0-9]*$/.test(OWNER_RAW) ? Number(OWNER_RAW) : null;
+// A malformed seam is logged once and ignored: it must never be able to stop a daemon.
+if (OWNER_RAW !== "" && OWNER_PID === null) {
+  log(`COCKPIT_OWNER_PID ${JSON.stringify(OWNER_RAW)} is not a positive integer -- ignored`);
+}
+let ownerMisses = 0;
+function checkOwner() {
+  if (OWNER_PID === null) return;
+  try {
+    process.kill(OWNER_PID, 0);
+    ownerMisses = 0;
+  } catch (e) {
+    // EPERM: the process exists under another user -- alive. Only ESRCH is a miss.
+    if (e.code !== "ESRCH") { ownerMisses = 0; return; }
+    // Two consecutive misses, like every other liveness rule here: one bad read
+    // must not end a process.
+    if (++ownerMisses >= 2) {
+      log(`owner ${OWNER_PID} gone, exiting`);
+      shutdown();
+    }
+  }
+}
+setInterval(() => { checkOwner(); reconcile(); }, POLL_MS);
 setInterval(reapAgents, REAP_MS);
 setInterval(healMissingPanes, REAP_MS);
 // Faster than the reap poll: a quit revdiff should come back promptly, not after

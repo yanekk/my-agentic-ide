@@ -18,7 +18,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+. "$ROOT/spikes/lib/test-daemons.sh"
+trap 'daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 REAL_SETTINGS="$HOME/.claude/settings.json"
 settings_fingerprint() {
@@ -115,5 +116,6 @@ same "...and reports it under --check first" \
      "$(grep -cE '\$NAMING" --check' "$ROOT/bin/install.sh")" "1"
 
 echo
+daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suites counted above)"; else echo "FAILURES"; fi
 exit "$fail"

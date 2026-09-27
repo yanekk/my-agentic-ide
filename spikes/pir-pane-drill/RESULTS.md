@@ -19,8 +19,8 @@ Stand-ins: a fake `claude` (a fleet list with the list marker; `a` attaches "alp
 `worker`, `again`, `quit` removes the file and exits 0, `crash` exits 3 leaving it). A
 usage reading is seeded, as the person's personal sessions leave one.
 
-A `pkill` shim is on the drill's `PATH`: the layout script's `pkill -f cockpitd.mjs`
-would otherwise kill the live cockpit's daemon (and every other worktree's).
+A `pkill` shim is on the drill's `PATH`: the layout script kills `cockpitd.mjs` by name
+(`pkill -f`) and would otherwise kill the live cockpit's daemon (and every other worktree's).
 
 Scratch repo: `main`; a run worktree `pir-demo` (branch `pir/demo`, one commit
 `planwork.txt`); `main` moves on after the fork (`mainlater.txt`); a worker worktree

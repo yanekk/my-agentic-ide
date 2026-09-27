@@ -39,7 +39,8 @@ echo "== the hook never crashes on bad stdin (it runs on every stop) =="
 # afplay is shimmed onto the front of PATH so a stray ding cannot fire during the
 # test while node itself stays reachable.
 SHIM="$(mktemp -d)"
-trap 'rm -rf "$SHIM"' EXIT
+. "$ROOT/spikes/lib/test-daemons.sh"
+trap 'daemon_sweep "$SHIM"; rm -rf "$SHIM"' EXIT
 printf '#!/bin/sh\nexit 0\n' > "$SHIM/afplay"
 chmod +x "$SHIM/afplay"
 for bad in 'not json' '{}' '{"cwd":123}' '[]' 'null' ''; do
@@ -66,5 +67,6 @@ same "the hook is executable (else zsh: permission denied)" \
      "$([ -x "$HOOK" ] && echo yes || echo no)" "yes"
 
 echo
+daemon_tripwire "$SHIM" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suite counted above)"; else echo "FAILURES"; fi
 exit "$fail"
