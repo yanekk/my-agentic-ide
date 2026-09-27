@@ -29,10 +29,10 @@ done · ⛔ blocked, needs a human.
 | T03 | program-swap | T00 | ✅ | |
 | T04 | pir-follow | T01, T03 | ✅ | |
 | T05 | docs | T04 | ⬜ | |
-| T06 | pir-pane-drill | T02, T04 | ⬜ | |
+| T06 | pir-pane-drill | T02, T04 | 🔍 | `drill.sh` on a private mux, 184 checks pass at 120×40 and 80×24, RESULTS.md. Three fixes, each in cockpit-test (12c, 15k2, 16i2): footer usage trim then cut (person chose), folder-gone re-read, switch race. 16k rewritten: the shown run detaches when its folder goes. |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T06
 
 ## Blocked on the user
 

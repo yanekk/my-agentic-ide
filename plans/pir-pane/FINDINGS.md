@@ -10,6 +10,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🔄 | T06: at 120 columns the footer's tightest level was 133 wide and wrapped, hiding the switch. The person chose a sixth level (usage without reset times), then cutting at the edge, never wrapping. Switch-only. |
+| 2026-09-27 | 🐞 | T06 drill: a shown worker's folder removed with no pir write left revdiff on a chdir error; the idle reconcile poll now re-reads pir's report. Two footer verbs in one 200ms read dropped the second; checked under the lock now. |
+| 2026-09-27 | 📌 | With no usage reading the footer never trims (usage-limits rule) and wraps below ~190 columns, hiding the switch: a Bedrock-only machine would hit it. Not changed. |
+| 2026-09-27 | 📌 | `cockpit-layout.sh` runs `pkill -f cockpitd.mjs`, killing every cockpit daemon on the machine. The T06 drill runs it under a `pkill` shim on PATH; anything else running the real layout script needs one. |
 | 2026-09-27 | 📌 | T04 review, by reading: a run key that fell back to uncommitted (merge-base or ref check failed once) keeps uncommitted on later attaches, since the start mode is reapplied only when unset or custom. Transient failures only; left alone. |
 | 2026-09-27 | 📌 | T04: showDiff forgets the mode of a key whose parked pane died, so a pir run's start mode is applied after it. A pir move blocked by an open annotation editor is retried only on pir's next file write. |
 | 2026-09-27 | 🔄 | T02: the switch pushed the 140-col footer to 145. The person chose a fifth trim level dropping the `Diff mode:` caption (not wrapping, not shorter labels). |
