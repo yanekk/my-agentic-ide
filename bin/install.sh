@@ -117,6 +117,15 @@ check_tool git     "xcode-select --install"
 # binaries, so "required" costs nothing anyone would notice.
 check_tool micro   "brew install micro"
 check_tool broot   "brew install broot"
+# pir is OPTIONAL (plans/pir-pane): it only feeds the footer's `Claude Agents | PIR`
+# switch, and the daemon hides that segment when pir is absent. So a missing pir is
+# reported and never counted in MISSING -- the cockpit is complete without it.
+PIR_PATH="$(resolve pir)"
+if [ -n "$PIR_PATH" ]; then
+    ok "$(printf '%-8s %s' pir "$PIR_PATH")"
+else
+    warn "$(printf '%-8s %s' pir "optional -- not found; the footer's PIR switch stays hidden")"
+fi
 
 # --- 2. where the fleet view opens ----------------------------------------
 #
