@@ -44,6 +44,9 @@ import {
 } from "./cockpit-bitbucket-store.mjs";
 
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
+// The pure half of following the pir dashboard (pir-pane DESIGN 3.1): this daemon
+// gathers the facts (file text, pid liveness, folders, git) and the model decides.
+import { decidePir, isPirKey, readPirState, shouldReapPirKey, startingMode } from "./cockpit-pir-model.mjs";
 // The push side (cockpit-open.mjs) takes this same lock over viewer-tabs.lock, and
 // the daemon is the other writer of that file: it clears an agent's list whenever
 // it launches a FRESH viewer. One helper rather than a second copy (DESIGN 3.5).
@@ -591,6 +594,16 @@ function readCustomRefs() {
   catch { return new Map(); }
 }
 const customRef = readCustomRefs();
+/**
+ * key -> the ref a pir RUN key opens against when the person has stored none: its
+ * fork point from main (pir-pane DESIGN 2.6). In memory only, deliberately apart
+ * from `customRef`: persistCustomRefs writes that whole map, and a computed fork
+ * point written there would read as a ref somebody chose -- and pin the base for
+ * ever, where the design recomputes it on every attach.
+ */
+const defaultRef = new Map();
+/** The ref a key's custom mode uses: the person's stored one, else the pir default. */
+const refOf = (key) => customRef.get(key) ?? defaultRef.get(key);
 function persistCustomRefs() {
   try {
     const tmp = `${CUSTOM_REFS_FILE}.tmp`;
@@ -1056,7 +1069,7 @@ async function enterBrowse(jobId, worktree, { focus = true } = {}) {
   // Recorded exactly as a revdiff launch is, so the cooldown that keeps the healer
   // off a still-painting pane covers these two as well.
   diffLaunchedMode.set(jobId, "browse");
-  diffLaunchedRef.set(jobId, customRef.get(jobId));
+  diffLaunchedRef.set(jobId, refOf(jobId));
   diffLaunchedCwd.set(jobId, worktree);
   diffLaunchedAt.set(jobId, Date.now());
 
@@ -1154,7 +1167,7 @@ async function leaveBrowse(jobId, worktree) {
   // shell (revdiff was quit before browsing, or it held the custom-range prompt)
   // has nothing running in it to keep.
   const mode = modeOf(jobId);
-  const ref = customRef.get(jobId);
+  const ref = refOf(jobId);
   const stale = !restored
              || parked.mode !== mode
              || (mode === "custom" && parked.ref !== ref)
@@ -1289,14 +1302,17 @@ function writeTerminals(table = paneTable()) {
   // The footer shows the visible agent's OWN mode and (in custom) its base ref
   // (the default mode at the repo/list, where neither really applies).
   const dmode = visibleKey === REPO_KEY ? DEFAULT_DIFF_MODE : modeOf(visibleKey);
-  const cref = visibleKey === REPO_KEY ? null : (customRef.get(visibleKey) ?? null);
+  const cref = visibleKey === REPO_KEY ? null : (refOf(visibleKey) ?? null);
   try {
     const tmp = `${TERMS}.tmp`;
     // `fleet` is what the footer's `Claude Agents | PIR` segment draws (DESIGN 2.1,
     // 3.5): which program is shown, whether a click may switch it, and whether pir
     // exists at all (absent -> the segment is not drawn).
     const fleet = { program: fleetProgram, switchable: fleetSwitchableNow, available: PIR_BIN !== null };
-    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode: dmode, customRef: cref, terminals: list, fleet })}\n`);
+    // `reviewable` is false only with a pir key attached: there a flush is inert
+    // (DESIGN 2.7), so the footer must not offer `O send→claude`.
+    const reviewable = !(attached && isPirKey(attached.jobId));
+    fs.writeFileSync(tmp, `${JSON.stringify({ agent, diffMode: dmode, customRef: cref, terminals: list, fleet, reviewable })}\n`);
     fs.renameSync(tmp, TERMS);
   } catch { /* the strip just keeps its last frame */ }
 }
@@ -1588,7 +1604,7 @@ async function relaunchDiff(jobId, pane, worktree, reviewFile, { discard = false
     await sleep(SHELL_SETTLE_MS);       // let the prompt return before we type
   }
   const mode = modeOf(jobId);
-  const ref = customRef.get(jobId);
+  const ref = refOf(jobId);
   launchInPane(pane, `cd ${JSON.stringify(worktree)} && ${diffCommand(reviewFile, mode, ref)}`);
   diffLaunchedMode.set(jobId, mode);
   diffLaunchedRef.set(jobId, ref);
@@ -1741,7 +1757,7 @@ async function openCustomPrompt(jobId, pane, worktree) {
     sendRaw(pane, "q");
     await sleep(SHELL_SETTLE_MS);
   }
-  const prefill = customRef.get(jobId) ?? "";
+  const prefill = refOf(jobId) ?? "";
   customPromptOpen = true;
   // Treat the prompt like a launch so healQuitDiff's cooldown covers it too: the
   // prompt reads as a "shell", and without this the 1s healer could type revdiff
@@ -1786,7 +1802,7 @@ async function resolveCustomPrompt(kind, attempt = 0) {
       log(`custom range cancelled for ${jobId}; reverted to ${modeBeforeCustom}`);
     }
     const mode = modeOf(jobId);
-    const ref = customRef.get(jobId);
+    const ref = refOf(jobId);
     if (mode === "browse") {
       // Cancelled back into browse: ⌥[ from browse lands on custom, so the mode to
       // revert to can be browse -- which is not a revdiff range at all. Launching
@@ -1990,9 +2006,27 @@ async function reapAgents() {
   // reaping from `diffs` alone would leave two live panes nobody can reach for the
   // life of the window. The agent holding the slot is still never a candidate
   // (`visibleDiff`), so a reap can never empty or half-empty it.
-  const candidates = [...new Set([...terminals.keys(), ...diffs.keys(),
-                                  ...browsePairs.keys(), ...parkedDiffs.keys()])]
+  const all = [...new Set([...terminals.keys(), ...diffs.keys(),
+                           ...browsePairs.keys(), ...parkedDiffs.keys()])]
     .filter((k) => k !== REPO_KEY && k !== visibleKey && k !== visibleDiff);
+
+  // pir keys are not `claude agents` jobs, so the fleet list would call every one of
+  // them missing (pir-pane DESIGN 2.9). They go when their FOLDER does -- pir removes
+  // a task's worktree after merging it -- and never while shown. No strikes: a folder
+  // that is gone is an answer, where one failed `claude agents` read is not.
+  for (const key of all.filter(isPirKey)) {
+    const reap = shouldReapPirKey(key, {
+      shownKey: attached?.jobId,
+      exists: (p) => fs.existsSync(p),
+      cwdOfKey: (k) => pirKeyCwd.get(k),
+    });
+    if (!reap) continue;
+    reapKeyPanes(key, `pir folder ${pirKeyCwd.get(key)} is gone`);
+    pirKeyCwd.delete(key);
+    defaultRef.delete(key);
+  }
+
+  const candidates = all.filter((k) => !isPirKey(k));
   if (!candidates.length) return;
 
   let list;
@@ -2010,61 +2044,70 @@ async function reapAgents() {
       log(`agent ${key} missing (${strikes}/${REAP_STRIKES}); not reaping yet`);
       continue;
     }
-    // An agent has many terminals but one diff; kill every pane it owns.
-    const term = terminals.get(key);
-    if (term) {
-      for (const id of term.panes) {
-        wez(["kill-pane", "--pane-id", String(id)]);
-        log(`reaped terminal pane ${id} — agent ${key} is gone`);
-      }
-      terminals.delete(key);
-    }
-    // An agent can now own THREE panes in the diff slot's world -- the one holding
-    // the slot, and the two halves or the revdiff parked out of it. Every one of
-    // them has to go, or a pane nobody can reach any more survives for the life of
-    // the window. Its browse pair goes through disposePair so the viewer stops
-    // being advertised with it.
-    //
-    // Its pane ids are noted BEFORE the disposal, because in browse mode `diffs`
-    // names the BROWSER: without this the kill below repeats one disposePair has
-    // just done, and a repeated kill is not merely untidy. Against a real WezTerm
-    // it FAILS, and every failed `wezterm cli` call sends the daemon looking for a
-    // dead mux socket (`wez` -> `repairMuxSocket`) -- relinking the socket symlink
-    // and burning the repair cooldown that a genuine socket failure then needs, on
-    // nothing at all. The stub cannot show this: its kill-pane always succeeds. So
-    // the suite asserts the COUNT instead.
-    const pair = browsePairs.get(key);
-    const pairPanes = new Set([pair?.browser, pair?.viewer]);
-    disposePair(key);
-    // ...and the record of what that viewer had open goes with the viewer. The file
-    // is keyed by job id and job ids are not reused, so an entry left behind is
-    // never read again -- it just grows the file for the life of the machine.
-    resetViewerTabs(key, "agent gone");
-    const parked = parkedDiffs.get(key);
-    if (parked !== undefined) {
-      wez(["kill-pane", "--pane-id", String(parked.pane)]);
-      log(`reaped parked diff pane ${parked.pane} — agent ${key} is gone`);
-      parkedDiffs.delete(key);
-    }
-    const d = diffs.get(key);
-    if (d !== undefined && !pairPanes.has(d)) {
-      wez(["kill-pane", "--pane-id", String(d)]);
-      log(`reaped diff pane ${d} — agent ${key} is gone`);
-    }
-    if (d !== undefined) forgetHalf(d);
-    // Cleared whether or not this agent still had a pane in `diffs`. An agent whose
-    // leaveBrowse could not hand the slot back has none -- and that is precisely
-    // the case the candidate list above was widened for, so gating the bookkeeping
-    // on `diffs` left its records behind in the one case worth widening for.
-    diffs.delete(key);
-    diffLaunchedMode.delete(key);
-    diffLaunchedRef.delete(key);
-    diffLaunchedCwd.delete(key);
-    diffLaunchedAt.delete(key);
-    diffModeByAgent.delete(key);
-    stopWorktreeWatch(key);
+    reapKeyPanes(key, `agent ${key} is gone`);
     reapStrikes.delete(key);
   }
+}
+
+/**
+ * Kill every pane `key` owns, in both slots, and forget it. `why` ends each log line.
+ * Shared by the agent reaper and the pir-folder reaper, so a fix to what a key owns
+ * is made once.
+ */
+function reapKeyPanes(key, why) {
+  // An agent has many terminals but one diff; kill every pane it owns.
+  const term = terminals.get(key);
+  if (term) {
+    for (const id of term.panes) {
+      wez(["kill-pane", "--pane-id", String(id)]);
+      log(`reaped terminal pane ${id} — ${why}`);
+    }
+    terminals.delete(key);
+  }
+  // An agent can now own THREE panes in the diff slot's world -- the one holding
+  // the slot, and the two halves or the revdiff parked out of it. Every one of
+  // them has to go, or a pane nobody can reach any more survives for the life of
+  // the window. Its browse pair goes through disposePair so the viewer stops
+  // being advertised with it.
+  //
+  // Its pane ids are noted BEFORE the disposal, because in browse mode `diffs`
+  // names the BROWSER: without this the kill below repeats one disposePair has
+  // just done, and a repeated kill is not merely untidy. Against a real WezTerm
+  // it FAILS, and every failed `wezterm cli` call sends the daemon looking for a
+  // dead mux socket (`wez` -> `repairMuxSocket`) -- relinking the socket symlink
+  // and burning the repair cooldown that a genuine socket failure then needs, on
+  // nothing at all. The stub cannot show this: its kill-pane always succeeds. So
+  // the suite asserts the COUNT instead.
+  const pair = browsePairs.get(key);
+  const pairPanes = new Set([pair?.browser, pair?.viewer]);
+  disposePair(key);
+  // ...and the record of what that viewer had open goes with the viewer. The file
+  // is keyed by job id and job ids are not reused, so an entry left behind is
+  // never read again -- it just grows the file for the life of the machine.
+  resetViewerTabs(key, "agent gone");
+  const parked = parkedDiffs.get(key);
+  if (parked !== undefined) {
+    wez(["kill-pane", "--pane-id", String(parked.pane)]);
+    log(`reaped parked diff pane ${parked.pane} — ${why}`);
+    parkedDiffs.delete(key);
+  }
+  const d = diffs.get(key);
+  if (d !== undefined && !pairPanes.has(d)) {
+    wez(["kill-pane", "--pane-id", String(d)]);
+    log(`reaped diff pane ${d} — ${why}`);
+  }
+  if (d !== undefined) forgetHalf(d);
+  // Cleared whether or not this agent still had a pane in `diffs`. An agent whose
+  // leaveBrowse could not hand the slot back has none -- and that is precisely
+  // the case the candidate list above was widened for, so gating the bookkeeping
+  // on `diffs` left its records behind in the one case worth widening for.
+  diffs.delete(key);
+  diffLaunchedMode.delete(key);
+  diffLaunchedRef.delete(key);
+  diffLaunchedCwd.delete(key);
+  diffLaunchedAt.delete(key);
+  diffModeByAgent.delete(key);
+  stopWorktreeWatch(key);
 }
 
 /**
@@ -2092,6 +2135,7 @@ function healMissingPanes() {
     log(`diff pane for ${attached.jobId} is gone; rebuilding`);
     diffs.delete(attached.jobId);
     attached = null;
+    reattachPir();
     return;
   }
   // A dead VIEWER is not worth rebuilding the whole attach for (T06 heals the
@@ -2115,7 +2159,18 @@ function healMissingPanes() {
   if (!inCockpit(curTermId(attached.jobId), table, cockpitTab)) {
     log(`terminal pane for ${attached.jobId} is gone; rebuilding`);
     attached = null;
+    reattachPir();
   }
+}
+
+/**
+ * The re-attach half of healMissingPanes while pir is shown. Under claude the next
+ * reconcile() poll re-attaches, but that poll is gated under pir (DESIGN 2.9), and
+ * pir only writes its file on a change of view -- so without this a pir key that
+ * lost a pane would sit detached until the person moved in pir.
+ */
+function reattachPir() {
+  if (fleetProgram === "pir") schedulePirState();
 }
 
 /**
@@ -2151,7 +2206,7 @@ function healQuitDiff() {
   try {
     if (diffPaneStatus(pane) !== "shell") return; // re-check under the lock
     const mode = modeOf(attached.jobId);
-    const ref = customRef.get(attached.jobId);
+    const ref = refOf(attached.jobId);
     launchInPane(pane, `cd ${JSON.stringify(attached.worktree)} && ${diffCommand(attached.reviewFile, mode, ref)}`);
     diffLaunchedMode.set(attached.jobId, mode);
     diffLaunchedRef.set(attached.jobId, ref);
@@ -2273,6 +2328,9 @@ let lastMigrationCheck = 0;
  */
 async function followWorktreeMigration() {
   if (customPromptOpen) return;              // the prompt owns the diff pane
+  // A pir key's folder comes from pir's file, never from `claude agents` (DESIGN
+  // 2.9): the fleet list does not know it, and would read it as not there at all.
+  if (isPirKey(attached.jobId)) return;
   // Cooldown FIRST, before the throttle is consumed: a just-launched revdiff looks
   // exactly like a shell while it paints, so relaunching into it would corrupt the
   // pane. Returning here without advancing lastMigrationCheck means the moment the
@@ -2290,13 +2348,29 @@ async function followWorktreeMigration() {
   if (normCwd(agent.cwd) === normCwd(attached.worktree)) return;
   log(`followWorktreeMigration ${attached.jobId}: live cwd ${agent.cwd} != ${attached.worktree}, following`);
 
-  const pane = diffs.get(attached.jobId);
   // The annotation editor eats every keystroke as comment text; leave the move
   // uncommitted and retry once it closes (a later throttle tick).
-  if (pane !== undefined && diffPaneStatus(pane) === "editing") return;
+  await moveAttachedTo(agent.cwd);
+}
 
-  const from = attached.worktree, to = agent.cwd;
+/**
+ * Re-point the attached key -- revdiff (or the browse pair), its watches and an
+ * idle untouched terminal -- at `to`. Shared by an agent's worktree migration and
+ * a pir key whose reported folder changed under the same key (DESIGN 2.11), so the
+ * two cannot drift. Returns false, having changed nothing, while the annotation
+ * editor is open: every keystroke would land in the comment. Called under the
+ * reconcile lock.
+ */
+async function moveAttachedTo(to) {
+  const pane = diffs.get(attached.jobId);
+  if (pane !== undefined && diffPaneStatus(pane) === "editing") {
+    log(`not moving ${attached.jobId} to ${to}: annotation editor is open`);
+    return false;
+  }
+
+  const from = attached.worktree;
   attached.worktree = to;
+  if (isPirKey(attached.jobId)) pirKeyCwd.set(attached.jobId, to);
   log(`agent ${attached.jobId} moved worktree ${from} → ${to}; re-pointing diff and watches`);
 
   // Relaunch, not reload: the range args are unchanged, but revdiff must `cd` into
@@ -2320,6 +2394,7 @@ async function followWorktreeMigration() {
   // Catch an untouched, idle terminal up to where the agent now is (same rule as
   // onEnter -- a busy or user-navigated shell is left alone).
   syncTerminalCwd(curTermId(attached.jobId), to, paneTable());
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2435,6 +2510,13 @@ function injectReview(text) {
     log("refusing to inject: not attached to an agent");
     return;
   }
+  // panes.fleet is claude's pane, parked while pir is shown; and pir's worker input
+  // sends on Enter, so a review typed anywhere there would not stay a draft (DESIGN
+  // 2.7). watchAnnotations never gets here for a pir key; this is the fence.
+  if (isPirKey(attached.jobId)) {
+    log("review not sent: pir has no input box");
+    return;
+  }
   // \r is what the Enter key sends and WOULD submit the prompt early; \n merely
   // inserts a newline. Normalising is the entire safety requirement here.
   const safe = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -2474,7 +2556,7 @@ function injectReview(text) {
  * healQuitDiff would see that shell and race its own relaunch in.
  */
 async function resetDiffAfterReview(attempt = 0) {
-  if (!attached) return;
+  if (!attached || isPirKey(attached.jobId)) return;   // nothing was sent, so nothing ends
   if (reconciling) {
     if (attempt < 20) setTimeout(() => resetDiffAfterReview(attempt + 1), 100);
     return;
@@ -2517,8 +2599,11 @@ async function resetDiffAfterReview(attempt = 0) {
  *    annotations -- see resetDiffAfterReview -- so back-to-back re-sends of the
  *    same set no longer arise; the dedup earns its keep collapsing one write.)
  */
-function watchAnnotations(file) {
-  try { fs.writeFileSync(file, ""); } catch {}
+function watchAnnotations(file, { inert = false } = {}) {
+  // A pir key's review file is neither injected nor reset (DESIGN 2.7): the flushed
+  // annotations are the person's, and with nowhere to send them the file is where
+  // they stay.
+  if (!inert) { try { fs.writeFileSync(file, ""); } catch {} }
   const name = path.basename(file);
   let lastWrite = "";
   let timer = null;
@@ -2534,6 +2619,10 @@ function watchAnnotations(file) {
     const id = `${st.mtimeMs}:${st.size}`;
     if (!cur.trim() || id === lastWrite) return;
     lastWrite = id;
+    if (inert) {
+      log("review not sent: pir has no input box");
+      return;
+    }
     injectReview(composePrompt(cur));
     // Sending the review ENDS it: hand the diff back to auto-reload so the agent's
     // next commit refreshes it. See resetDiffAfterReview for why this is a relaunch
@@ -2667,13 +2756,39 @@ async function onEnter(jobId, knownName) {
     return;
   }
   if (!agent) return log(`no agent for job ${jobId}`);
+  log(`enter ${jobId} "${agent.name}" → ${agent.cwd}`);
+  await onEnterKey(jobId, agent.cwd, knownName ?? agent.name, { source: "claude", paneLabel: agent.name });
+}
 
-  const worktree = agent.cwd;
-  const reviewFile = path.join(DIR, `review-${jobId}.md`);
-  attached = { jobId, worktree, reviewFile, name: knownName ?? agent.name };
-  log(`enter ${jobId} "${agent.name}" → ${worktree}`);
+/**
+ * Attach `key` at `cwd`: both slots, the watches, browse mode, parking on leave --
+ * the one path an agent and a pir run or worker share (pir-pane DESIGN 2.5), so a
+ * fix to parking is never made twice. `source` is "claude" or "pir"; `startMode`
+ * is a pir run key's startingMode() result, applied here before anything launches.
+ * Called under the reconcile lock.
+ */
+async function onEnterKey(key, cwd, label, { source = "claude", startMode = null, paneLabel = label } = {}) {
+  stopWatchers();
+  customPromptOpen = false;
+  const jobId = key;
+  const worktree = cwd;
+  const pir = source === "pir";
+  // A pir key reaches a file name; agent job ids are hex and are left exactly as
+  // they were, so an existing agent's review file does not move.
+  const reviewFile = path.join(DIR, `review-${pir ? key.replace(/[^A-Za-z0-9._-]/g, "-") : key}.md`);
+  attached = { jobId, worktree, reviewFile, name: label, source };
+  if (pir) pirKeyCwd.set(key, cwd);
 
-  const shown = await showDiff(jobId, worktree, agent.name);
+  const shown = await showDiff(jobId, worktree, paneLabel);
+  // A run key opens at the mode startingMode chose -- the first time, and again
+  // whenever it is in custom, since its fork point is recomputed on every attach and
+  // may have failed this time. A mode the person cycled to themselves is theirs.
+  // AFTER showDiff, because showDiff forgets the mode of a key whose parked pane
+  // died, and a start mode set before it would be wiped on exactly that return.
+  if (startMode && (!diffModeByAgent.has(key) || modeOf(key) === "custom")) {
+    diffModeByAgent.set(key, startMode.mode);
+    if (startMode.reason) log(`${key} starts at ${startMode.mode}: ${startMode.reason}`);
+  }
   // A restored pane already has revdiff up on this diff, with the file you were
   // reading and any unflushed annotations still there. Typing nothing is the
   // entire point -- so revdiff is only started when there is no revdiff to
@@ -2687,7 +2802,7 @@ async function onEnter(jobId, knownName) {
   const parkedCwd = diffLaunchedCwd.get(jobId);
   if (shown) {
     const mode = modeOf(jobId);           // a new agent gets the default, never another agent's mode
-    const ref = customRef.get(jobId);
+    const ref = refOf(jobId);
     const status = shown.spawned ? "spawned" : diffPaneStatus(shown.pane);
     // The agent moved worktree while this pane was parked (followWorktreeMigration
     // only follows the ATTACHED agent, so a parked one that moved is caught here).
@@ -2733,14 +2848,16 @@ async function onEnter(jobId, knownName) {
     }
   }
 
-  await showTerminal(jobId, worktree, agent.name);
+  await showTerminal(jobId, worktree, paneLabel);
   // The agent may have moved directory since this terminal was spawned (e.g. it
   // started in the checkout and later entered a worktree). Catch an untouched,
   // idle shell up to where the agent is now; a busy or user-navigated one is left
   // as it is.
   syncTerminalCwd(curTermId(jobId), worktree, paneTable());
 
-  watchAnnotations(reviewFile);
+  watchAnnotations(reviewFile, { inert: pir });
+  // The footer's `O send→claude` hint follows `reviewable`, which showTerminal's
+  // write above already computed from the new `attached`.
   // The worktree/reflog watch is kept alive while parked, so watchWorktree no-ops
   // when one already exists -- but if the agent moved worktree while parked, that
   // surviving watch still points at the old dir (auto-reload and commit-detection
@@ -3359,14 +3476,117 @@ async function acquireReconcileLock() {
 /**
  * May the fleet slot switch programs right now? Only with the shown program on its
  * list screen (DESIGN 2.2), so a switch always happens with nothing attached.
- * Claude: its pane says so. pir: always, until T04 reads pir's own report.
+ * Claude: its pane says so. pir: its own report says `list` (a missing, corrupt or
+ * dead-pid file reads as list, so an old pir stays switchable).
  */
 async function fleetSwitchable() {
   if (attached) return false;
-  if (fleetProgram === "pir") return true;
+  if (fleetProgram === "pir") return readPir().view === "list";
   const state = await paneState();
   return state?.mode === "list";
 }
+
+// ---------------------------------------------------------------------------
+// Following pir (pir-pane DESIGN 2.4-2.6, 2.9, 2.11)
+//
+// While pir is shown its state file is the only source of truth. The daemon reads
+// it, gathers what the pure model cannot (is the pid alive, does a folder exist, is
+// it a git work tree, where did the run fork from main) and acts on decidePir's
+// answer through the same onEnterKey/onExit an agent goes through.
+// ---------------------------------------------------------------------------
+
+/** pir key -> the folder it was last attached at: what the pir reaper checks. */
+const pirKeyCwd = new Map();
+const PIR_DEBOUNCE_MS = ms(150);
+let pirTimer = null;
+
+/** process.kill(pid, 0): EPERM still means a process is there, just not ours. */
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code === "EPERM"; }
+}
+
+/** pir's report, read defensively: anything doubtful is the runs list. */
+function readPir() {
+  let raw = null;
+  try { raw = fs.readFileSync(PIR_STATE, "utf8"); } catch { /* absent: list */ }
+  return readPirState(raw, { isAlive });
+}
+
+/** One git call in `cwd`, trimmed stdout, or null on any failure. */
+function gitIn(cwd, args) {
+  try {
+    return execFileSync("git", ["-C", cwd, ...args],
+      { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch { return null; }
+}
+
+/**
+ * The run's fork point from main, abbreviated (DESIGN 2.6), or null. Computed on
+ * every attach of the run key and never stored: a run that has since merged main
+ * in is shown from its new fork point on the next visit.
+ */
+function forkPoint(cwd) {
+  const base = gitIn(cwd, ["merge-base", "main", "HEAD"]);
+  return base ? gitIn(cwd, ["rev-parse", "--short", base]) : null;
+}
+
+/** Debounced (150ms): a burst of writes moves panes once, for the latest state. */
+function schedulePirState() {
+  clearTimeout(pirTimer);
+  pirTimer = setTimeout(onPirState, PIR_DEBOUNCE_MS);
+}
+
+async function onPirState() {
+  if (fleetProgram !== "pir") return;           // while claude is shown the file means nothing
+  if (!(await acquireReconcileLock())) { schedulePirState(); return; }
+  try {
+    if (fleetProgram !== "pir") return;         // switched back while we waited
+    const state = readPir();
+    // Switchable follows what pir REPORTS, not what is attached: a run whose folder
+    // is gone attaches nothing, yet pir is not at its list (DESIGN 2.2).
+    noteSwitchable(state.view === "list");
+    const d = decidePir(state, { exists: (p) => fs.existsSync(p), isGitRepo });
+    if (d.mode === "list") {
+      if (d.reason) log(`pir: ${d.reason}; showing the list`);
+      if (attached) await onExit();
+      return;
+    }
+    if (attached && attached.jobId === d.key) {
+      // The same key at a new folder (a planning run's worktree renamed): followed
+      // like a migrated agent, relaunching revdiff there (DESIGN 2.11).
+      if (normCwd(attached.worktree) !== normCwd(d.cwd)) await moveAttachedTo(d.cwd);
+      return;
+    }
+    let startMode = null;
+    if (d.isRun) {
+      const fp = forkPoint(d.cwd);
+      if (fp) defaultRef.set(d.key, fp);
+      else defaultRef.delete(d.key);
+      startMode = startingMode({
+        isRun: true,
+        storedRef: customRef.get(d.key),
+        forkPoint: fp,
+        resolves: (ref) => gitIn(d.cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]) !== null,
+      });
+    }
+    log(`pir: enter ${d.key} → ${d.cwd}`);
+    await onEnterKey(d.key, d.cwd, d.label, { source: "pir", startMode });
+  } finally {
+    reconciling = false;
+  }
+}
+
+// pir writes temp-then-rename, so the file gets a new inode on every write: watch
+// the directory, never the file (CLAUDE.md). The temp file's own events pass the
+// filter only by name, and the debounce folds them into the rename's.
+try {
+  fs.watch(DIR, (_e, name) => {
+    if (fleetProgram !== "pir") return;
+    if (name && !name.startsWith(path.basename(PIR_STATE))) return;
+    schedulePirState();
+  });
+} catch (e) { log(`could not watch ${DIR} for pir: ${e.message}`); }
 
 /** Keep the footer's `switchable` honest; rewrites terminals.json only on a change. */
 function noteSwitchable(v) {
@@ -3435,11 +3655,13 @@ async function switchFleet(target) {
     fleetProgram = target;
     // The person clicked to see this program, so the keyboard goes with it.
     wez(["activate-pane", "--pane-id", String(incoming)]);
-    // Both programs are at their list: claude could only be parked from there, and a
-    // pir that has just been shown is taken as at its list until T04 reads its file.
-    fleetSwitchableNow = true;
+    // Claude could only have been parked from its list. pir says for itself.
+    fleetSwitchableNow = target === "pir" ? readPir().view === "list" : true;
     writeTerminals();
     log(`fleet slot now shows ${target}`);
+    // A pir already inside a run is followed now, not at its next write (DESIGN 2.4).
+    // Scheduled, not awaited: it needs the lock this call is still holding.
+    if (target === "pir") schedulePirState();
     return true;
   } finally {
     reconciling = false;

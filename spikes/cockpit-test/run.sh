@@ -2118,6 +2118,265 @@ echo list > "$FLEETSTATE"
 nap 3
 
 echo
+echo "== 16a. pir reports a RUN: its shared worktree attaches at custom-against-fork-point =="
+# pir-pane T04. The tests write pir-dashboard.json the way the real pir does (temp +
+# rename). A run branched off main; main then moved on -- the person commits to main
+# during builds -- so the fork point and main's tip differ (DESIGN 2.6).
+PREPO="$T/pirrepo"; mkrepo "$PREPO"
+echo base > "$PREPO/base.txt"; git -C "$PREPO" add -A; git -C "$PREPO" commit -qm fork
+FORK="$(git -C "$PREPO" rev-parse --short HEAD)"
+PRUN="$T/pirrun"; PWORK="$T/pirworker"; PRUN2="$T/pirrun2"
+git -C "$PREPO" worktree add -q -b pir/slug "$PRUN"
+echo run > "$PRUN/runwork.txt"; git -C "$PRUN" add -A; git -C "$PRUN" commit -qm "run work"
+git -C "$PREPO" worktree add -q -b pir/slug-T01 "$PWORK" pir/slug
+echo later > "$PREPO/mainlater.txt"; git -C "$PREPO" add -A; git -C "$PREPO" commit -qm "main later"
+MAINTIP="$(git -C "$PREPO" rev-parse --short HEAD)"
+# pirwrite <view> <run cwd|null> [<worker cwd|null>] [pid]: one atomic write. The pid
+# defaults to this script's own, which is alive for as long as the suite runs.
+pirjson() { [ "$1" = null ] && printf null || printf '"%s"' "$1"; }
+pirwrite() {
+  local view="$1" run="null" worker="null" pid="${4:-$$}"
+  [ "$view" != list ] && run="{\"key\":\"proj__slug\",\"kind\":\"work\",\"slug\":\"slug\",\"repo\":\"proj\",\"repoPath\":\"$PREPO\",\"branch\":\"pir/slug\",\"cwd\":$(pirjson "$2")}"
+  [ "$view" = worker ] && worker="{\"id\":\"w1\",\"task\":\"T01\",\"role\":\"implement\",\"cwd\":$(pirjson "$3")}"
+  printf '{"version":1,"pid":%s,"view":"%s","run":%s,"worker":%s,"updatedAt":"2026-09-27T00:00:00.000Z"}\n' \
+    "$pid" "$view" "$run" "$worker" > "$T/state/pir-dashboard.json.tmp"
+  mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+}
+RK="pir.proj__slug"; WK="pir.proj__slug.w1"
+RFILE="$T/state/review-$RK.md"
+rm -f "$T/state/pir-dashboard.json"
+echo fleet-pir >> "$T/state/cmd"
+nap 2
+check  "pir is shown, and with no file it is at its list" '"fleet":{"program":"pir","switchable":true' "$T/state/terminals.json"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "the run key was entered at the run's folder" "pir: enter $RK → $PRUN" "$T/daemon.log"
+RDIFF="$(pane_key diff)"; RTERM="$(pane_key shell)"
+in_slot "its diff pane holds the slot"             "$RDIFF"
+in_slot "its terminal holds the terminal slot"     "$RTERM"
+check  "revdiff cd'd into the run's worktree"      "cd \"$PRUN\" && revdiff" "$CALLS"
+check  "...custom against the fork point"          "--untracked -o \"$RFILE\" \"$FORK\"" "$CALLS"
+refute "...never main's moved-on tip"              "\"$MAINTIP\"" "$CALLS"
+refute "no ref prompt was opened"                  "cockpit-custom-prompt" "$CALLS"
+check  "a terminal opened at the run's worktree"   "--cwd $PRUN --" "$CALLS"
+check  "the footer reads Custom: <fork point>"     "\"diffMode\":\"custom\",\"customRef\":\"$FORK\"" "$T/state/terminals.json"
+check  "...labelled with the run's slug"           '"agent":"slug"' "$T/state/terminals.json"
+check  "reviewable is false with a pir key"        '"reviewable":false' "$T/state/terminals.json"
+check  "the switch is dim while pir is in a run"   '"switchable":false' "$T/state/terminals.json"
+refute "the fork point was never persisted"        "$RK" "$T/state/custom-refs.json"
+R0="$(countof "refusing fleet-claude: pir is not at its list" "$T/daemon.log")"
+echo fleet-claude >> "$T/state/cmd"
+nap 1.5
+grew   "Claude Agents is refused inside a run"     "refusing fleet-claude: pir is not at its list" "$T/daemon.log" "$R0"
+in_slot "...and pir keeps the slot"                "$PIRP2"
+
+echo
+echo "== 16b. main moved on after the fork: its new commit is not in the diff =="
+# What revdiff shows for <ref> -> working tree is git's diff against that ref.
+same   "the fork point is the diff's base, main's commit absent" \
+       "$(git -C "$PRUN" diff --name-only "$FORK" | tr '\n' ' ')" "runwork.txt "
+refute "...where main's tip would have shown it reversed" "$MAINTIP" "$T/state/terminals.json"
+
+echo
+echo "== 16c. a revdiff flush on a pir key: nothing typed, logged, file kept =="
+: > "$CALLS"
+N0="$(countof "review not sent: pir has no input box" "$T/daemon.log")"
+printf '## runwork.txt:1 (+)\nPIR REVIEW STAYS\n' > "$RFILE"
+nap 1.5
+grew   "the inert review was logged"               "review not sent: pir has no input box" "$T/daemon.log" "$N0"
+refute "nothing was typed into any pane"           "send-text" "$CALLS"
+check  "the review file was left as flushed"       "PIR REVIEW STAYS" "$RFILE"
+refute "revdiff was not relaunched to reset it"    "relaunched diff pane $RDIFF for $RK" "$T/daemon.log"
+
+echo
+echo "== 16d. ⌥[ with the diff focused cycles the pir key's own mode =="
+: > "$CALLS"
+echo "$RDIFF" > "$ACTIVE"
+echo prev >> "$T/state/cmd"
+nap 2
+: > "$ACTIVE"
+check  "the run key relaunched in lastcommit"      "relaunched diff pane $RDIFF for $RK in lastcommit mode" "$T/daemon.log"
+check  "the footer shows it"                       '"diffMode":"lastcommit"' "$T/state/terminals.json"
+
+echo
+echo "== 16e. pir reports a WORKER: its own key and folder, at uncommitted =="
+: > "$CALLS"
+pirwrite worker "$PRUN" "$PWORK"
+nap 3
+check  "the worker key was entered"                "pir: enter $WK → $PWORK" "$T/daemon.log"
+WDIFF="$(pane_key diff)"; WTERM="$(pane_key shell)"
+in_slot "its own diff pane holds the slot"         "$WDIFF"
+parked "the run's diff pane is parked"             "$RDIFF"
+parked "...and so is the run's terminal"           "$RTERM"
+check  "revdiff uncommitted in the worker's folder" "cd \"$PWORK\" && revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-$WK.md\" HEAD" "$CALLS"
+check  "the footer: uncommitted, the worker's label" '"agent":"slug / T01","diffMode":"uncommitted"' "$T/state/terminals.json"
+check  "still not reviewable"                      '"reviewable":false' "$T/state/terminals.json"
+check  "still not switchable"                      '"switchable":false' "$T/state/terminals.json"
+
+echo
+echo "== 16f. back to the RUN: its parked panes return untouched =="
+: > "$CALLS"
+RL0="$(countof "relaunched diff pane $RDIFF" "$T/daemon.log")"
+pirwrite run "$PRUN"
+nap 3
+in_slot "the run's diff pane is back"              "$RDIFF"
+in_slot "...and its terminal"                      "$RTERM"
+parked "the worker's diff pane is parked"          "$WDIFF"
+same   "the run's revdiff was not relaunched"      "$(countof "relaunched diff pane $RDIFF" "$T/daemon.log")" "$RL0"
+refute "nothing was typed into it"                 "send-text --pane-id $RDIFF " "$CALLS"
+check  "its own mode came back with it"            '"diffMode":"lastcommit"' "$T/state/terminals.json"
+
+echo
+echo "== 16g. back to the LIST: the welcome pane and the repo terminals =="
+: > "$CALLS"
+pirwrite list
+nap 3
+check  "the run key was left"                      "exit $RK → fleet list" "$T/daemon.log"
+check  "the footer is back on the repo"            '"agent":"repo"' "$T/state/terminals.json"
+check  "...reviewable again"                       '"reviewable":true' "$T/state/terminals.json"
+check  "...and switchable"                         '"switchable":true' "$T/state/terminals.json"
+parked "the run's diff pane is parked, not killed" "$RDIFF"
+in_slot "the repo diff pane holds the slot"        10
+in_slot "pir still holds the fleet slot"           "$PIRP2"
+
+echo
+echo "== 16h. a pir key's diff pane killed while shown is re-attached, no file write =="
+pirwrite run "$PRUN"
+nap 3
+in_slot "the run is shown again"                   "$RDIFF"
+H0="$(countof "pir: enter $RK" "$T/daemon.log")"
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+waitfor "diff pane for $RK is gone; rebuilding" "$T/daemon.log" 6
+waitmore "pir: enter $RK" "$T/daemon.log" "$H0" 6
+grew   "the heal re-ran pir's state"               "pir: enter $RK" "$T/daemon.log" "$H0"
+RDIFF="$(pane_key diff)"
+in_slot "a fresh diff pane holds the slot"         "$RDIFF"
+check  "...opened at the run's folder"            "opened diff pane $RDIFF for slug at $PRUN" "$T/daemon.log"
+
+echo
+echo "== 16i. the same key at a new folder: revdiff relaunched there, watches moved =="
+git -C "$PREPO" worktree add -q -b pir/slug-renamed "$PRUN2" pir/slug
+: > "$CALLS"
+nap 2   # past the relaunch cooldown of the heal above
+pirwrite run "$PRUN2"
+nap 3
+check  "the move was followed"                     "agent $RK moved worktree $PRUN → $PRUN2" "$T/daemon.log"
+check  "revdiff relaunched in the new folder"      "cd \"$PRUN2\" && revdiff" "$CALLS"
+in_slot "the same diff pane still holds the slot"  "$RDIFF"
+
+echo
+echo "== 16j. worker folder gone: the run is shown, and the worker key is reaped =="
+git -C "$PREPO" worktree remove --force "$PWORK"
+E0="$(countof "pir: enter $WK" "$T/daemon.log")"
+pirwrite worker "$PRUN2" "$PWORK"
+nap 3
+same   "the worker was not entered"                "$(countof "pir: enter $WK" "$T/daemon.log")" "$E0"
+in_slot "the run stays shown"                      "$RDIFF"
+check  "...and the footer says so"                 '"agent":"slug"' "$T/state/terminals.json"
+waitfor "pir folder $PWORK is gone" "$T/daemon.log" 6
+gone   "the worker's diff pane was reaped"         "$WDIFF"
+gone   "...and its terminal"                       "$WTERM"
+
+echo
+echo "== 16k. the SHOWN key is never reaped; both folders gone reads as the list =="
+rm -rf "$PRUN2"
+nap 3
+in_slot "the shown run survives its folder going"  "$RDIFF"
+pirwrite worker "$PRUN2" "$PWORK"
+nap 3
+check  "both gone: the list, and why"              "pir: neither the worker's nor the run's folder exists; showing the list" "$T/daemon.log"
+check  "the repo is shown"                         '"agent":"repo"' "$T/state/terminals.json"
+check  "...not switchable: pir is not at its list" '"switchable":false' "$T/state/terminals.json"
+waitfor "reaped diff pane $RDIFF — pir folder $PRUN2 is gone" "$T/daemon.log" 6
+gone   "once not shown, the run key was reaped"    "$RDIFF"
+gone   "...terminal and all"                       "$RTERM"
+git -C "$PREPO" worktree prune
+
+echo
+echo "== 16l. a folder that is not a git work tree reads as the list =="
+mkdir -p "$T/notgit"
+pirwrite run "$T/notgit"
+nap 3
+check  "logged"                                    "pir: run folder is not a git work tree: $T/notgit" "$T/daemon.log"
+check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
+
+echo
+echo "== 16m. a dead pid, a corrupt file and no file all read as the list =="
+sleep 0 & DEADPID=$!; wait "$DEADPID"
+for how in dead corrupt missing; do
+  pirwrite run "$PRUN"
+  nap 3
+  X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
+  case "$how" in
+    dead)    pirwrite run "$PRUN" "" "$DEADPID" ;;
+    corrupt) printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json" ;;
+    missing) rm -f "$T/state/pir-dashboard.json" ;;
+  esac
+  nap 3
+  grew "$how: the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
+  check "$how: switchable again"                  '"switchable":true' "$T/state/terminals.json"
+done
+
+echo
+echo "== 16n. a stored ref wins over the fork point; one that stopped resolving is uncommitted =="
+git -C "$PREPO" branch tmpbase "$FORK"
+pirwrite run "$PRUN"
+nap 3
+RDIFF="$(pane_key diff)"
+echo diff-custom >> "$T/state/cmd"
+nap 2
+check  "the prompt is pre-filled with the fork point" "opened custom-range prompt for $RK (prefill \"$FORK\")" "$T/daemon.log"
+printf '{"jobId":"%s","ref":"tmpbase"}' "$RK" > "$T/state/custom-ref-pending"
+echo custom-ok >> "$T/state/cmd"
+nap 2
+check  "the person's ref is stored for the key"    "\"$RK\":\"tmpbase\"" "$T/state/custom-refs.json"
+pirwrite list; nap 3
+# A parked pane that died is spawned afresh, so the launch line shows the ref used.
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "the stored ref is used"                    "-o \"$RFILE\" \"tmpbase\"" "$CALLS"
+RDIFF="$(pane_key diff)"
+pirwrite list; nap 3
+git -C "$PREPO" branch -D -q tmpbase
+awk -v p="$RDIFF" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+pirwrite run "$PRUN"
+nap 3
+check  "a stale stored ref is logged"              "$RK starts at uncommitted: stored ref does not resolve: tmpbase" "$T/daemon.log"
+check  "...and the key opens uncommitted"          "-o \"$RFILE\" HEAD" "$CALLS"
+refute "...never the prompt"                       "cockpit-custom-prompt" "$CALLS"
+pirwrite list; nap 3
+
+echo
+echo "== 16o. no main to fork from: uncommitted, logged =="
+NOMAIN="$T/nomain"; mkdir -p "$NOMAIN"; git init -q -b trunk "$NOMAIN"
+git -C "$NOMAIN" config user.email t@t; git -C "$NOMAIN" config user.name t
+git -C "$NOMAIN" commit -q --allow-empty -m base
+printf '{"version":1,"pid":%s,"view":"run","run":{"key":"proj__nomain","slug":"nomain","cwd":"%s"},"worker":null}\n' "$$" "$NOMAIN" \
+  > "$T/state/pir-dashboard.json.tmp" && mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
+: > "$CALLS"
+nap 3
+check  "the failed merge-base is logged"           "pir.proj__nomain starts at uncommitted: no fork point from main (git merge-base failed)" "$T/daemon.log"
+check  "...and the key opens uncommitted"          "review-pir.proj__nomain.md\" HEAD" "$CALLS"
+check  "the footer agrees"                         '"diffMode":"uncommitted"' "$T/state/terminals.json"
+pirwrite list; nap 3
+
+echo
+echo "== 16p. while claude is shown, pir's file does nothing =="
+echo fleet-claude >> "$T/state/cmd"
+nap 2
+in_slot "claude is back in the fleet slot"         20
+E0="$(countof "pir: enter" "$T/daemon.log")"
+pirwrite run "$PRUN"
+nap 3
+same   "nothing was entered"                       "$(countof "pir: enter" "$T/daemon.log")" "$E0"
+check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
+rm -f "$T/state/pir-dashboard.json"
+
+echo
 echo "== 15m. no pir on PATH: nothing to switch to =="
 A7="$T/nopir"; S7="$A7/state"
 mkdir -p "$A7/bin" "$S7"

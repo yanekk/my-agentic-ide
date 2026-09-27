@@ -10,11 +10,10 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-27 — 9 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built. The pir-side change is a separate plan started from
+**Status:** Building. T00, T01, T03 done; T04 awaiting review. The pir-side change is a separate plan started from
 [PIR-PROMPT.md](PIR-PROMPT.md); only T07 waits for it.
-**Last updated:** 2026-09-26
-**Next `pir-work` will:** implement T00 (swap-spike), the riskiest unknown; T01 and T02 have no
-dependencies and may run beside it.
+**Last updated:** 2026-09-27
+**Next `pir-work` will:** review T04 (pir-follow).
 
 ## Tasks
 
@@ -27,12 +26,12 @@ done · ⛔ blocked, needs a human.
 | T01 | pir-model | — | ✅ | |
 | T02 | footer-switch | — | ⬜ | |
 | T03 | program-swap | T00 | ✅ | |
-| T04 | pir-follow | T01, T03 | ⬜ | |
+| T04 | pir-follow | T01, T03 | 🔍 | onPirState/onEnterKey, pir reaper, inert reviews, `reviewable`; cockpit-test 16a–16p (700 checks). Deviations: start mode applied only when unset or custom, after showDiff; pir review file never truncated; `resolves` checks `^{commit}`; `moveAttachedTo` shared with agent migration; `reviewable:true` written for agents. |
 | T05 | docs | T04 | ⬜ | |
 | T06 | pir-pane-drill | T02, T04 | ⬜ | |
 | T07 | live-check | T05, T06 | ⬜ | The pir side landed and is installed (pir `d4f2e7e`, 2026-09-27). |
 
-**Review queue:** *(empty)*
+**Review queue:** T04
 
 ## Blocked on the user
 
