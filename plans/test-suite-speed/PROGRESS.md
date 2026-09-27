@@ -25,10 +25,10 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | section-runner | — | ✅ | |
 | T02 | waituntil | — | ✅ | |
-| T03 | convert-main-early | T01, T02 | ⬜ | |
+| T03 | convert-main-early | T01, T02 | ✅ | |
 | T04 | convert-browse | T01, T02 | ✅ | 11–11p: waits are log/terminals.json polls or `nap` windows sized to scaled timers; 146s to 47s, 767 checks. Review: clean, no fix commit. Checked each poll against the daemon's log lines and timers; full run ALL PASS. Deleting the fence guard, 11c'''' caught it 8/10 runs, no worse than before (FINDINGS). |
-| T05 | convert-footer-agenda | T01, T02 | ⬜ | |
-| T06 | convert-dashboard | T01, T02 | ⬜ | |
+| T05 | convert-footer-agenda | T01, T02 | ✅ | |
+| T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ⬜ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |

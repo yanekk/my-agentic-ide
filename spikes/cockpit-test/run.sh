@@ -415,6 +415,12 @@ chmod +x "$T/bin/claude"
 SPEED="${COCKPIT_TEST_SPEED:-0.5}"
 # nap N: sleep N seconds scaled by SPEED, with a small floor so it never hits zero.
 nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }
+# The dashboard daemons' tick (D4, D6). cockpitd reads COCKPIT_BITBUCKET_TICK_MS
+# as-is, NOT through COCKPIT_TIME_SCALE, so it is scaled here by the same factor
+# as `nap`: a nap that proves "N ticks went by" must shrink with the tick, or a
+# lower SPEED would prove it against a tick that no longer fits (DESIGN 3.2).
+# 400ms at the default 0.5, as it was when it was a literal. D5 keeps its hour.
+BB_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
 
 # --- state -----------------------------------------------------------------
 echo '{"diff":10,"fleet":20,"shell":30,"foot":9,"repo":"'"$WT"'"}' > "$T/state/panes.json"
@@ -428,6 +434,16 @@ mkdir -p "$T/home"
 # SPEED like everything else (never below 50ms); COCKPIT_TIME_SCALE scales the
 # daemon's own poll/debounce/settle constants to match the naps below.
 REAP_MS="$(awk -v s="$SPEED" 'BEGIN{ v=700*s; if (v<50) v=50; printf "%d", v }')"
+# The agenda daemons' tick (sections 13, 13b) has its own env seam and is NOT
+# scaled by COCKPIT_TIME_SCALE, so it is scaled here: 800*SPEED is the old fixed
+# 400ms at the default 0.5, and `nap 0.8` is one tick at any SPEED (same 50ms floor
+# as REAP_MS). Without this a lower SPEED would shrink the naps that prove "no
+# fetch within N ticks" below the tick itself, and they would pass vacuously.
+AGENDA_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
+# Staleness must outlast the whole agenda section (nothing may go stale unless a
+# line zeroes its fetchedAt), and the section's length is mostly unscaled polls --
+# so it scales UP with SPEED but never drops below the old 60s.
+AGENDA_STALE_MS="$(awk -v s="$SPEED" 'BEGIN{ v=120000*s; if (v<60000) v=60000; printf "%d", v }')"
 # AGENDA_ORIGIN points at a port nothing listens on. This daemon never has a
 # calendar configured so it never fetches at all -- but a later edit that gave it
 # one must fail loudly here rather than open a real socket to Google on whatever
@@ -599,7 +615,9 @@ if section 1 "attach: panes retargeted"; then
 # The pane now shows an agent; the log line is only a nudge to reconcile sooner.
 echo "test agent" > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] respawnJob abc12345: ok=false alive=true' >> "$T/state/fleet.log"
-nap 3
+# The attach's last act is arming the annotation watch, which creates the review
+# file (watchAnnotations writes it empty). Every pane move checked below precedes it.
+waituntil 10 "the attach to finish (review-abc12345.md created)" test -e "$T/state/review-abc12345.md"
 
 check "diff pane told to cd to the worktree"     "cd \"$WT\"" "$CALLS"
 check "revdiff invoked with --wrap --untracked"  "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
@@ -622,8 +640,12 @@ fi
 
 if section 2 "review flushed: typed into the fleet pane, unsent"; then
 : > "$CALLS"
+R0=$(countof "relaunched diff pane" "$T/daemon.log")
 printf '## tracked.txt:2 (+)\nthis allocates in a loop\n' > "$T/state/review-abc12345.md"
-nap 1.5
+waitfor "this allocates in a loop" "$CALLS" 10 "the review typed into the fleet pane"
+# The send also resets the diff (resetDiffAfterReview: Q, then a relaunch). Wait for
+# it to finish so section 3's detach does not land in the middle of it.
+waitmore "relaunched diff pane" "$T/daemon.log" "$R0" 10 "the diff reset after the send"
 
 check "sent to the FLEET pane"                   "--pane-id 20" "$CALLS"
 check "annotation text present"                  "this allocates in a loop" "$CALLS"
@@ -634,10 +656,11 @@ fi
 if section 3 "detach: injection refused while the fleet list is showing"; then
 echo list > "$FLEETSTATE"
 echo '[DEBUG] [FV-attach] attachJob returned after 2020ms — remounting list' >> "$T/state/fleet.log"
-nap 2
+# The detach's last act is the repo shell's showTerminal writing terminals.json.
+waituntil 10 "the detach to finish (terminals.json back to repo)" grep -qF '"agent":"repo"' "$T/state/terminals.json"
 : > "$CALLS"
 printf '## tracked.txt:9 (+)\nSHOULD NOT BE SENT\n' >> "$T/state/review-abc12345.md"
-nap 1.5
+nap 1   # window: ANNOTATION_DEBOUNCE_MS (250, scaled) before a wrongful inject, 750 margin
 
 # Nothing reaches the fleet pane once the list is showing. Two independent
 # mechanisms enforce this and only the first is exercised here: watchers are torn
@@ -652,18 +675,30 @@ if section 3b "a SECOND flush injects too (atomic rename must not kill the watch
 # revdiff flushes by writing a temp file and renaming it over the target, so the
 # path gets a new inode each time. Watching the file rather than its directory
 # fired once and then watched a deleted inode forever -- the second O did nothing.
+#
+# The re-attach re-arms the watch by EMPTYING the review file (watchAnnotations),
+# and section 3 left "SHOULD NOT BE SENT" in it -- so an empty file is the signal
+# that the watch is up. The planning baseline flaked here under load: a flush
+# written after a fixed sleep but before the re-attach finished was wiped by that
+# emptying, or landed with no watch at all, and the fixed wait after each flush was
+# shorter than the inject + reset (Q, settle, relaunch) took on a loaded machine.
 echo "test agent" > "$FLEETSTATE"          # re-attach
-nap 2
+waituntil 10 "the re-attach to arm the annotation watch (review file emptied)" test ! -s "$T/state/review-abc12345.md"
 : > "$CALLS"
+R0=$(countof "relaunched diff pane" "$T/daemon.log")
 printf '## a.txt:1 (+)\nfirst flush\n' > "$T/state/tmp.$$" \
     && mv "$T/state/tmp.$$" "$T/state/review-abc12345.md"
-nap 1.5
+waitfor "first flush" "$CALLS" 10 "the first flush injected"
 check "first flush injected"                     "first flush" "$CALLS"
+# Its reset empties the file and relaunches revdiff; a second flush written before
+# that emptying would be wiped by it, so the reset has to be over first.
+waitmore "relaunched diff pane" "$T/daemon.log" "$R0" 10 "the diff reset after the first flush"
 
 : > "$CALLS"
+R0=$(countof "relaunched diff pane" "$T/daemon.log")
 printf '## a.txt:1 (+)\nfirst flush\n## b.txt:2 (+)\nsecond flush\n' > "$T/state/tmp2.$$" \
     && mv "$T/state/tmp2.$$" "$T/state/review-abc12345.md"
-nap 1.5
+waitmore "relaunched diff pane" "$T/daemon.log" "$R0" 10 "the second flush injected and its diff reset"
 check "second flush injected after rename"       "second flush" "$CALLS"
 # Sending a review now ENDS it (see resetDiffAfterReview): the daemon empties the
 # handoff file and relaunches the diff clean. That relaunch drops the annotations
@@ -684,7 +719,7 @@ refute "the send did not quit with a plain q"        "STDIN:q" "$CALLS"
 
 : > "$CALLS"
 touch "$T/state/review-abc12345.md"        # bare re-touch: the reset already cleared it
-nap 1.5
+nap 1   # window: ANNOTATION_DEBOUNCE_MS (250, scaled) before a wrongful re-inject, 750 margin
 # "Press O twice to re-send the same review" is deliberately gone: a sent review
 # leaves no annotations, so re-touching the now-empty handoff file injects nothing.
 refute "a spent review does not re-inject"       "second flush" "$CALLS"
@@ -693,7 +728,7 @@ fi
 if section 4 "switch A→B with NO log line: the pane itself is the signal"; then
 : > "$CALLS"
 echo "second agent" > "$FLEETSTATE"     # nothing appended to fleet.log
-nap 3
+waituntil 10 "the attach to def67890 to finish (its review file created)" test -e "$T/state/review-def67890.md"
 
 check "followed to the second agent's worktree"  "cd \"$WT2\"" "$CALLS"
 check "resolved it by the name in the header"    "enter def67890" "$T/daemon.log"
@@ -713,7 +748,7 @@ if section 4b "the PARKED agent's diff keeps following its worktree"; then
 : > "$CALLS"
 : > "$T/state/review-abc12345.md"          # nothing flushed, so reloading is allowed
 echo "more work by the agent" >> "$WT/tracked.txt"
-nap 3
+waitfor 'STDIN:R\n' "$CALLS" 10 "an R sent to the parked diff"
 
 check "a reload was sent"                        'STDIN:R\n' "$CALLS"
 check "...to the first agent's PARKED pane"      "send-text --pane-id 31 --no-paste" "$CALLS"
@@ -725,8 +760,9 @@ if section 4c "nothing is typed into a pane whose annotation editor is open"; th
 # auto-reload R would be typed INTO the comment -- unseen, in a parked pane.
 : > "$CALLS"
 echo 31 > "$EDITING"
+E0=$(countof "annotation editor is open" "$T/daemon.log")
 echo "yet more work" >> "$WT/tracked.txt"
-nap 3
+waitmore "annotation editor is open" "$T/daemon.log" "$E0" 10 "the reload refused for the open editor"
 
 refute "no reload while a comment is half-typed" "send-text --pane-id 31 --no-paste" "$CALLS"
 check  "and the daemon said why"                 "annotation editor is open" "$T/daemon.log"
@@ -744,7 +780,8 @@ if section 5 "switching BACK restores both panes (the whole point)"; then
 : > "$CALLS"
 echo 31 > "$TITLELAG"
 echo "test agent" > "$FLEETSTATE"
-nap 3
+# showTerminal's terminals.json write is the switch's last pane step.
+waituntil 10 "the switch back to test agent (terminals.json)" grep -qF '"agent":"test agent"' "$T/state/terminals.json"
 
 check "the agent's diff pane is moved back in"   "--move-pane-id 31" "$CALLS"
 check "the agent's terminal is moved back in"    "--move-pane-id 32" "$CALLS"
@@ -765,7 +802,8 @@ if section 5b "⌥] with the diff pane focused switches the diff MODE, not a ter
 : > "$CALLS"
 echo 31 > "$ACTIVE"                       # focus the agent's diff pane (31)
 echo next >> "$T/state/cmd"
-nap 2
+# A mode switch ends by handing focus back to the relaunched diff pane.
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the switch to last-commit"
 
 check "the running revdiff was quit first"       "STDIN:q\n" "$CALLS"
 check "revdiff relaunched in the last-commit range" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
@@ -778,7 +816,7 @@ fi
 if section "5b'" "toggling again returns to the uncommitted range"; then
 : > "$CALLS"
 echo prev >> "$T/state/cmd"
-nap 2
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the switch back to uncommitted"
 check "back to HEAD -> working tree"              "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "this agent's mode is back to uncommitted"  '"diffMode":"uncommitted"' "$T/state/terminals.json"
 fi
@@ -788,7 +826,7 @@ if section 5c "⌥] with a TERMINAL focused leaves the diff mode alone"; then
 : > "$CALLS"
 echo 32 > "$ACTIVE"                       # focus the agent's terminal, not the diff
 echo next >> "$T/state/cmd"
-nap 2
+nap 1   # window: the cmd tail's read (200) + SHELL_SETTLE_MS (400) before a wrongful relaunch, scaled; 400 margin
 refute "the diff was not relaunched"              "HEAD~1 HEAD" "$CALLS"
 check  "the mode is untouched"                    '"diffMode":"uncommitted"' "$T/state/terminals.json"
 fi
@@ -802,7 +840,7 @@ if section "5c'" "a revdiff flush (O) jumps focus to the agent's Claude pane"; t
 : > "$CALLS"
 echo 32 > "$ACTIVE"                       # even from the terminal (the verb only ever comes from revdiff)
 echo focus-claude >> "$T/state/cmd"
-nap 2
+waitfor "activate-pane --pane-id 20" "$CALLS" 10 "focus moved to the Claude pane"
 check "focus moved to the Claude (fleet) pane"    "activate-pane --pane-id 20" "$CALLS"
 refute "did NOT focus the shell pane"             "activate-pane --pane-id 32" "$CALLS"
 fi
@@ -812,10 +850,11 @@ if section "5c''" "revdiff is launched with the focus-claude post-flush command"
 : > "$CALLS"
 echo 31 > "$ACTIVE"                       # focus the diff pane
 echo next >> "$T/state/cmd"               # uncommitted -> last-commit forces a relaunch
-nap 2
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the switch to last-commit"
 check "revdiff carries the post-flush hook"       "--post-flush-command \"echo focus-claude >> $T/state/cmd\"" "$CALLS"
+: > "$CALLS"
 echo prev >> "$T/state/cmd"               # back to uncommitted, restoring state for later sections
-nap 2
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the switch back to uncommitted"
 : > "$ACTIVE"                             # unfocus for the remaining sections
 fi
 
@@ -826,11 +865,13 @@ if section 5d "cycling into Custom opens the ASCII prompt, unset revdiff until a
 # Two steps forward, because BROWSE is now the fourth stop and sits between
 # custom and uncommitted -- one `prev` from uncommitted lands on browse (11 below).
 echo 31 > "$ACTIVE"                       # focus the diff pane
+L0=$(countof "in lastcommit mode" "$T/daemon.log")
 echo next >> "$T/state/cmd"               # uncommitted -> lastcommit
-nap 2
+waitmore "in lastcommit mode" "$T/daemon.log" "$L0" 10 "the switch to last-commit"
 : > "$CALLS"
+P0=$(countof "opened custom-range prompt" "$T/daemon.log")
 echo next >> "$T/state/cmd"               # lastcommit -> custom
-nap 2
+waitmore "opened custom-range prompt" "$T/daemon.log" "$P0" 10 "the custom prompt opened"
 check "the running revdiff was quit first"        "STDIN:q\n" "$CALLS"
 check "the custom-range prompt was launched"      "cockpit-custom-prompt.mjs" "$CALLS"
 check "...in the agent's OWN diff pane"           "send-text --pane-id 31" "$CALLS"
@@ -843,7 +884,7 @@ if section "5d'" "answering the prompt launches revdiff against that ref, persis
 : > "$CALLS"
 printf '{"jobId":"abc12345","ref":"main"}' > "$T/state/custom-ref-pending"
 echo custom-ok >> "$T/state/cmd"
-nap 2
+waitfor "custom range set for abc12345: main" "$T/daemon.log" 10 "the custom range set"
 check "revdiff diffs the given ref -> working tree" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" \"main\"" "$CALLS"
 check "...in the agent's OWN diff pane"            "send-text --pane-id 31" "$CALLS"
 check "the per-agent ref was persisted"           "\"abc12345\":\"main\"" "$T/state/custom-refs.json"
@@ -854,20 +895,24 @@ if section "5d''" "cancelling the prompt reverts to the previous mode"; then
 # Leave custom (backwards, to last-commit -- forwards is browse now), then cycle
 # back in so the prompt opens with last-commit as the mode to fall back to, and
 # answer with a cancel.
+L0=$(countof "in lastcommit mode" "$T/daemon.log")
 echo prev >> "$T/state/cmd"               # custom -> lastcommit
-nap 2
+waitmore "in lastcommit mode" "$T/daemon.log" "$L0" 10 "the switch back to last-commit"
 : > "$CALLS"
+P0=$(countof "opened custom-range prompt" "$T/daemon.log")
 echo next >> "$T/state/cmd"               # lastcommit -> custom, opens the prompt again
-nap 2
+waitmore "opened custom-range prompt" "$T/daemon.log" "$P0" 10 "the custom prompt opened again"
 check "the prompt opened again"                   "cockpit-custom-prompt.mjs" "$CALLS"
 : > "$CALLS"
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
-nap 2
+# The cancel relaunches revdiff, then writes the reverted mode to terminals.json.
+waituntil 10 "the cancel to revert to last-commit" grep -qF '"diffMode":"lastcommit"' "$T/state/terminals.json"
 check "cancel reverted to the prior mode"         '"diffMode":"lastcommit"' "$T/state/terminals.json"
 check "and revdiff came back in that range"       "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
+U0=$(countof "in uncommitted mode" "$T/daemon.log")
 echo prev >> "$T/state/cmd"               # back to the uncommitted default for 5e
-nap 2
+waitmore "in uncommitted mode" "$T/daemon.log" "$U0" 10 "the switch back to uncommitted"
 fi
 
 if section 5e "the diff mode is PER AGENT: a new agent is never carried into another's mode"; then
@@ -875,12 +920,13 @@ if section 5e "the diff mode is PER AGENT: a new agent is never carried into ano
 # in the uncommitted default -- not inherit last-commit. (Its parked revdiff was
 # launched uncommitted and comes back untouched.)
 echo 31 > "$ACTIVE"                       # focus abc12345's diff pane
+L0=$(countof "in lastcommit mode" "$T/daemon.log")
 echo next >> "$T/state/cmd"               # uncommitted -> last-commit for abc12345 only
-nap 2
+waitmore "in lastcommit mode" "$T/daemon.log" "$L0" 10 "the switch to last-commit"
 check "this agent went to last-commit"            '"diffMode":"lastcommit"' "$T/state/terminals.json"
 : > "$CALLS"; : > "$ACTIVE"
 echo "second agent" > "$FLEETSTATE"       # switch to def67890
-nap 3
+waituntil 10 "the switch to second agent (terminals.json)" grep -qF '"agent":"second agent"' "$T/state/terminals.json"
 check "the OTHER agent shows the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
 refute "it did NOT inherit last-commit"           "HEAD~1 HEAD" "$CALLS"
 fi
@@ -888,12 +934,13 @@ fi
 if section "5e'" "switching back leaves abc12345 in its own last-commit, then reset"; then
 : > "$CALLS"
 echo "test agent" > "$FLEETSTATE"         # back to abc12345
-nap 3
+waituntil 10 "the switch back to test agent (terminals.json)" grep -qF '"agent":"test agent"' "$T/state/terminals.json"
 check "abc12345 kept its own last-commit mode"    '"diffMode":"lastcommit"' "$T/state/terminals.json"
 # Reset to the uncommitted default so the later sections see the default range.
 echo 31 > "$ACTIVE"
+U0=$(countof "in uncommitted mode" "$T/daemon.log")
 echo prev >> "$T/state/cmd"               # last-commit -> uncommitted
-nap 2
+waitmore "in uncommitted mode" "$T/daemon.log" "$U0" 10 "the switch back to uncommitted"
 check "reset to the uncommitted default"          '"diffMode":"uncommitted"' "$T/state/terminals.json"
 : > "$ACTIVE"                             # unfocus for the remaining sections; back at the uncommitted default
 fi
@@ -905,19 +952,19 @@ if section 5f "clicking a diff-mode label switches the mode regardless of focus"
 # empty so no pane reads as the focused diff pane, proving focus-independence.
 : > "$CALLS"; : > "$ACTIVE"
 echo diff-lastcommit >> "$T/state/cmd"
-nap 2
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the clicked switch to last-commit"
 check "clicked label switched to last-commit while unfocused" "revdiff --wrap --no-confirm-discard -o \"$T/state/review-abc12345.md\" HEAD~1 HEAD" "$CALLS"
 check "the mode reflects the clicked label"       '"diffMode":"lastcommit"' "$T/state/terminals.json"
 
 : > "$CALLS"
 echo diff-uncommitted >> "$T/state/cmd"
-nap 2
+waitfor "activate-pane --pane-id 31" "$CALLS" 10 "the clicked switch to uncommitted"
 check "clicking Uncommitted returns to that range" "revdiff --wrap --no-confirm-discard --untracked -o \"$T/state/review-abc12345.md\" HEAD" "$CALLS"
 check "the mode is back to uncommitted"           '"diffMode":"uncommitted"' "$T/state/terminals.json"
 
 : > "$CALLS"
 echo diff-uncommitted >> "$T/state/cmd"           # clicking the ALREADY-active label
-nap 2
+nap 1   # window: the cmd tail's read (200) + SHELL_SETTLE_MS (400) before a wrongful relaunch, scaled; 400 margin
 refute "clicking the active label relaunches nothing" "revdiff --wrap" "$CALLS"
 fi
 
@@ -926,15 +973,16 @@ if section "5f'" "clicking Custom always (re)opens the ref prompt"; then
 # prompt so the base ref can be entered (or changed), and revdiff is not
 # relaunched until the answer comes back.
 : > "$CALLS"
+P0=$(countof "opened custom-range prompt" "$T/daemon.log")
 echo diff-custom >> "$T/state/cmd"
-nap 2
+waitmore "opened custom-range prompt" "$T/daemon.log" "$P0" 10 "the clicked custom prompt"
 check "clicking Custom opened the ref prompt"     "cockpit-custom-prompt.mjs" "$CALLS"
 check "the mode is now custom"                    '"diffMode":"custom"' "$T/state/terminals.json"
 refute "revdiff is NOT relaunched until answered" "revdiff --wrap" "$CALLS"
 # Cancel so state is clean and later sections see the uncommitted default again.
 printf '{"jobId":"abc12345","cancel":true}' > "$T/state/custom-ref-pending"
 echo custom-cancel >> "$T/state/cmd"
-nap 2
+waituntil 10 "the cancel to revert to uncommitted" grep -qF '"diffMode":"uncommitted"' "$T/state/terminals.json"
 check "cancel reverted to the uncommitted default" '"diffMode":"uncommitted"' "$T/state/terminals.json"
 fi
 
@@ -947,16 +995,19 @@ if section 5g "the strip's [+ add] and [x] buttons manage terminals by number"; 
 # leaned on by later sections) is never the one killed -- so the section nets to
 # zero and leaves that one terminal exactly as it found it.
 : > "$CALLS"
+O0=$(countof "opened terminal pane" "$T/daemon.log")
 echo new >> "$T/state/cmd"                        # [+ add]
-nap 2
+# A terminal command's last act is writing terminals.json, after its log line.
+waituntil 10 "[+ add] to open terminal #2" grep -qF '"n":2' "$T/state/terminals.json"
 check "[+ add] opened a second terminal"          '"n":2' "$T/state/terminals.json"
-check "opening a terminal was logged"             "opened terminal pane" "$T/daemon.log"
+# Count-based: section 1 already logged "opened terminal pane" (DESIGN 3.3).
+grew  "opening a terminal was logged"             "opened terminal pane" "$T/daemon.log" "$O0"
 
 # close-2 targets the terminal ON SCREEN (the one just added, now current): the
 # slot-dance path brings the original sibling back before killing the new one.
 : > "$CALLS"
 echo close-2 >> "$T/state/cmd"
-nap 2
+waituntil 10 "[x] to close on-screen terminal #2" sh -c '! grep -qF "\"n\":2" "$1"' _ "$T/state/terminals.json"
 check "[x] on the on-screen terminal closed it"   "closed terminal pane" "$T/daemon.log"
 refute "one terminal left after closing #2"       '"n":2' "$T/state/terminals.json"
 
@@ -965,21 +1016,22 @@ refute "one terminal left after closing #2"       '"n":2' "$T/state/terminals.js
 # empty, so `prev` cycles terminals, not the diff mode.)
 : > "$CALLS"
 echo new >> "$T/state/cmd"
-nap 2
+waituntil 10 "a second terminal to open again" grep -qF '"n":2' "$T/state/terminals.json"
 check "a second terminal is open again"           '"n":2' "$T/state/terminals.json"
 echo prev >> "$T/state/cmd"                        # show terminal #1, parking #2
-nap 2
+waituntil 10 "prev to show terminal #1" grep -qF '"n":1,"active":true' "$T/state/terminals.json"
 : > "$CALLS"
 echo close-2 >> "$T/state/cmd"
-nap 2
+waituntil 10 "[x] to close parked terminal #2" sh -c '! grep -qF "\"n\":2" "$1"' _ "$T/state/terminals.json"
 check "[x] on a PARKED terminal closed it"        "closed parked terminal pane" "$T/daemon.log"
 refute "back to one terminal"                     '"n":2' "$T/state/terminals.json"
 
 # The last terminal has no [x] in the strip, but a stray close-<n> must still be
 # refused -- the slot must always hold a terminal (mirrors ⌥w).
 : > "$CALLS"
+F0=$(countof "refusing to close the last terminal for abc12345" "$T/daemon.log")
 echo close-1 >> "$T/state/cmd"
-nap 2
+waitmore "refusing to close the last terminal for abc12345" "$T/daemon.log" "$F0" 10 "close-1 refused"
 refute "closing the last terminal killed nothing" "kill-pane" "$CALLS"
 check "refusing to close the last was logged"     "refusing to close the last terminal" "$T/daemon.log"
 fi
@@ -992,12 +1044,12 @@ if section "5g'" "clicking a terminal's label selects it (select-<n>)"; then
 # the agent's original terminal (32) is left exactly as found.
 : > "$CALLS"
 echo new >> "$T/state/cmd"                        # a second terminal, now on screen (#2)
-nap 2
+waituntil 10 "a second terminal to open" grep -qF '"n":2' "$T/state/terminals.json"
 check "a second terminal is open"                 '"n":2' "$T/state/terminals.json"
 
 : > "$CALLS"
 echo select-1 >> "$T/state/cmd"                   # click terminal #1's label
-nap 2
+waituntil 10 "select-1 to show terminal #1" grep -qF '"n":1,"active":true' "$T/state/terminals.json"
 check "selecting #1 was logged"                   "selected terminal pane" "$T/daemon.log"
 check "terminal #1 is now active"                 '"n":1,"active":true' "$T/state/terminals.json"
 check "terminal #2 is now parked"                 '"n":2,"active":false' "$T/state/terminals.json"
@@ -1005,29 +1057,30 @@ check "terminal #2 is now parked"                 '"n":2,"active":false' "$T/sta
 # Selecting the terminal already on screen is a no-op: no slot swap, nothing moves.
 : > "$CALLS"
 echo select-1 >> "$T/state/cmd"
-nap 2
+nap 1   # window: the cmd tail's read (200, scaled) + the command itself; 800 margin
 refute "re-selecting the active terminal moved nothing" "move-pane-id" "$CALLS"
 
 # An out-of-range number names no terminal and is refused, not guessed.
 : > "$CALLS"
+N0=$(countof "no terminal #9" "$T/daemon.log")
 echo select-9 >> "$T/state/cmd"
-nap 2
+waitmore "no terminal #9" "$T/daemon.log" "$N0" 10 "select-9 refused"
 check "an out-of-range select is refused"         "no terminal #9" "$T/daemon.log"
 refute "an out-of-range select moved nothing"     "move-pane-id" "$CALLS"
 
 # Bring #2 back and close it, netting the section to zero (leaves terminal 32).
 echo select-2 >> "$T/state/cmd"
-nap 2
+waituntil 10 "select-2 to show terminal #2" grep -qF '"n":2,"active":true' "$T/state/terminals.json"
 : > "$CALLS"
 echo close-2 >> "$T/state/cmd"
-nap 2
+waituntil 10 "close-2 to close terminal #2" sh -c '! grep -qF "\"n\":2" "$1"' _ "$T/state/terminals.json"
 refute "back to one terminal after 5g'"           '"n":2' "$T/state/terminals.json"
 fi
 
 if section 6 "back to the list: the repo shell returns, agents keep running"; then
 : > "$CALLS"
 echo list > "$FLEETSTATE"
-nap 3
+waituntil 10 "the detach to finish (terminals.json back to repo)" grep -qF '"agent":"repo"' "$T/state/terminals.json"
 
 check "repo diff pane moved back into the slot"  "--move-pane-id 10" "$CALLS"
 check "repo shell moved back into the slot"      "--move-pane-id 30" "$CALLS"
@@ -1044,7 +1097,7 @@ if section 6b "the fleet LIST has terminals of its own: ⌥t / [+ add] work unat
 # sections below.
 : > "$CALLS"
 echo new >> "$T/state/cmd"                        # ⌥t / [+ add], at the list
-nap 2
+waituntil 10 "a second repo shell to open" grep -qF '"n":2' "$T/state/terminals.json"
 check "a second repo shell was opened"           '"n":2' "$T/state/terminals.json"
 check "...for the repo, not an agent"            '"agent":"repo"' "$T/state/terminals.json"
 check "...at the cockpit repo, not a worktree"    "--cwd $WT --" "$CALLS"
@@ -1054,23 +1107,26 @@ check "opening it was logged against 'repo'"     "for repo (2 total) at $WT" "$T
 # Cycling works too: prev shows #1 again and parks #2, both still alive.
 : > "$CALLS"
 echo prev >> "$T/state/cmd"
-nap 2
+waituntil 10 "prev to show repo shell #1" grep -qF '"n":1,"active":true' "$T/state/terminals.json"
 check "cycling back showed repo shell #1"        '"n":1,"active":true' "$T/state/terminals.json"
 check "repo shell #2 was parked, not killed"     "move-pane-to-new-tab" "$CALLS"
 refute "no repo shell was killed by cycling"     "kill-pane" "$CALLS"
 
 # And closing by number, the strip's [x] on a parked one.
 : > "$CALLS"
+C0=$(countof "closed parked terminal pane" "$T/daemon.log")
 echo close-2 >> "$T/state/cmd"
-nap 2
-check "[x] closed the parked repo shell"         "closed parked terminal pane" "$T/daemon.log"
+waituntil 10 "[x] to close parked repo shell #2" sh -c '! grep -qF "\"n\":2" "$1"' _ "$T/state/terminals.json"
+# Count-based: 5g already logged "closed parked terminal pane" (DESIGN 3.3).
+grew  "[x] closed the parked repo shell"         "closed parked terminal pane" "$T/daemon.log" "$C0"
 refute "back to one repo shell"                  '"n":2' "$T/state/terminals.json"
 
 # The last one is refused here exactly as it is for an agent: the slot must always
 # hold a terminal.
 : > "$CALLS"
+F0=$(countof "refusing to close the last terminal for repo" "$T/daemon.log")
 echo close >> "$T/state/cmd"                      # ⌥w on the lone repo shell
-nap 2
+waitmore "refusing to close the last terminal for repo" "$T/daemon.log" "$F0" 10 "the last repo shell's close refused"
 refute "closing the last repo shell killed nothing" "kill-pane" "$CALLS"
 check "refusing the last was logged against 'repo'" "refusing to close the last terminal for repo" "$T/daemon.log"
 fi
@@ -1082,7 +1138,8 @@ cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$WT","kind":"background",
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
-nap 3
+# Two reaper ticks (REAP_MS each), then the terminal and the diff go, diff last.
+waitfor "diff pane 33 — agent def67890 is gone" "$T/daemon.log" 10 "def67890's diff pane reaped"
 
 check "the vanished agent's terminal was killed" "kill-pane --pane-id 34" "$CALLS"
 check "the vanished agent's diff pane too"       "kill-pane --pane-id 33" "$CALLS"
@@ -1098,10 +1155,13 @@ if section 8 "a diff pane that dies is rebuilt, at full width"; then
 # repairs it: the reconcile poll returns early while the same agent is still
 # showing, so the slot would sit empty until the next switch.
 echo "test agent" > "$FLEETSTATE"
-nap 3
+waituntil 10 "the attach to test agent (terminals.json)" grep -qF '"agent":"test agent"' "$T/state/terminals.json"
 : > "$CALLS"
+O0=$(countof "opened diff pane" "$T/daemon.log")
 awk '$1 != 31' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
-nap 4
+# healMissingPanes notices on its REAP_MS tick, the next reconcile rebuilds, and
+# launching revdiff in the fresh pane is the last step checked.
+waitfor "revdiff --wrap --no-confirm-discard --untracked" "$CALLS" 10 "revdiff in the rebuilt diff pane"
 
 check "the loss was noticed"                     "diff pane for abc12345 is gone" "$T/daemon.log"
 check "the slot was rebuilt"                     "rebuilt the diff slot" "$T/daemon.log"
@@ -1111,7 +1171,8 @@ check "the terminal stepped aside for the rebuild" "move-pane-to-new-tab --pane-
 check "and was moved back, not respawned"        "--move-pane-id 32" "$CALLS"
 check "the full-width split came off the fleet pane" "--top --percent 42 --pane-id 20" "$CALLS"
 check "the placeholder was killed, not parked"   "kill-pane" "$CALLS"
-check "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log"
+# Count-based: section 1 already logged "opened diff pane" (DESIGN 3.3).
+grew  "a fresh diff pane took the slot"          "opened diff pane" "$T/daemon.log" "$O0"
 check "revdiff started in it"                    "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
 fi
 
@@ -1121,7 +1182,8 @@ if section 9 "an agent that changed directory drags its idle, untouched terminal
 # spawned once and only moved between tabs after that, so without help it stays
 # frozen at the old directory. On re-attach the daemon cd's the shell forward --
 # but only when it is idle AND still sitting where it was spawned (untouched).
-echo list > "$FLEETSTATE"; sleep 2
+echo list > "$FLEETSTATE"
+waituntil 10 "the detach to finish (terminals.json back to repo)" grep -qF '"agent":"repo"' "$T/state/terminals.json"
 
 MOVED="$T/moved"; mkrepo "$MOVED"       # where the agent went (its new worktree)
 echo "32 file://$WT" > "$PANECWD"         # its terminal (pane 32) is still at $WT
@@ -1130,7 +1192,8 @@ cat > "$AGENTS_JSON" <<JSON
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 : > "$CALLS"
-echo "test agent" > "$FLEETSTATE"; sleep 3
+echo "test agent" > "$FLEETSTATE"
+waitfor "cd terminal 32" "$T/daemon.log" 10 "terminal 32 cd'd forward"
 
 check "the stale idle terminal was cd'd forward"  "cd terminal 32" "$T/daemon.log"
 check "logged as an agent directory move"         "agent moved from" "$T/daemon.log"
@@ -1141,7 +1204,8 @@ check "the new dir was typed into the terminal"   'cd "'"$MOVED"'"\n' "$CALLS"
 fi
 
 if section 9b "a BUSY terminal is left where it is (a cd must not land mid-command)"; then
-echo list > "$FLEETSTATE"; sleep 2
+echo list > "$FLEETSTATE"
+waituntil 10 "the detach to finish (terminals.json back to repo)" grep -qF '"agent":"repo"' "$T/state/terminals.json"
 MOVED2="$T/moved2"; mkrepo "$MOVED2"
 echo "32 file://$MOVED" > "$PANECWD"       # 32 is now at $MOVED (untouched), still
 echo node > "$PSBUSY"                      # ...but a job is running in it now
@@ -1150,7 +1214,8 @@ cat > "$AGENTS_JSON" <<JSON
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 : > "$CALLS"
-echo "test agent" > "$FLEETSTATE"; sleep 3
+echo "test agent" > "$FLEETSTATE"
+waitfor "busy at" "$T/daemon.log" 10 "the busy terminal refused"
 
 check  "the daemon refused because it was busy"   "busy at" "$T/daemon.log"
 refute "the busy shell was NOT cd'd"              'cd "'"$MOVED2"'"\n' "$CALLS"
@@ -1172,11 +1237,11 @@ cat > "$AGENTS_JSON" <<JSON
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 : > "$CALLS"
-# NOT scaled: followWorktreeMigration re-reads the cwd only once per
-# MIGRATION_CHECK_MS and spawns `claude` each time, so this wait must clear that
-# throttle plus the spawn with margin. Scaled down it shrinks below the throttle
-# and the relaunch is missed (measured: flaky at SPEED 0.5). Fixed 3s is cheap.
-sleep 3
+# followWorktreeMigration re-reads the cwd once per MIGRATION_CHECK_MS, and not
+# inside DIFF_RELAUNCH_COOLDOWN_MS of 9b's relaunch; the relaunch in the new
+# worktree is its last step. (The fixed sleep 3 this replaces was measured flaky
+# when scaled; a poll has no such floor.)
+waitfor 'cd "'"$MOVED3"'" && revdiff' "$CALLS" 10 "revdiff relaunched in the new worktree"
 
 check  "the mid-attach move was noticed"          "moved worktree" "$T/daemon.log"
 check  "revdiff was re-pointed at the new dir"    'cd "'"$MOVED3"'" && revdiff' "$CALLS"
@@ -1190,15 +1255,23 @@ if section 9d "an agent that moves WHILE PARKED is caught on return, not left st
 # watch) is relaunched in the new worktree. Here: detach to the list, move the
 # agent while it is parked, then re-attach.
 MOVED4="$T/moved4"; mkrepo "$MOVED4"     # the watch is re-pointed on return, so it must exist
-echo list > "$FLEETSTATE"; sleep 2         # park abc12345's diff (last launched at $MOVED3)
+echo list > "$FLEETSTATE"                   # park abc12345's diff (last launched at $MOVED3)
+waituntil 10 "the detach to finish (terminals.json back to repo)" grep -qF '"agent":"repo"' "$T/state/terminals.json"
 cat > "$AGENTS_JSON" <<JSON
 [{"pid":1,"id":"abc12345","cwd":"$MOVED4","kind":"background",
   "sessionId":"s","name":"test agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 : > "$CALLS"
-echo "test agent" > "$FLEETSTATE"; sleep 3  # re-attach: onEnter sees the parked pane moved
+R0=$(countof "relaunched diff pane" "$T/daemon.log")
+echo "test agent" > "$FLEETSTATE"           # re-attach: onEnter sees the parked pane moved
+waitmore "relaunched diff pane" "$T/daemon.log" "$R0" 10 "the parked pane relaunched on return"
+# ...and for the attach to END (showTerminal's terminals.json write): the terminal
+# swap after the relaunch rewrites the stub's pane table, and section 10's own
+# rewrite of it (marking revdiff quit) must not race that and be lost.
+waituntil 10 "the re-attach to finish (terminals.json)" grep -qF '"agent":"test agent"' "$T/state/terminals.json"
 
-check  "the parked pane was relaunched on return" "relaunched diff pane" "$T/daemon.log"
+# Count-based: 3b and 5 already logged "relaunched diff pane" (DESIGN 3.3).
+grew   "the parked pane was relaunched on return" "relaunched diff pane" "$T/daemon.log" "$R0"
 check  "revdiff came back on the new worktree"    'cd "'"$MOVED4"'" && revdiff' "$CALLS"
 refute "revdiff did not come back on the old one" 'cd "'"$MOVED3"'" && revdiff' "$CALLS"
 fi
@@ -1209,16 +1282,16 @@ if section 10 "quitting revdiff is reinstated, never left as a bare shell"; then
 # revdiff back on the same diff so the top pane is not left at an empty shell.
 DP=$(grep -oE '"diff":[0-9]+' "$T/state/panes.json" | grep -oE '[0-9]+')
 : > "$CALLS"
+Q0=$(countof "reinstated it" "$T/daemon.log")
 # Simulate the quit: the pane falls back to a shell prompt (title no longer
 # revdiff), exactly what the daemon sees the moment revdiff exits.
 awk -v p="$DP" '{ if ($1 == p) print $1, $2, "sh"; else print }' "$PANESTATE" > "$PANESTATE.q" \
     && mv "$PANESTATE.q" "$PANESTATE"
-# NOT scaled: healQuitDiff must fire (its own interval), clear the relaunch
-# cooldown, and relaunch. Scaled down this margin got thin and the reinstate was
-# occasionally missed. Fixed 3s keeps it reliable at any SPEED.
-sleep 3
+# healQuitDiff fires every 1000ms (scaled) once DIFF_RELAUNCH_COOLDOWN_MS has
+# passed since 9d's relaunch; the reinstate is logged after the launch is typed.
+waitmore "reinstated it" "$T/daemon.log" "$Q0" 10 "revdiff reinstated after the quit"
 
-check "the quit was noticed and revdiff reinstated" "reinstated it" "$T/daemon.log"
+grew  "the quit was noticed and revdiff reinstated" "reinstated it" "$T/daemon.log" "$Q0"
 check "revdiff relaunched in the same diff pane"     "send-text --pane-id $DP" "$CALLS"
 check "...on the current range"                      "revdiff --wrap --no-confirm-discard --untracked" "$CALLS"
 
@@ -2732,11 +2805,11 @@ PKF="pkill -f"
 check  "the harness intercepted pkill"            "$PKF cockpitd.mjs" "$T/layout-calls"
 fi
 
-if section 12 "the footer draws -- and clicks -- a fourth label"; then
-# The strip renderer is a separate process reading terminals.json, so this section
-# runs it directly rather than through the daemon. It never exits on its own (it
-# watches the state dir), so every run is backgrounded and killed.
-SD="$T/strip"; mkdir -p "$SD"
+# --- the footer chain's helpers (12, 12b, 12c) ------------------------------
+# Defined here, above the chain's first heading and outside every section, so
+# what a section sees never depends on which sections ran before it
+# (plans/test-suite-speed DESIGN 4.1). Nothing here starts a process.
+SD="$T/strip"
 # The capture goes OUTSIDE the state dir: the renderer watches that directory, so a
 # capture file written into it makes the renderer repaint on its own output for ever.
 RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
@@ -2745,16 +2818,134 @@ RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
 # ←↑↓→) that a byte-oriented reader counts several times over, which lands the
 # click ~35 columns to the right of the label it was aimed at.
 STRIP_ANSI='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(process.argv[2] ? String(s.indexOf(process.argv[2]) + 1) : s)'
+# Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
+# code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
+# points equal columns here -- which is what the one-row width assertion needs.
+LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
+SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
+# The renderer's start-up writes, in order: hide the cursor, the frame, then turn on
+# mouse reporting (and, on a tty, raw mode straight after). So MOUSE_ON in the
+# output means the first frame is complete and a click can be read. CURSOR_ON is
+# what its SIGTERM handler writes on the way out.
+MOUSE_ON=$'\033[?1006h'
+CURSOR_ON=$'\033[?25h'
 
+# strip_frame [cols]: render ONE footer frame of $SD/terminals.json into $RAW and
+# $PLAIN. It used to sleep 0.8s and kill; now it polls for the finished frame. The
+# kill must land after the renderer has registered its SIGTERM handler, or the
+# frame loses its exit bytes (which 12c's hashes include), so a frame without them
+# is simply rendered again. The single-command subshells matter: bash execs node,
+# so the kill reaches node rather than a wrapper. No [cols] leaves COLUMNS as
+# inherited, exactly as section 12's frames always ran.
+strip_frame() {
+  local p try
+  for try in 1 2 3; do
+    : > "$RAW"
+    if [ $# -gt 0 ]; then
+      ( COCKPIT_DIR="$SD" COLUMNS="$1" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+    else
+      ( COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
+    fi
+    p=$!
+    waituntil 10 "the footer to draw a frame" grep -qF -- "$MOUSE_ON" "$RAW"
+    kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+    grep -qF -- "$CURSOR_ON" "$RAW" && break
+  done
+  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+}
 footer() {   # footer <diffMode>: render one frame with that mode into $RAW/$PLAIN
   printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' \
       "$1" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!
-  sleep 0.8
-  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
+  strip_frame
 }
+useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
+# ufooter <mode> <cols>: render one frame at a forced width (no TTY under the pipe,
+# so COLUMNS is how the narrow-window trim is exercised).
+ufooter() {
+  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' "$1" > "$SD/terminals.json"
+  strip_frame "$2"
+}
+# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
+# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
+ffooter() {
+  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
+      "$1" "$2" > "$SD/terminals.json"
+  strip_frame "${3:-}"
+}
+has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
+
+# press <cols|-> <label> [<sentinel-label> <sentinel-verb>]: left-press <label> in
+# the frame last rendered into $RAW, through $CLICKER under script(1) (the footer
+# needs a real terminal to read a mouse report), and echo the verbs it appended.
+# `-` runs without COLUMNS, as section 12's clicks always did.
+#
+# This used to be `sleep 1; click; sleep 0.8` and then up to 4s waiting for
+# script(1) to notice its input had closed, which it never did. Now each step is a
+# poll: the press is sent once the renderer has drawn and turned on mouse input,
+# and the result is read once the verb is in $SD/cmd.
+#
+# A press that must append NOTHING cannot end on a poll for a verb. So it is
+# followed by a SENTINEL press on a label that does append one: the renderer reads
+# its input in order, so once the sentinel's verb is in the file the first press
+# has been handled, and whatever came before the sentinel's line is its result.
+# That proves the absence without a timed window.
+press() {
+  local cols=$1 label=$2 sl=${3:-} sv=${4:-} col scol="" p i=0
+  local out="$T/press-out" go="$T/press-go" done="$T/press-done"
+  col=$(node -e "$STRIP_ANSI" "$RAW" "$label")
+  [ -n "$sl" ] && scol=$(node -e "$STRIP_ANSI" "$RAW" "$sl")
+  : > "$SD/cmd"; : > "$out"; rm -f "$go" "$done"
+  # The feeder holds script's stdin open until told the result is in: closed early,
+  # script(1) could take the renderer down before the press was read. Its own
+  # loops are bounded so it can never outlive the helper by more than ~30s.
+  feed() {
+    local j=0
+    until [ -e "$go" ] || [ "$j" -ge 300 ]; do sleep 0.05; j=$((j + 1)); done
+    printf '\033[<0;%d;1M' "$col"
+    [ -n "$scol" ] && printf '\033[<0;%d;1M' "$scol"
+    j=0
+    until [ -e "$done" ] || [ "$j" -ge 300 ]; do sleep 0.05; j=$((j + 1)); done
+  }
+  if [ "$cols" = - ]; then
+    feed | ( COCKPIT_DIR="$SD" script -q /dev/null node "$CLICKER" footer > "$out" 2>&1 ) &
+  else
+    feed | ( COCKPIT_DIR="$SD" COLUMNS="$cols" script -q /dev/null node "$CLICKER" footer > "$out" 2>&1 ) &
+  fi
+  p=$!
+  # Inside $(...) a wait's FAIL line would become part of the result, so it goes
+  # to stderr; the `same` on the result is what fails the run.
+  waituntil 10 "the clicked footer to draw and read the mouse" grep -qF -- "$MOUSE_ON" "$out" >&2
+  : > "$go"
+  if [ -n "$sv" ]; then
+    waituntil 10 "the sentinel press on $sl to append $sv" grep -qxF -- "$sv" "$SD/cmd" >&2
+  else
+    waituntil 10 "a press on $label to append a verb" grep -q . "$SD/cmd" >&2
+  fi
+  : > "$done"
+  pkill -f "$CLICKER" 2>/dev/null
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+  wait "$p" 2>/dev/null
+  if [ -n "$sv" ]; then
+    # Called inside $(...), where a timed-out wait's `fail=1` is lost: so a missing
+    # sentinel is written INTO the result, and the `same` after it fails on it
+    # rather than passing on an empty file that proved nothing.
+    awk -v s="$sv" '$0 == s { exit } { printf "%s", $0 }' "$SD/cmd"
+    grep -qxF -- "$sv" "$SD/cmd" || printf '<no %s: the press was never shown to be handled>' "$sv"
+  else
+    tr -d '\n' < "$SD/cmd"
+  fi
+}
+click() { press - "$@"; }                    # section 12: no forced width
+fclick() {  # fclick <label> <cols> [<sentinel-label> <sentinel-verb>]
+  local l=$1 c=$2; shift 2; press "$c" "$l" "$@"
+}
+
+if section 12 "the footer draws -- and clicks -- a fourth label"; then
+# The strip renderer is a separate process reading terminals.json, so this section
+# runs it directly rather than through the daemon. It never exits on its own (it
+# watches the state dir), so every run is backgrounded and killed.
+mkdir -p "$SD"
 
 footer browse
 check  "the footer draws a Browse label"          "Browse" "$PLAIN"
@@ -2791,20 +2982,6 @@ cp "$ROOT/bin/cockpit-usage-store.mjs" "$T/cockpit-usage-store.mjs"
 cp "$ROOT/bin/cockpit-usage-model.mjs" "$T/cockpit-usage-model.mjs"
 
 footer uncommitted                        # Browse drawn plain, as it would be clicked
-click() {  # click <label>: send a left-click at that label's column, echo the verb
-  local col p i=0
-  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
-  : > "$SD/cmd"
-  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
-  | ( COCKPIT_DIR="$SD" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
-  p=$!
-  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
-  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
-  wait "$p" 2>/dev/null
-  pkill -f "$CLICKER" 2>/dev/null
-  tr -d '\n' < "$SD/cmd"
-}
-
 same "clicking Browse appends diff-browse"        "$(click Browse)" "diff-browse"
 # The three that were already there must keep their columns and their hit zones: a
 # fourth label inserted anywhere but the end would silently move them.
@@ -2830,19 +3007,6 @@ NOW_MS=$(( NOW_S * 1000 ))
 STALE_MS=$(( (NOW_S - 1200) * 1000 ))
 R5=$(( NOW_S + 3600 ))
 R7=$(( NOW_S + 3 * 86400 ))
-# Visible width of a rendered frame: strip the escapes (incl. 2J/H/K) and count
-# code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
-# points equal columns here -- which is what the one-row width assertion needs.
-LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
-useed() { printf '%s' "$1" > "$SD/usage-cache.json"; }   # seed the cache the footer reads
-# ufooter <mode> <cols>: render one frame at a forced width (no TTY under the pipe,
-# so COLUMNS is how the narrow-window trim is exercised).
-ufooter() {
-  printf '{"agent":"test agent","diffMode":"%s","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' "$1" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" COLUMNS="$2" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
-}
 
 # A fresh cache: the 5h / 1d / 7d windows with their percentages, coloured by role.
 # R7 is NOW+3 days, so the weekly window started NOW-4 days -> we are in daily slice
@@ -2909,16 +3073,6 @@ if section 12c "the footer's program switch: Claude Agents | PIR (pir-pane T02)"
 # 3.5) and draws `Claude Agents | PIR` leftmost; a click on the label NOT shown,
 # while switchable, appends fleet-claude / fleet-pir. The daemon starts writing the
 # block in T03, so here terminals.json is hand-written, as in sections 12 and 12b.
-# ffooter <agent> <extra-json> [cols]: one frame; <extra-json> is spliced into the
-# object (e.g. `,"fleet":{...}`), [cols] forces a width through COLUMNS.
-ffooter() {
-  printf '{"agent":"%s","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]%s}\n' \
-      "$1" "$2" > "$SD/terminals.json"
-  ( COCKPIT_DIR="$SD" COLUMNS="${3:-}" node "$ROOT/bin/cockpit-strip.mjs" footer > "$RAW" 2>&1 ) &
-  local p=$!; sleep 0.8; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
-  node -e "$STRIP_ANSI" "$RAW" > "$PLAIN"
-}
-SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
 FL_CLAUDE=',"fleet":{"program":"claude","switchable":true,"available":true}'
 FL_PIR=',"fleet":{"program":"pir","switchable":true,"available":true}'
 FL_LOCKED=',"fleet":{"program":"claude","switchable":false,"available":true}'
@@ -2978,7 +3132,6 @@ check  "narrow: the diff labels are kept"             "Browse" "$PLAIN"
 NW=$(node -e "$LEN" "$RAW")
 if [ "${NW:-0}" -le 140 ]; then okline "narrow: the switch footer stays one row ($NW <= 140)"
 else echo "  FAIL the switch footer wrapped: width $NW > 140 columns"; fail=1; fi
-has() { grep -qF -- "$1" "$PLAIN" && echo 1 || echo 0; }
 LV="$(has 'drag copy')$(has '⌥t new')$(has 'test agent')"
 case "$LV" in 111|011|001|000) okline "narrow: trimming stays in its order ($LV)";;
   *) echo "  FAIL narrow trim is out of order: sec/pri/name = $LV"; fail=1;; esac
@@ -3026,19 +3179,6 @@ rm -f "$SD/usage-cache.json"
 
 # The click path, under script(1) exactly like section 12's click().
 if command -v script >/dev/null; then
-fclick() {  # fclick <label> [cols]: left-press that label in the current frame, echo the verb
-  local col p i=0
-  col=$(node -e "$STRIP_ANSI" "$RAW" "$1")
-  : > "$SD/cmd"
-  ( sleep 1; printf '\033[<0;%d;1M' "$col"; sleep 0.8 ) \
-  | ( COCKPIT_DIR="$SD" COLUMNS="${2:-}" script -q /dev/null node "$CLICKER" footer >/dev/null 2>&1 ) &
-  p=$!
-  while kill -0 "$p" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
-  kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
-  wait "$p" 2>/dev/null
-  pkill -f "$CLICKER" 2>/dev/null
-  tr -d '\n' < "$SD/cmd"
-}
 cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it
 # Both sizes the task names: 319 (the live window) and the 140 narrow one, the
 # latter with usage present so the trim is in play.
@@ -3046,22 +3186,58 @@ for W in 319 140; do
   if [ "$W" = 140 ]; then useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":80,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":93,\"resetsAt\":$R7}}"; fi
   ffooter "test agent" "$FL_CLAUDE" "$W"
   same "[$W] claude shown: clicking PIR appends fleet-pir"           "$(fclick PIR "$W")" "fleet-pir"
-  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] claude shown: clicking Claude Agents appends nothing"   "$(fclick 'Claude Agents' "$W" Browse diff-browse)" ""
   same "[$W] the diff labels still land behind the switch"           "$(fclick Browse "$W")" "diff-browse"
   same "[$W] ...and Uncommitted Changes too"                         "$(fclick 'Uncommitted Changes' "$W")" "diff-uncommitted"
   ffooter "test agent" "$FL_PIR" "$W"
   same "[$W] pir shown: clicking Claude Agents appends fleet-claude" "$(fclick 'Claude Agents' "$W")" "fleet-claude"
-  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W")" ""
+  same "[$W] pir shown: clicking PIR appends nothing"                "$(fclick PIR "$W" Browse diff-browse)" ""
   ffooter "test agent" "$FL_LOCKED" "$W"
-  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W")" ""
-  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W")" ""
+  same "[$W] not switchable: clicking PIR appends nothing"           "$(fclick PIR "$W" Browse diff-browse)" ""
+  same "[$W] not switchable: clicking Claude Agents appends nothing" "$(fclick 'Claude Agents' "$W" Browse diff-browse)" ""
   ffooter "repo" "$FL_CLAUDE" "$W"
   same "[$W] at the fleet list the switch still clicks (fleet-pir)"  "$(fclick PIR "$W")" "fleet-pir"
-  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W")" ""
+  same "[$W] ...while the diff labels stay inert there"              "$(fclick Browse "$W" PIR fleet-pir)" ""
 done
 rm -f "$SD/usage-cache.json"
 fi
 fi
+
+# --- the agenda chain's helpers (13, 13b, 13c) ------------------------------
+# Above the chain's first heading and outside every gate, like the footer chain's.
+#
+# `same` is REDEFINED here for the rest of the file, with the expected/actual
+# failure format. It used to be redefined inside section 13, so the sections after
+# it (the dashboard chain) printed a different failure format depending on whether
+# 13 had run: `ONLY=14c` got `want [..] got [..]`, a full run `expected:/actual:`.
+# Out here, and ungated, every run prints what a full run always printed. It must
+# stay below every main-chain and footer section, which use the first format.
+same() {  # same <description> <actual> <expected>
+  if [ "$2" = "$3" ]; then
+    okline "$1"
+  else
+    echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
+  fi
+}
+# Read one value out of a cache file; `c` is the parsed agenda-cache.json.
+cq() {  # cq <state-dir> <expression over c>
+  node -e 'const fs=require("fs");let c={calendars:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/agenda-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
+}
+# Zero the fetchedAt the daemon compares against, which is the only way anything
+# here becomes stale. Written directly rather than through the store: nothing is
+# stale at the moment this is called, so the daemon is not holding the lock.
+makestale() {  # makestale <state-dir> <slug>...
+  node -e 'const fs=require("fs");const p=process.argv[1]+"/agenda-cache.json";const c=JSON.parse(fs.readFileSync(p,"utf8"));for(const s of process.argv.slice(2))if(c.calendars[s])c.calendars[s].fetchedAt=0;fs.writeFileSync(p,JSON.stringify(c));' "$@"
+}
+# ghits_ge <n> <fragment>...: has the fake Google logged at least n requests
+# for EACH fragment? A poll condition for waituntil.
+ghits_ge() {
+  local n=$1 f; shift
+  for f; do [ "$(grep -c -- "$f" "$GHITS")" -ge "$n" ] || return 1; done
+}
+# The fake Google's `slow` hold: five agenda ticks, so the in-flight window below
+# (two and a half ticks) always closes before the held request is released.
+GSLOW_MS="$(awk -v t="$AGENDA_TICK_MS" 'BEGIN{ printf "%d", t * 5 }')"
 
 if section 13 "the agenda: the daemon keeps the event cache current"; then
 # T07. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.5), so the refresh is
@@ -3072,20 +3248,14 @@ if section 13 "the agenda: the daemon keeps the event cache current"; then
 # the pane table the sections above assert on. The stub takes those paths from the
 # environment, which is what makes the isolation a matter of env vars alone.
 #
-#   D2  a 400ms tick: everything the tick itself does.
+#   D2  an $AGENDA_TICK_MS tick (400ms at the default speed): everything the tick
+#       itself does. Every window below is a `nap` counted in those ticks.
 #   D3  a tick an hour long, so it can never fire in-test: whatever D3 refreshes
 #       is the ON-RETURN trigger and cannot be confused for a tick.
 #
-# AGENDA_STALE_MS is 60s in both -- longer than this section runs -- so nothing is
+# $AGENDA_STALE_MS (60s or more) in both -- longer than this section runs -- so nothing is
 # ever re-fetched by accident. A calendar goes stale only when a line below zeroes
 # its fetchedAt, and that is what makes every assertion here deterministic.
-same() {  # same <description> <actual> <expected>
-  if [ "$2" = "$3" ]; then
-    okline "$1"
-  else
-    echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
-  fi
-}
 
 # --- a loopback stand-in for Google ----------------------------------------
 # The seatbelt DESIGN 5.2 names: the client is pointed at 127.0.0.1, so a call
@@ -3100,7 +3270,9 @@ import fs from "node:fs";
 // argv[1] is this script's own path (it is run as a file, not with -e), so the
 // two arguments start at 2. Getting this wrong is silent: the mode file is never
 // read, every request looks like a success, and the hit log lands somewhere else.
-const [, , MODE, HITS] = process.argv;
+// The third, the `slow` hold in ms, is scaled with the daemon's tick by the suite.
+const [, , MODE, HITS, SLOW_ARG] = process.argv;
+const SLOW = Number(SLOW_ARG) || 2000;
 const mode = () => { try { return fs.readFileSync(MODE, "utf8").trim(); } catch { return "ok"; } };
 const json = (res, status, body) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -3129,28 +3301,18 @@ const server = http.createServer((req, res) => {
   if (m === "net") return req.socket.destroy();     // a dropped socket -> kind network
   if (m === "gone") return json(res, 404, { error: { message: "Not Found" } });
   if (m === "one-bad" && cal === "bad-cal") return json(res, 404, { error: { message: "Not Found" } });
-  if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), 2000);
+  if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), SLOW);
   json(res, 200, EVENTS);
 });
 server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
 GSTUB
-node "$T/gstub.mjs" "$GMODE" "$GHITS" > "$T/gstub.out" 2>&1 &
+node "$T/gstub.mjs" "$GMODE" "$GHITS" "$GSLOW_MS" > "$T/gstub.out" 2>&1 &
 GPID=$!
 for _ in $(seq 1 60); do grep -q '^PORT ' "$T/gstub.out" 2>/dev/null && break; sleep 0.1; done
 GPORT="$(sed -n 's/^PORT //p' "$T/gstub.out" | head -1)"
 ORIGIN="http://127.0.0.1:$GPORT"
 same "the fake Google is listening on loopback" "$([ -n "$GPORT" ] && echo yes || echo no)" "yes"
 
-# Read one value out of a cache file; `c` is the parsed agenda-cache.json.
-cq() {  # cq <state-dir> <expression over c>
-  node -e 'const fs=require("fs");let c={calendars:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/agenda-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
-}
-# Zero the fetchedAt the daemon compares against, which is the only way anything
-# here becomes stale. Written directly rather than through the store: nothing is
-# stale at the moment this is called, so the daemon is not holding the lock.
-makestale() {  # makestale <state-dir> <slug>...
-  node -e 'const fs=require("fs");const p=process.argv[1]+"/agenda-cache.json";const c=JSON.parse(fs.readFileSync(p,"utf8"));for(const s of process.argv.slice(2))if(c.calendars[s])c.calendars[s].fetchedAt=0;fs.writeFileSync(p,JSON.stringify(c));' "$@"
-}
 
 # --- D2: the tick ----------------------------------------------------------
 A2="$T/agenda2"; S2="$A2/state"
@@ -3173,12 +3335,17 @@ d2env() {
   NEXTPANE="$A2/nextpane" NEXTTAB="$A2/nexttab" EDITING="$A2/editing" \
   TITLELAG="$A2/titlelag" ACTIVE="$A2/active" PANECWD="$A2/panecwd" \
   PSBUSY="$A2/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=400 COCKPIT_AGENDA_STALE_MS=60000 \
+  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS="$AGENDA_TICK_MS" COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
 d2env node "$ROOT/bin/cockpitd.mjs" > "$A2/daemon.log" 2>&1 &
 D2PID=$!
-sleep 2
+# Booted: it has reached the wezterm stub. Nothing is configured yet, so whether
+# the start-up refresh has run by then does not matter here (D3's boot below is
+# where it does). Then two and a half ticks with nothing configured is the window
+# that proves a tick asks for nothing.
+waituntil 10 "the agenda daemon D2 to boot" test -s "$A2/calls.log"
+nap 2   # window: 2.5 x AGENDA_TICK_MS
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5).
 same "no calendars: nothing was requested"     "$(wc -l < "$GHITS" | tr -d ' ')" "0"
@@ -3191,7 +3358,7 @@ d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{
 # comparison is against dayBounds rather than against a hand-written stamp.
 WINDOW="$(TZ=Europe/Warsaw node -e 'import(process.argv[1]+"/bin/cockpit-agenda-model.mjs").then(m=>{const b=m.dayBounds(Date.now(),{tz:"Europe/Warsaw"});process.stdout.write(new Date(b.todayStart).toISOString()+" "+new Date(b.dayAfterStart).toISOString());});' "$ROOT")"
 WMIN="${WINDOW%% *}"; WMAX="${WINDOW##* }"
-sleep 2
+waitfor "agenda tick: work ok" "$A2/daemon.log" 10 "the first tick to fetch work"
 
 check "a stale calendar is fetched"                  "agenda tick: work ok, 1 events" "$A2/daemon.log"
 same  "...and its fetchedAt is set"                  "$(cq "$S2" 'c.calendars.work.fetchedAt > 0')" "true"
@@ -3209,15 +3376,18 @@ refute "...and no raw summary field either"          '"summary"'  "$S2/agenda-ca
 
 # Younger than AGENDA_STALE_MS: left alone, however many ticks pass.
 : > "$GHITS"
-sleep 2
+nap 2   # window: 2.5 x AGENDA_TICK_MS, every tick finding work fresh
 same "a fresh calendar is not re-fetched" "$(grep -c '/events' "$GHITS")" "0"
 
 # Two calendars, both stale, one pass.
 d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.putCalendar({slug:"home",account:"me@x.test",calendarId:"home-cal",title:"Home",colour:2},1);});' "$ROOT"
-sleep 2                       # let the new calendar's first fetch land and settle
-makestale "$S2" work home     # ...so this pass is the one being asserted on
+# Let the new calendar's first fetch land (its cache entry is written before the
+# log line), so the pass after makestale is the one being asserted on.
+waitfor "agenda tick: home ok" "$A2/daemon.log" 10 "the first tick to fetch home"
+makestale "$S2" work home
 : > "$GHITS"
-sleep 2
+waituntil 10 "one pass to request both work and home" \
+    ghits_ge 1 /calendars/work-cal/events /calendars/home-cal/events
 check "two calendars are both refreshed in one pass" "/calendars/work-cal/events" "$GHITS"
 check "...the second one too"                        "/calendars/home-cal/events" "$GHITS"
 
@@ -3225,7 +3395,9 @@ check "...the second one too"                        "/calendars/home-cal/events
 # is added AFTER `bad` and asserted on.
 echo one-bad > "$GMODE"       # before the add: a new calendar is stale at once
 d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.putCalendar({slug:"bad",account:"me@x.test",calendarId:"bad-cal",title:"Bad",colour:3},1);s.putCalendar({slug:"late",account:"me@x.test",calendarId:"late-cal",title:"Late",colour:4},1);});' "$ROOT"
-sleep 3
+# The pass is sequential, bad before late, and late's cache entry is written before
+# its log line -- so late's line means bad's error is on disk too.
+waitfor "agenda tick: late ok" "$A2/daemon.log" 10 "the pass to reach the calendar after the failing one"
 same "a failing calendar records its error"                 "$(cq "$S2" 'c.calendars.bad.error.kind')" "gone"
 same "...and does not stop the NEXT one being refreshed"    "$(cq "$S2" 'c.calendars.late.fetchedAt > 0')" "true"
 same "...which has no error of its own"                     "$(cq "$S2" 'c.calendars.late.error')" "null"
@@ -3234,23 +3406,26 @@ same "...which has no error of its own"                     "$(cq "$S2" 'c.calen
 # error is added.
 echo net > "$GMODE"
 makestale "$S2" work
-sleep 3
+waitfor "agenda tick: work failed, network" "$A2/daemon.log" 10 "work to fail on the dropped socket"
 same "a network failure keeps the previous events" "$(cq "$S2" 'c.calendars.work.events.length')" "1"
 same "...and sets error.kind = network"            "$(cq "$S2" 'c.calendars.work.error.kind')" "network"
 SINCE1="$(cq "$S2" 'c.calendars.work.error.since')"
 same "...and stamps when it broke"                 "$([ "${SINCE1:-0}" -gt 0 ] 2>/dev/null && echo yes || echo no)" "yes"
 # A failure keeps the previous fetchedAt, so `work` is still stale and retries on
 # every tick -- which is exactly the repeat this asserts `since` survives.
-sleep 2
+waitmore "agenda tick: work failed, network" "$A2/daemon.log" \
+    "$(countof "agenda tick: work failed, network" "$A2/daemon.log")" 10 "a repeat of the network failure"
 same "error.since is preserved across repeats"     "$(cq "$S2" 'c.calendars.work.error.since')" "$SINCE1"
 
 echo auth > "$GMODE"
-sleep 3
+waitfor "agenda tick: work failed, auth" "$A2/daemon.log" 10 "work to fail on the refused token"
 same "an auth failure classifies as auth"          "$(cq "$S2" 'c.calendars.work.error.kind')" "auth"
 same "...and still keeps the previous events"      "$(cq "$S2" 'c.calendars.work.events.length')" "1"
 
+# Counted before the switch: while the stub refuses tokens no new "ok" can appear.
+OKN=$(countof "agenda tick: work ok" "$A2/daemon.log")
 echo ok > "$GMODE"
-sleep 3
+waitmore "agenda tick: work ok" "$A2/daemon.log" "$OKN" 10 "work to recover"
 same "a success after a failure clears the error entirely" "$(cq "$S2" 'c.calendars.work.error')" "null"
 # Three passes have now thrown inside them. The daemon runs unattended behind a
 # window; dying silently means the panes just stop following and nothing says why.
@@ -3264,10 +3439,17 @@ same "...which is a later tick running after three thrown passes" \
 echo slow > "$GMODE"
 : > "$GHITS"                  # cleared FIRST: the pass below must stay recorded
 makestale "$S2" work home
-sleep 1.5
+# The pass is in flight once its first events call is held. From there, two and a
+# half ticks fire behind it; each would add an events call if the guard let a
+# second pass in. The window closes well inside the stub's hold of five ticks.
+waituntil 10 "a pass to enter the held events call" ghits_ge 1 /events
+nap 2   # window: 2.5 x AGENDA_TICK_MS, inside the GSLOW_MS (5-tick) hold
 same "a pass entered while one is in flight starts nothing" "$(grep -c '/events' "$GHITS")" "1"
+HOMEN=$(countof "agenda tick: home ok" "$A2/daemon.log")
 echo ok > "$GMODE"
-sleep 4
+# The held pass ends with home, the calendar after work: wait for it, so nothing is
+# still writing when the log and the state file are read below.
+waitmore "agenda tick: home ok" "$A2/daemon.log" "$HOMEN" 10 "the held pass to finish"
 
 # daemon.log gets pasted into conversations.
 refute "no access token ever reaches the log"  "TOKEN-MUST-NOT-BE-LOGGED" "$A2/daemon.log"
@@ -3279,7 +3461,7 @@ refute "no meeting title ever reaches the log" "SECRET-MEETING-TITLE"     "$A2/d
 # always win the race and the sign-ins would vanish unannounced. Rescuing is the
 # `agenda` command's alone -- the same defect the T06 review fixed in the pane.
 printf '{"calendars":[' > "$S2/agenda.json"
-sleep 2
+nap 2   # window: 2.5 x AGENDA_TICK_MS, each tick reading the corrupt file
 same "a corrupt agenda.json is NOT quarantined by the daemon" \
      "$(ls "$S2" | grep -c 'agenda.json.corrupt')" "0"
 same "...and the sign-ins are left exactly where they were" \
@@ -3309,29 +3491,51 @@ d3env() {
   NEXTPANE="$A3/nextpane" NEXTTAB="$A3/nexttab" EDITING="$A3/editing" \
   TITLELAG="$A3/titlelag" ACTIVE="$A3/active" PANECWD="$A3/panecwd" \
   PSBUSY="$A3/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=3600000 COCKPIT_AGENDA_STALE_MS=60000 \
+  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=3600000 COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
 d3env node "$ROOT/bin/cockpitd.mjs" > "$A3/daemon.log" 2>&1 &
 D3PID=$!
-sleep 2
+# polls_past <n>: has D3 read the fleet pane more than n times? Only reconcile
+# reads pane 20, and it holds its lock through onExit, so a poll counted AFTER the
+# exit line was made after the on-return refresh had started. Two of them span a
+# full POLL_MS, time for a fetch it started to reach the stub.
+polls_past() { [ "$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")" -gt "$1" ]; }
+
 # Configured only AFTER boot, so the one refresh at start-up finds nothing to do
-# and cannot be mistaken for the on-return trigger below.
+# and cannot be mistaken for the on-return trigger below. Booted means a SECOND
+# fleet poll: the first get-text, and the `list` writeTerminals makes before it, are
+# issued while the module body is still running -- BEFORE refreshAgenda("start")
+# reads the state -- so configuring on the first stub call races the start refresh
+# into fetching w3 (reproduced with a 600ms stall before it). The second poll comes
+# from the POLL_MS interval, which cannot fire until the whole body has run.
+waituntil 10 "the agenda daemon D3 to boot" polls_past 1
 d3env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.writeClient({clientId:"cid",clientSecret:"csec"});s.putAccount("me@x.test","REFRESH-TOKEN",1);s.putCalendar({slug:"w3",account:"me@x.test",calendarId:"w3-cal",title:"W3",colour:1},1);});' "$ROOT"
-sleep 2
+# D3's tick is an hour, so only a return could fetch here, and no return has
+# happened: 2.5 fleet polls (POLL_MS, 800ms scaled by COCKPIT_TIME_SCALE) is the
+# window in which a spurious one would have shown up.
+nap 2   # window: 2.5 x POLL_MS
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/events' "$GHITS")" "0"
 
 # The return to the fleet LIST is the trigger (DESIGN 2.5) -- so attach first,
 # then step back out, which is what makes reconcile call onExit.
-echo "test agent" > "$A3/fleetstate"; sleep 3
-echo list > "$A3/fleetstate"; sleep 3
+echo "test agent" > "$A3/fleetstate"
+waitfor "enter abc12345" "$A3/daemon.log" 10 "D3 to attach the agent"
+echo list > "$A3/fleetstate"
+waitfor "agenda returned: w3 ok" "$A3/daemon.log" 10 "the return to refresh w3"
 check "the return to the fleet list refreshed a stale calendar" "agenda returned: w3 ok" "$A3/daemon.log"
 same  "...and the cache was written"  "$(cq "$S3" 'c.calendars.w3.fetchedAt > 0')" "true"
 
 # The same return, with nothing stale, must fetch nothing at all.
 : > "$GHITS"
-echo "test agent" > "$A3/fleetstate"; sleep 3
-echo list > "$A3/fleetstate"; sleep 3
+ENTN=$(countof "enter abc12345" "$A3/daemon.log")
+EXITN=$(countof "exit abc12345" "$A3/daemon.log")
+echo "test agent" > "$A3/fleetstate"
+waitmore "enter abc12345" "$A3/daemon.log" "$ENTN" 10 "D3 to attach the agent again"
+echo list > "$A3/fleetstate"
+waitmore "exit abc12345" "$A3/daemon.log" "$EXITN" 10 "D3 to see the second return"
+POLLN=$(grep -cxF "ARGV: cli get-text --pane-id 20" "$A3/calls.log")
+waituntil 10 "two of D3's fleet polls after the return" polls_past $((POLLN + 1))
 same "...while a return with nothing stale fetches nothing" "$(grep -c '/events' "$GHITS")" "0"
 fi
 
@@ -3474,6 +3678,11 @@ same "the fake BitBucket is listening on loopback" "$([ -n "$BBPORT" ] && echo y
 bq() {  # bq <state-dir> <expression over c>
   node -e 'const fs=require("fs");let c={meUuid:null,repos:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
 }
+# bqtrue <state-dir> <expression over c>: exit 0 when it is true. For waituntil:
+# the cache is written ONCE, at the END of a pass, after the per-repo log lines,
+# so a wait on a log line can still read the previous pass's cache -- poll the
+# cache itself for the state the checks after it read.
+bqtrue() { [ "$(bq "$1" "$2")" = true ]; }
 # The four config settings are plain files under COCKPIT_DIR (DESIGN 3.5); `config`
 # writes them, and readSetting/readConfig read them, so a test writes them directly.
 bbconf() {  # bbconf <state-dir> <repos-csv>   (workspace/key fixed; team left empty)
@@ -3499,12 +3708,14 @@ d4env() {
   NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
   PSBUSY="$A4/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   "$@"
 }
 d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
 D4PID=$!
-sleep 2
+waitfor "cockpitd up" "$A4/daemon.log" 10 "D4 to start"
+# Window: an unconfigured daemon ticking for 2.5 ticks (BB_TICK_MS) must call nothing.
+nap 2
 
 # Nothing configured: the feature costs nothing until it is used (DESIGN 2.5, 2.n).
 same "no config: nothing was requested"     "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
@@ -3516,7 +3727,8 @@ same "no config: no cache file was written" "$([ -e "$S4/bitbucket-cache.json" ]
 # fetches no repo -- a dead token would only repeat the 401.
 echo user-auth > "$BBMODE"
 bbconf "$S4" "bad,alpha"
-sleep 2
+# refreshPRs writes the auth signal to the cache BEFORE it logs the failure.
+waitfor "bitbucket tick: getUser failed, auth" "$A4/daemon.log" 10 "the getUser auth failure"
 check "a bad token on /user is logged as an auth failure" "bitbucket tick: getUser failed, auth" "$A4/daemon.log"
 same  "...and meUuid is left unset so it is retried"       "$(bq "$S4" 'c.meUuid')" "null"
 same  "...the whole-dashboard auth signal is on every repo" "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
@@ -3525,7 +3737,8 @@ same  "...and no repo pullrequests call was made"          "$(grep -c '/pullrequ
 # Recover: a good token now identifies the user ONCE and fetches every repo. The raw
 # PRs pass through untouched (DESIGN 3.1); the model normalises them later (T06).
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
+  bqtrue "$S4" 'c.meUuid==="ME-UUID" && !!c.repos.alpha && c.repos.alpha.error===null'
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
 check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
@@ -3557,7 +3770,7 @@ check "...the log counts the diffstat fetches"      "1 comment fetches, 1 diffst
 # for the handful shown.
 : > "$BBHITS"
 echo two-prs > "$BBMODE"
-sleep 2
+waituntil 10 "a two-prs pass in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===2'
 same  "both raw PRs are cached"                    "$(bq "$S4" 'c.repos.alpha.prs.length')" "2"
 check "the PR I review still gets a comment read"  "/pullrequests/7/comments" "$BBHITS"
 same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/comments' "$BBHITS")" "0"
@@ -3569,13 +3782,16 @@ same  "...the PR that concerns nobody does NOT"    "$(grep -c '/pullrequests/8/d
 same  "...and it carries no diffstatSummary"       "$(bq "$S4" 'c.repos.alpha.prs.find(function(p){return p.id===8}).diffstatSummary')" "undefined"
 check "...the log counts one read for two PRs"     "alpha ok, 2 prs, 1 comment fetches, 1 diffstat fetches" "$A4/daemon.log"
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass back in the cache" bqtrue "$S4" 'c.repos.alpha.prs.length===1'
 same  "back to one PR when the extra one closes"   "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 # meUuid is fetched ONCE and reused (DESIGN 2.6): over the next several ticks the
 # repos are re-fetched but /2.0/user is not called again.
 : > "$BBHITS"
-sleep 2
+# Two list calls for alpha is at least one whole pass since the clear (a pass
+# lists bad, then alpha), so /2.0/user had a full tick in which to be called.
+hits_at_least() { [ "$(grep -cF -- "$1" "$BBHITS")" -ge "$2" ]; }   # re-counted on every poll
+waituntil 10 "two more passes' alpha list calls" hits_at_least '/alpha/pullrequests?' 2
 same "meUuid is not re-fetched every tick" "$(grep -c '/2.0/user' "$BBHITS")" "0"
 same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBHITS")" -gt 0 ] && echo yes || echo no)" "yes"
 
@@ -3583,7 +3799,8 @@ same "...while the repos still are"        "$([ "$(grep -c '/pullrequests' "$BBH
 # BEFORE it in the pass (bad) failing must not stop the one after it (alpha). Each
 # repo is cached independently (DESIGN 2.n).
 echo one-bad > "$BBMODE"
-sleep 2
+waituntil 10 "a one-bad pass in the cache" \
+  bqtrue "$S4" '!!c.repos.bad.error && c.repos.bad.error.kind==="transient"'
 same "a transient repo failure keeps its previous PRs" "$(bq "$S4" 'c.repos.bad.prs.length')" "1"
 same "...and records a transient error"                "$(bq "$S4" 'c.repos.bad.error.kind')" "transient"
 same "...while the repo after it still refreshes"      "$(bq "$S4" 'c.repos.alpha.error')" "null"
@@ -3592,12 +3809,13 @@ same "...with a fresh fetchedAt of its own"            "$(bq "$S4" 'c.repos.alph
 # A repo-level auth (the token expired mid-life) is the whole-dashboard signal too,
 # recorded per repo, previous PRs kept (DESIGN 2.7/2.n).
 echo auth > "$BBMODE"
-sleep 2
+waituntil 10 "an auth pass in the cache" \
+  bqtrue "$S4" '!!c.repos.alpha.error && c.repos.alpha.error.kind==="auth"'
 same "a repo auth failure classifies as auth"     "$(bq "$S4" 'c.repos.alpha.error.kind')" "auth"
 same "...and still keeps the previous PRs"         "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 
 echo ok > "$BBMODE"
-sleep 2
+waituntil 10 "an ok pass clearing the auth error" bqtrue "$S4" 'c.repos.alpha.error===null'
 same "a success after a failure clears the error" "$(bq "$S4" 'c.repos.alpha.error')" "null"
 # A later tick ran and wrote after passes that threw nothing but returned errors --
 # the daemon is still alive behind its window.
@@ -3608,7 +3826,11 @@ same "...which is a later tick running"           "$(bq "$S4" 'c.repos.alpha.fet
 # thread count and reshuffle the sort for a tick (DESIGN 2.3, 2.n). alpha's list still
 # succeeds, so the repo itself is not an error.
 echo comment-net > "$BBMODE"
-sleep 2
+# The cache already reads what the checks want (1 comment, no error), so only the
+# log can say a comment-net pass happened -- and it logs before it writes the
+# cache. A SECOND such line means the first pass's write is done (one pass at a
+# time), and every pass since has been comment-net too.
+waitmore "alpha ok, 1 prs, 0 comment fetches" "$A4/daemon.log" 1 10 "two comment-net passes"
 same "a dropped comment fetch keeps the PR's previous comments" "$(bq "$S4" 'c.repos.alpha.prs[0].comments.length')" "1"
 same "...and the repo itself stays a success"                   "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
@@ -3618,7 +3840,8 @@ echo ok > "$BBMODE"
 # file/line counts out and back. The prior tick cached { files:2, added:10, removed:3 };
 # a dropped diffstat call this tick must leave that triple intact, not zero or drop it.
 echo diffstat-net > "$BBMODE"
-sleep 2
+# As for comment-net: the cache already holds the triple, so wait for two passes.
+waitmore "alpha ok, 1 prs, 1 comment fetches, 0 diffstat fetches" "$A4/daemon.log" 1 10 "two diffstat-net passes"
 same "a dropped diffstat fetch keeps the PR's previous summary: files"   "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.files')" "2"
 same "...added"                                                          "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.added')" "10"
 same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
@@ -3628,15 +3851,21 @@ echo ok > "$BBMODE"
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
 # to age), then `slow` holds the first repo open while ~3 ticks fire behind it.
-echo slow > "$BBMODE"
+# Unconfigured while still `ok`, so a pass caught in flight is a loopback one that
+# ends in milliseconds: the drain is a 1s window, where unconfiguring AFTER `slow`
+# had to outwait a whole held pass (~4s). Stub hold times are real seconds, so
+# neither window is scaled by SPEED.
 printf '' > "$S4/bitbucket-repos"    # unconfigure -> passes no-op; any in-flight one drains
-sleep 5                              # longer than one full slow pass (~4s), so nothing is in flight
+sleep 1                              # window: an ok pass in flight ends well inside it
+echo slow > "$BBMODE"
 : > "$BBHITS"                        # cleared while nothing is fetching
+ALPHA_OK="$(countof "alpha ok" "$A4/daemon.log")"
 printf 'bad,alpha' > "$S4/bitbucket-repos"   # the next tick starts exactly one pass
-sleep 1.5                            # under slow's 2s hold: only the FIRST repo is requested
+sleep 1.5                            # window: under slow's 2s hold, only the FIRST repo is requested
 same "a pass entered while one is in flight starts nothing" "$(grep -c '/pullrequests' "$BBHITS")" "1"
 echo ok > "$BBMODE"
-sleep 4                             # drain the held request
+# The held pass ends when alpha's (still slow) list call returns and it logs alpha.
+waitmore "alpha ok" "$A4/daemon.log" "$ALPHA_OK" 10 "the held slow pass to finish"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9).
 refute "no PR title ever reaches the log"   "SECRET-PR-TITLE" "$A4/daemon.log"
@@ -3677,6 +3906,18 @@ chmod +x "$A6/opener.sh"
 vq() {  # vq <state-dir> <expression over v>
   node -e 'const fs=require("fs");let v={};try{v=JSON.parse(fs.readFileSync(process.argv[1]+"/bitbucket-view.json","utf8"));}catch{}let r;try{r=eval(process.argv[2]);}catch(e){r="<error>";}process.stdout.write(String(r===undefined?"undefined":r));' "$1" "$2"
 }
+vqtrue() { [ "$(vq "$1" "$2")" = true ]; }   # for waituntil, like bqtrue
+# bbverb <verb> <what> <condition...>: append a click verb and wait for its effect.
+# The daemon handles the cmd channel one line at a time, in order, so a verb whose
+# only effect is to do NOTHING (a clamp) is followed by `bb-sync-<n>`, an unknown
+# verb the daemon logs and otherwise ignores: once that line is logged, every verb
+# before it has been handled.
+BBSYNC=0
+bbverb() { local v=$1 what=$2; shift 2; echo "$v" >> "$S6/cmd"; waituntil 10 "$what" "$@"; }
+bbsync() {
+  BBSYNC=$((BBSYNC + 1)); echo "bb-sync-$BBSYNC" >> "$S6/cmd"
+  waitfor "unknown verb bb-sync-$BBSYNC" "$A6/daemon.log" 10 "the cmd channel to reach bb-sync-$BBSYNC"
+}
 
 d6env() {
   HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
@@ -3685,28 +3926,29 @@ d6env() {
   NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
   TITLELAG="$A6/titlelag" ACTIVE="$A6/active" PANECWD="$A6/panecwd" \
   PSBUSY="$A6/psbusy" AGENTS_JSON="$AGENTS_JSON" \
-  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=400 \
+  BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   BITBUCKET_BROWSER="$A6/opener.sh" \
   "$@"
 }
 d6env node "$ROOT/bin/cockpitd.mjs" > "$A6/daemon.log" 2>&1 &
 D6PID=$!
-sleep 2
+waituntil 10 "D6's first pass in the cache" bqtrue "$S6" '!!c.repos.alpha && c.repos.alpha.prs.length===1'
 # The one PR (id 7) concerns me as a reviewer, so it is on the To-review tab.
 same "the dashboard's PR is cached before any click" "$(bq "$S6" 'c.repos.alpha.prs.length')" "1"
 
 # --- tabs: a bb-tab verb rewrites the active tab in the view file (DESIGN 2.8) ---
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
 same "clicking the Mine tab rewrites the view's active tab" "$(vq "$S6" 'v.tab')" "mine"
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "clicking To-review switches the active tab back"      "$(vq "$S6" 'v.tab')" "toReview"
 
 # --- Open: the daemon hands the cached PR's htmlUrl to the fake opener (DESIGN 2.7) ---
-echo bb-open:alpha/7 >> "$S6/cmd"; sleep 1
+bbverb bb-open:alpha/7 "the opener to record PR 7's url" grep -qF "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 check "clicking Open launches the browser at the PR's htmlUrl" "https://bitbucket.org/ws/pr/7" "$OPENLOG"
 # An id not in the cache (a stale click after a refetch) is a safe no-op, not a crash.
 CNT_BEFORE="$(wc -l < "$OPENLOG" | tr -d ' ')"
-echo bb-open:alpha/999 >> "$S6/cmd"; sleep 1
+# The no-op's own log line marks it handled: it never spawns, so nothing can follow.
+bbverb bb-open:alpha/999 "Open's no-op on alpha/999" grep -qF "bitbucket open: no cached PR alpha/999" "$A6/daemon.log"
 same "Open on an absent PR id launches nothing"               "$(wc -l < "$OPENLOG" | tr -d ' ')" "$CNT_BEFORE"
 check "...and says so rather than crashing"                   "no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
@@ -3718,7 +3960,10 @@ same  "...the daemon is still alive after the no-op"          "$(kill -0 "$D6PID
 # from the cache by slug/id, exactly as Open is; an absent id is the same safe no-op.
 CR="$(printf '\r')"
 : > "$A6/calls.log"
-echo bb-review:alpha/7 >> "$S6/cmd"; sleep 1
+# spawnAgent logs AFTER both sends (text, then Enter).
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-review:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Review spawn"
 check "a Review click types the review directive + url to the fleet box" \
       "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...to the fleet pane (pane 20), twice: the text then the Enter" \
@@ -3731,7 +3976,9 @@ refute "no PR url reaches the log via a spawn (DESIGN 2.9)" \
       "bitbucket.org/ws/pr/7" "$A6/daemon.log"
 
 : > "$A6/calls.log"
-echo bb-address:alpha/7 >> "$S6/cmd"; sleep 1
+SPAWNED="$(countof "spawned agent in alpha" "$A6/daemon.log")"
+echo bb-address:alpha/7 >> "$S6/cmd"
+waitmore "spawned agent in alpha" "$A6/daemon.log" "$SPAWNED" 10 "the Address spawn"
 check "an Address click types the address directive + url to the fleet box" \
       "STDIN:@alpha Address the review comments on Bitbucket PR https://bitbucket.org/ws/pr/7" "$A6/calls.log"
 same  "...also submitted with a real Enter (text + Enter = two sends)" \
@@ -3740,10 +3987,13 @@ same  "...also submitted with a real Enter (text + Enter = two sends)" \
 # A stale click (the id refetched away) resolves no url, so it spawns nothing -- the same
 # safe no-op Open has, never a crash.
 : > "$A6/calls.log"
-echo bb-review:alpha/999 >> "$S6/cmd"; sleep 1
+bbverb bb-review:alpha/999 "Review's no-op on alpha/999" \
+  grep -qF "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "a Review click on an absent PR id types nothing to the fleet box" \
       "$(grep -c -- 'send-text --pane-id 20' "$A6/calls.log")" "0"
-check "...and says so rather than crashing"        "no cached PR alpha/999" "$A6/daemon.log"
+# Named by its `review:` prefix: Open's no-op above already logged "no cached PR
+# alpha/999", so the bare phrase passed whatever Review did (DESIGN 3.3).
+check "...and says so rather than crashing"        "bitbucket review: no cached PR alpha/999" "$A6/daemon.log"
 same  "...the daemon is still alive after the no-op" \
       "$(kill -0 "$D6PID" 2>/dev/null && echo yes || echo no)" "yes"
 
@@ -3754,23 +4004,24 @@ same  "...the daemon is still alive after the no-op" \
 # (k PRs cost 3k-1 lines; 3k-1 <= 7 -> k=2) -> ceil(20/2)=10. The daemon reads `pages`
 # from the model at the live geometry and clamps a click to [1, pages], so a next past
 # the end never writes an out-of-range page (the model's own shrink->page-1 reset is separate).
-echo many > "$BBMODE"; sleep 2
+echo many > "$BBMODE"
+waituntil 10 "the 20-PR pass in the cache" bqtrue "$S6" 'c.repos.alpha.prs.length===20'
 same "the overflowing tab is cached (20 PRs)" "$(bq "$S6" 'c.repos.alpha.prs.length')" "20"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+bbverb bb-page:next "page 2" vqtrue "$S6" 'v.page.toReview===2'
 same "bb-page:next advances to page 2"        "$(vq "$S6" 'v.page.toReview')" "2"
 # Walk the rest of the way to the last page (10).
-for _ in 3 4 5 6 7 8 9 10; do echo bb-page:next >> "$S6/cmd"; sleep 1; done
+for n in 3 4 5 6 7 8 9 10; do bbverb bb-page:next "page $n" vqtrue "$S6" "v.page.toReview===$n"; done
 same "bb-page:next reaches the last page (10)"  "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:next >> "$S6/cmd"; sleep 1
+echo bb-page:next >> "$S6/cmd"; bbsync   # a clamp writes nothing: sync past it
 same "bb-page:next past the last page is clamped (stays 10)" "$(vq "$S6" 'v.page.toReview')" "10"
-echo bb-page:prev >> "$S6/cmd"; sleep 1
+bbverb bb-page:prev "page 9" vqtrue "$S6" 'v.page.toReview===9'
 same "bb-page:prev steps back to page 9"      "$(vq "$S6" 'v.page.toReview')" "9"
 
 # Switching tabs lands on page 1 (DESIGN 2.5, user 2026-09-05). To-review is deep in the
 # list now, so a hop to Mine and back must reset To-review to page 1 -- not drop you back
 # in the middle of a list you switched away from.
-echo bb-tab:mine >> "$S6/cmd"; sleep 1
-echo bb-tab:toReview >> "$S6/cmd"; sleep 1
+bbverb bb-tab:mine "the view's tab to be mine" vqtrue "$S6" 'v.tab==="mine"'
+bbverb bb-tab:toReview "the view's tab back to toReview" vqtrue "$S6" 'v.tab==="toReview"'
 same "switching away and back resets the tab to page 1" "$(vq "$S6" 'v.page.toReview')" "1"
 
 # daemon.log gets pasted into conversations (DESIGN 2.9): a click path logs no title.
@@ -3807,22 +4058,29 @@ d5env() {
 }
 d5env node "$ROOT/bin/cockpitd.mjs" > "$A5/daemon.log" 2>&1 &
 D5PID=$!
-sleep 2
+waituntil 10 "the start-up pass in the cache" \
+  bqtrue "$S5" '!!c.repos.alpha && c.repos.alpha.fetchedAt>0 && c.meUuid==="ME-UUID"'
 check "the start-up trigger fetched a configured repo" "bitbucket start: alpha ok" "$A5/daemon.log"
 same  "...and filled the cache"                        "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
 same  "...resolving 'me' at start"                     "$(bq "$S5" 'c.meUuid')" "ME-UUID"
 
-# An hour-long tick fetches nothing on its own.
+# An hour-long tick fetches nothing on its own. Window: 2.5 of the ticks D4 and D6
+# run on (BB_TICK_MS), so a tick at the test cadence would have fetched twice.
 : > "$BBHITS"
-sleep 2
+nap 2
 same "an hour-long tick has fetched nothing on its own" "$(grep -c '/pullrequests' "$BBHITS")" "0"
 
 # The return to the fleet LIST is the trigger (DESIGN 2.9) -- attach, then step back
 # out, which is what makes reconcile call onExit.
-echo "test agent" > "$A5/fleetstate"; sleep 3
-echo list > "$A5/fleetstate"; sleep 3
+# The return's pass must REWRITE the cache: fetchedAt was already > 0 from the start,
+# so the check compares against the start pass's stamp (DESIGN 3.3).
+FETCHED_START="$(bq "$S5" 'c.repos.alpha.fetchedAt')"
+echo "test agent" > "$A5/fleetstate"
+waitfor "enter abc12345" "$A5/daemon.log" 10 "D5 to attach the agent"
+echo list > "$A5/fleetstate"
+waituntil 10 "the return's pass in the cache" bqtrue "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START"
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
-same  "...and the cache was rewritten"                   "$(bq "$S5" 'c.repos.alpha.fetchedAt > 0')" "true"
+same  "...and the cache was rewritten"                   "$(bq "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START")" "true"
 
 daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
