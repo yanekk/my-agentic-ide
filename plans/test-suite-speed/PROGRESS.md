@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | section-runner | — | ⬜ | |
-| T02 | waituntil | — | ⬜ | |
+| T02 | waituntil | — | ✅ | |
 | T03 | convert-main-early | T01, T02 | ⬜ | |
 | T04 | convert-browse | T01, T02 | ⬜ | |
 | T05 | convert-footer-agenda | T01, T02 | ⬜ | |
