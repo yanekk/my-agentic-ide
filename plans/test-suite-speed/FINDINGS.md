@@ -9,6 +9,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 📌 | T04 review: with the fence guard deleted, 11c'''' failed only 8 of 10 runs. Its "still starting" window (nap 1.5) can hold no healer pass, since ticks skip while reconcile holds the lock. Pre-existing; left for T09. |
+| 2026-09-27 | 📌 | T04, load ~3.5, 0 orphans: 11–11p 146s before, 47s after; full run 457s, ALL PASS (767 checks). Agent switches poll `"agent":` in terminals.json, which showTerminal writes last. |
+| 2026-09-27 | 🐞 | T04: 11c'''' "a browser sitting at a shell is never questioned" flaked at load 23. A healer tick that read the pane table before the retitle queried broot after the truncation. Now truncates once the daemon logs the shell status. |
+| 2026-09-27 | 📌 | A wait on a stub ARGV line in `$CALLS` returns before the stub rewrites its pane table, so a test `retitle` just after can be lost (11c'''' never saw broot quit). Wait on the daemon's log line; it logs after the stub returns. |
 | 2026-09-27 | 🐞 | 3b baseline flake ("first flush injected"): re-attach re-arms the annotation watch by emptying the review file, wiping a flush written earlier. Reproduced by cutting that wait to 0.3s. T03 polls for the emptied file. |
 | 2026-09-27 | 🐞 | A wait ending at an attach's relaunch let section 10 rewrite `$PANESTATE` while the attach's later stub calls rewrote it too; the edit was lost and no heal came. Wait for terminals.json's `agent`, the attach's last write. |
 | 2026-09-27 | 📌 | T03: sections 1–10 went 82.5s (load 3) to 27.6s quiet, 32.5s at load 25; 152 checks. Full run ALL PASS 767 at load 22–28. Under 8 copies plus 16 `yes` burners: new 16/16 pass, old failed 1–2. |
