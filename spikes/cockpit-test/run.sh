@@ -38,7 +38,7 @@ chain main 1 2 3 3b 4 4b 4c 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e'" 
   11 11a 11b "11b'" "11b''" 11c "11c'" "11c''" "11c'''" "11c''''" "11c'''''" 11d "11d'" \
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
-  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16n 16o 16p 15m 15n 15o
+  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m2 16n 16o 16p 15m 15n 15o
 chain footer 12 12b 12c
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
@@ -463,7 +463,7 @@ AGENDA_STALE_MS="$(awk -v s="$SPEED" 'BEGIN{ v=120000*s; if (v<60000) v=60000; p
 if chain_runs main; then
 HOME="$T/home" COCKPIT_DIR="$T/state" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_OWNER_PID="$$" \
     COCKPIT_TIME_SCALE="$SPEED" SHELL=/bin/zsh \
-    AGENDA_ORIGIN="http://127.0.0.1:9" \
+    AGENDA_ORIGIN="http://127.0.0.1:9" COCKPIT_TEST_PIR_WATCH_MUTE="$T/pir-watch-mute" \
     node "$ROOT/bin/cockpitd.mjs" > "$T/daemon.log" 2>&1 &
 DPID=$!
 sleep 1   # node startup is fixed overhead -- not scaled by SPEED
@@ -2477,32 +2477,19 @@ MAINTIP="$(git -C "$PREPO" rev-parse --short HEAD)"
 # pirwrite <view> <run cwd|null> [<worker cwd|null>] [pid]: one atomic write. The pid
 # defaults to this script's own, which is alive for as long as the suite runs.
 pirjson() { [ "$1" = null ] && printf null || printf '"%s"' "$1"; }
-# pirspace / pirmark: every change to pir-dashboard.json lands at least 1.5s after
-# the one before. macOS's directory watch drops a second change to the same file made
-# ~0.4s after the first -- measured 2026-09-27: 5 of 384 lost with the polls back to
-# back, 0 of 288 at 1.5s (FINDINGS). A lost one is never acted on, so this is not a
-# window being proved but a daemon weakness worked around until T11's backstop lands.
-# Real seconds, not `nap`: the drop is the OS's timing, not the daemon's.
-PIR_LAST=0
-pirspace() {
-  local w
-  w=$(awk -v l="$PIR_LAST" -v n="${EPOCHREALTIME/,/.}" 'BEGIN{ d=1.5-(n-l); if (d>0) printf "%.3f", d; else print 0 }')
-  [ "$w" = 0 ] || sleep "$w"
-}
-pirmark() { PIR_LAST=${EPOCHREALTIME/,/.}; }
+# No spacing between writes: macOS's directory watch drops some changes made close
+# together, and the daemon's reconcile-poll backstop follows those (16m2).
 pirwrite() {
   local view="$1" run="null" worker="null" pid="${4:-$$}"
-  pirspace
   [ "$view" != list ] && run="{\"key\":\"proj__slug\",\"kind\":\"work\",\"slug\":\"slug\",\"repo\":\"proj\",\"repoPath\":\"$PREPO\",\"branch\":\"pir/slug\",\"cwd\":$(pirjson "$2")}"
   [ "$view" = worker ] && worker="{\"id\":\"w1\",\"task\":\"T01\",\"role\":\"implement\",\"cwd\":$(pirjson "$3")}"
   printf '{"version":1,"pid":%s,"view":"%s","run":%s,"worker":%s,"updatedAt":"2026-09-27T00:00:00.000Z"}\n' \
     "$pid" "$view" "$run" "$worker" > "$T/state/pir-dashboard.json.tmp"
   mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
-  pirmark
 }
 RK="pir.proj__slug"; WK="pir.proj__slug.w1"
 RFILE="$T/state/review-$RK.md"
-rm -f "$T/state/pir-dashboard.json"; pirmark
+rm -f "$T/state/pir-dashboard.json"
 fleetclick pir
 check  "pir is shown, and with no file it is at its list" '"fleet":{"program":"pir","switchable":true' "$T/state/terminals.json"
 : > "$CALLS"
@@ -2702,14 +2689,37 @@ for how in dead corrupt missing; do
   X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
   case "$how" in
     dead)    pirwrite run "$PRUN" "" "$DEADPID" ;;
-    corrupt) pirspace; printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json"; pirmark ;;
-    missing) pirspace; rm -f "$T/state/pir-dashboard.json"; pirmark ;;
+    corrupt) printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json" ;;
+    missing) rm -f "$T/state/pir-dashboard.json" ;;
   esac
   waitmore "exit $RK → fleet list" "$T/daemon.log" "$X0" 10 "$how: the run key to be left"
   waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "$how: the exit to the list to finish"
   grew "$how: the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
   check "$how: switchable again"                  '"switchable":true' "$T/state/terminals.json"
 done
+fi
+
+if section 16m2 "a change the watch never reports is still followed"; then
+# macOS drops some directory-watch events (T07: 5 of 384 under load) but not on
+# demand, and a write through a hard link elsewhere is still reported, so the watch
+# is muted through the daemon's test-only seam: while $T/pir-watch-mute exists it
+# ignores every event. Only the reconcile-poll backstop can see this change.
+pirwrite run "$PRUN"
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
+X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
+B0="$(countof "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log")"
+: > "$T/pir-watch-mute"
+pirwrite list
+waitmore "exit $RK → fleet list" "$T/daemon.log" "$X0" 10 "the unwatched change to be followed"
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
+# Window, not a wait for an effect: a backstop that re-fired on an unchanged file
+# would do so on the next poll, so the count below needs polls to have run. Counted
+# at once, a mutant that fires every poll passed 1 run in 3 (T11 review).
+nap 2   # window: 2.5 x POLL_MS
+rm -f "$T/pir-watch-mute"
+grew   "the backstop saw the change"            "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log" "$B0"
+grew   "...and the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
+same   "...once: the backstop does not re-fire"    "$(countof "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log")" "$((B0+1))"
 fi
 
 if section 16n "a stored ref wins over the fork point; one that stopped resolving is uncommitted"; then
@@ -2754,10 +2764,8 @@ if section 16o "no main to fork from: uncommitted, logged"; then
 NOMAIN="$T/nomain"; mkdir -p "$NOMAIN"; git init -q -b trunk "$NOMAIN"
 git -C "$NOMAIN" config user.email t@t; git -C "$NOMAIN" config user.name t
 git -C "$NOMAIN" commit -q --allow-empty -m base
-pirspace
 printf '{"version":1,"pid":%s,"view":"run","run":{"key":"proj__nomain","slug":"nomain","cwd":"%s"},"worker":null}\n' "$$" "$NOMAIN" \
   > "$T/state/pir-dashboard.json.tmp" && mv "$T/state/pir-dashboard.json.tmp" "$T/state/pir-dashboard.json"
-pirmark
 : > "$CALLS"
 waitfor '"agent":"nomain"' "$T/state/terminals.json" 10 "the nomain key's attach to finish"
 check  "the failed merge-base is logged"           "pir.proj__nomain starts at uncommitted: no fork point from main (git merge-base failed)" "$T/daemon.log"
