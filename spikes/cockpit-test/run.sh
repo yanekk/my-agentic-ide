@@ -2700,8 +2700,12 @@ B0="$(countof "pir: pir-dashboard.json changed without a watch event" "$T/daemon
 pirwrite list
 waitmore "exit $RK → fleet list" "$T/daemon.log" "$X0" 10 "the unwatched change to be followed"
 waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
+# Window, not a wait for an effect: a backstop that re-fired on an unchanged file
+# would do so on the next poll, so the count below needs polls to have run. Counted
+# at once, a mutant that fires every poll passed 1 run in 3 (T11 review).
+nap 2   # window: 2.5 x POLL_MS
 rm -f "$T/pir-watch-mute"
-grew   "the backstop saw the change"               "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log" "$B0"
+grew   "the backstop saw the change"            "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log" "$B0"
 grew   "...and the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
 same   "...once: the backstop does not re-fire"    "$(countof "pir: pir-dashboard.json changed without a watch event" "$T/daemon.log")" "$((B0+1))"
 fi
