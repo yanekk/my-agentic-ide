@@ -12,7 +12,7 @@ over-budget cell they walk past.
 
 **Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
 `test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-28
 **Next `pir-work` will:** T01, once pir-pane and then test-daemon-leaks have merged (the person
 starts it); it re-takes the baseline on the merged script.
 
@@ -33,9 +33,9 @@ done · ⛔ blocked, needs a human.
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
-| T11 | pir-state-backstop | T07; blocks T09 | ⬜ | |
+| T11 | pir-state-backstop | T07; blocks T09 | 🔍 | Backstop in the reconcile poll compares pir-dashboard.json identity with the last read. `pirspace`/`pirmark` gone. New 16m2, 3 checks (770). Deviation: the watch cannot be made to drop on demand (hard-link writes are still reported), so a test-only env seam `COCKPIT_TEST_PIR_WATCH_MUTE` mutes it. |
 
-**Review queue:** empty
+**Review queue:** T11
 
 ## Blocked on the user
 

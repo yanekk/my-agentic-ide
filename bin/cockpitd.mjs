@@ -3534,14 +3534,34 @@ function forkPoint(cwd) {
 /** Debounced (150ms): a burst of writes moves panes once, for the latest state. */
 function schedulePirState() {
   clearTimeout(pirTimer);
+  pirReadPending = true;
   pirTimer = setTimeout(onPirState, PIR_DEBOUNCE_MS);
 }
+let pirReadPending = false;
+
+/**
+ * pir-dashboard.json's identity: mtime, size and inode, or "absent". A rename gives
+ * a new inode and an in-place write a new mtime, so any change pir makes moves it.
+ */
+function pirStateId() {
+  try {
+    const st = fs.statSync(PIR_STATE);
+    return `${st.mtimeMs}:${st.size}:${st.ino}`;
+  } catch { return "absent"; }
+}
+// What the last onPirState read, or null before the first read since pir was shown.
+let pirSeenId = null;
 
 async function onPirState() {
+  pirReadPending = false;
   if (fleetProgram !== "pir") return;           // while claude is shown the file means nothing
   if (!(await acquireReconcileLock())) { schedulePirState(); return; }
   try {
     if (fleetProgram !== "pir") return;         // switched back while we waited
+    // Identity before content: a write landing between the two is then re-read by
+    // the backstop, where the other order would take the new content's identity
+    // for the old content's and never read the new one.
+    pirSeenId = pirStateId();
     const state = readPir();
     // Switchable follows what pir REPORTS, not what is attached: a run whose folder
     // is gone attaches nothing, yet pir is not at its list (DESIGN 2.2).
@@ -3580,9 +3600,14 @@ async function onPirState() {
 // pir writes temp-then-rename, so the file gets a new inode on every write: watch
 // the directory, never the file (CLAUDE.md). The temp file's own events pass the
 // filter only by name, and the debounce folds them into the rename's.
+// COCKPIT_TEST_PIR_WATCH_MUTE is a test-only seam: while the file it names exists,
+// the watch ignores every event, so the suite can prove the backstop below follows
+// a change the watch never reported -- macOS drops some, but not on demand.
+const PIR_WATCH_MUTE = process.env.COCKPIT_TEST_PIR_WATCH_MUTE || null;
 try {
   fs.watch(DIR, (_e, name) => {
     if (fleetProgram !== "pir") return;
+    if (PIR_WATCH_MUTE && fs.existsSync(PIR_WATCH_MUTE)) return;
     if (name && !name.startsWith(path.basename(PIR_STATE))) return;
     schedulePirState();
   });
@@ -3605,6 +3630,21 @@ function pirFolderGone() {
   schedulePirState();
 }
 let pirGoneKey = null;
+
+/**
+ * The backstop for the directory watch, run from the reconcile poll while pir is
+ * shown. macOS's fs.watch sometimes delivers NO event for a second change to
+ * pir-dashboard.json made ~0.4s after the first (test-suite-speed T07: 5 of 384 lost
+ * under load, rename and in-place writes alike), and a lost change was never acted
+ * on: the cockpit kept a stale pir view until pir next wrote. So each poll compares
+ * the file's identity with what onPirState last read. The watch stays the fast path.
+ */
+function pirStateBackstop() {
+  if (reconciling || pirReadPending || pirSeenId === null) return;
+  if (pirStateId() === pirSeenId) return;
+  log("pir: pir-dashboard.json changed without a watch event");
+  schedulePirState();
+}
 
 /** Keep the footer's `switchable` honest; rewrites terminals.json only on a change. */
 function noteSwitchable(v) {
@@ -3674,6 +3714,7 @@ async function switchFleet(target) {
 
     parkPane(outgoing, fleetProgram === "pir" ? "pir" : "claude agents", cockpitTab);
     fleetProgram = target;
+    pirSeenId = null;   // the backstop waits for a first read (scheduled below for pir)
     // The person clicked to see this program, so the keyboard goes with it.
     wez(["activate-pane", "--pane-id", String(incoming)]);
     // Claude could only have been parked from its list. pir says for itself.
@@ -3694,7 +3735,7 @@ async function reconcile() {
   // Everything below reads the CLAUDE pane. While pir is shown that pane is parked
   // at its list and cannot change, so a poll would only re-read a frozen screen --
   // and a stale header there must never attach anything (DESIGN 2.9).
-  if (fleetProgram === "pir") { pirFolderGone(); return; }
+  if (fleetProgram === "pir") { pirFolderGone(); pirStateBackstop(); return; }
   reconciling = true;
   try {
     const state = await paneState();
