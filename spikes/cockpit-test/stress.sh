@@ -21,6 +21,14 @@
 # with the folder around it, so the failure can be read.
 set -u
 
+# EPOCHREALTIME and `declare -A` are bash 5 (run.sh needs them too). Under macOS's
+# /bin/bash 3.2 the first copy died on an unbound variable before running, and the
+# EXIT trap's status then made the whole stress run exit 0 -- a pass with nothing run.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 5 ]; then
+  echo "stress.sh: needs bash 5 or later (this is $BASH_VERSION); run it with a newer bash" >&2
+  exit 2
+fi
+
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 . "$ROOT/spikes/lib/test-daemons.sh"
 
