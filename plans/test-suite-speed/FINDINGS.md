@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 | Date | | Finding |
 |---|---|---|
 | 2026-09-28 | 📌 | T11 `TIMINGS=1`, load ~3: 16a–16p 39.5s before, 19.1s after (16m 9.2→1.9, 16n 9.0→3.6); 16m2 adds 0.9s. Full run 2m16s, ALL PASS 770. 16m looped 8× and 15o: 3 rounds of 4 concurrent, zero failures. |
+| 2026-09-28 | 🐞 | Pre-existing, serial order (`CONCURRENT=0`): a Ctrl-C during a 12c `press` can leave its feeder bash and the script(1) clicker running (1 of 12 interrupts); both are `&` jobs, which ignore SIGINT. Concurrent mode's side-chain trap reaps them. |
+| 2026-09-28 | 📌 | T08: before, 3 full runs 162/161/162s (median over 150s), main chain 119s, side chains 40s. Built concurrency: 118/120/119s, 767 checks, load ~3. Output identical to `CONCURRENT=0` (159s). 12 interrupts, nothing left. |
 | 2026-09-27 | 🐞 | T07: macOS `fs.watch` dropped a second `pir-dashboard.json` change made ~0.4s after the first: 5/384 lost under 4 concurrent suites, 0/288 at 1.5s. Went to T11: cockpitd's reconcile-poll backstop; `pirspace` removed. |
 | 2026-09-27 | 📌 | T07 pir sections 15a–16p, 15m–15o, `TIMINGS=1`: before 75.7s (load ~40), after 46.6s (load ~2); 21.7s before the spacing. 16m and 16n stay ~9s each, mostly spacing. 554 checks unchanged. |
 | 2026-09-27 | 📌 | T04 review: with the fence guard deleted, 11c'''' failed only 8 of 10 runs. Its "still starting" window (nap 1.5) can hold no healer pass, since ticks skip while reconcile holds the lock. Pre-existing; left for T09. |

@@ -13,7 +13,7 @@ over-budget cell they walk past.
 **Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
 `test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
 **Last updated:** 2026-09-28
-**Next `pir-work` will:** implement T08 (concurrent-chains).
+**Next `pir-work` will:** implement T09 (stability-proof).
 
 ## Tasks
 
@@ -29,7 +29,7 @@ done · ⛔ blocked, needs a human.
 | T05 | convert-footer-agenda | T01, T02 | ✅ | |
 | T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
-| T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
+| T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | |
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 | T11 | pir-state-backstop | T07; blocks T09 | ✅ | Review: one fix. The 16m2 "backstop does not re-fire" check counted at once, so a mutant firing every poll passed 1 run in 3; it now waits 2.5 polls and fails 4 of 4. Probed the lock and read-order races, the switch reset, and removal of the backstop (all of 16m2 fails). Test-only mute seam accepted. |
