@@ -24,9 +24,9 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | section-runner | — | ✅ | |
 | T02 | waituntil | — | ✅ | |
-| T03 | convert-main-early | T01, T02 | ⬜ | |
-| T04 | convert-browse | T01, T02 | ⬜ | |
-| T05 | convert-footer-agenda | T01, T02 | ⬜ | |
+| T03 | convert-main-early | T01, T02 | ✅ | |
+| T04 | convert-browse | T01, T02 | ✅ | |
+| T05 | convert-footer-agenda | T01, T02 | ✅ | |
 | T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ✅ | Polls on terminals.json (written last in an attach), log counts, `fleetclick`; 3 windows kept; 1.5s `pirspace` workaround, T11 added. Review clean, no code fix: checked no mid-attach footer write, full ALL PASS 767, 4×`ONLY=15o` concurrent, pir-pane-test 79. Person set T11 blocks T09. |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
