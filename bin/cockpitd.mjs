@@ -46,7 +46,7 @@ import {
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
 // The pure half of following the pir dashboard (pir-pane DESIGN 3.1): this daemon
 // gathers the facts (file text, pid liveness, folders, git) and the model decides.
-import { decidePir, isPirKey, readPirState, shouldReapPirKey, startingMode } from "./cockpit-pir-model.mjs";
+import { decidePir, followPirReport, isPirKey, shouldReapPirKey, startingMode } from "./cockpit-pir-model.mjs";
 // The push side (cockpit-open.mjs) takes this same lock over viewer-tabs.lock, and
 // the daemon is the other writer of that file: it clears an agent's list whenever
 // it launches a FRESH viewer. One helper rather than a second copy (DESIGN 3.5).
@@ -3506,11 +3506,49 @@ function isAlive(pid) {
   catch (e) { return e.code === "EPERM"; }
 }
 
+/** The tty a pid runs on ("ttys019"), or null: dead, no terminal ("??"), or ps failed. */
+function ttyOfPid(pid) {
+  try {
+    const out = execFileSync("ps", ["-o", "tty=", "-p", String(pid)],
+      { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return out && out !== "??" ? out.replace(/^\/dev\//, "") : null;
+  } catch { return null; }
+}
+
+/**
+ * Whether `pid` is the cockpit's own pir: alive and on the pir pane's terminal. pir
+ * hands PIR_DASHBOARD_STATE to everything it starts, so the dashboards a worker's
+ * test run spawns (each in a pty of its own) write this same file; only the one in
+ * the pane may move panes. Workers themselves have no terminal at all.
+ */
+function isOurPir(pid) {
+  if (panes.pir === undefined || !isAlive(pid)) return false;
+  const tn = paneTable()?.find((p) => p.pane_id === panes.pir)?.tty_name;
+  const paneTty = tn ? tn.replace(/^\/dev\//, "") : null;
+  return paneTty !== null && ttyOfPid(pid) === paneTty;
+}
+
+// What the cockpit's own pir last reported ({ pid, state }), kept so that another
+// pir's write or delete cannot move panes (followPirReport).
+let pirLast = null;
+let pirIgnoredLogged = null;
+
 /** pir's report, read defensively: anything doubtful is the runs list. */
 function readPir() {
   let raw = null;
   try { raw = fs.readFileSync(PIR_STATE, "utf8"); } catch { /* absent: list */ }
-  return readPirState(raw, { isAlive });
+  const r = followPirReport(raw, { isAlive, isOurs: isOurPir, last: pirLast });
+  pirLast = r.last;
+  // Once per offender, not per write: a rig can rewrite the file many times a second.
+  const why = r.ignored === null ? null
+    : r.ignored === "unreadable" ? "unreadable" : `pid ${r.ignored.pid}`;
+  if (why !== null && why !== pirIgnoredLogged) {
+    log(why === "unreadable"
+      ? `pir: pir-dashboard.json is missing or unreadable while the cockpit's pir (pid ${pirLast.pid}) runs; keeping its last report`
+      : `pir: ignoring pir-dashboard.json from ${why}: not the pir in the cockpit's pir pane`);
+  }
+  pirIgnoredLogged = why;
+  return r.state;
 }
 
 /** One git call in `cwd`, trimmed stdout, or null on any failure. */

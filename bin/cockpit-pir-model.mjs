@@ -93,6 +93,50 @@ export function readPirState(raw, { isAlive }) {
   return LIST; // "list", or a view this version does not know
 }
 
+// The pid a report names, or null when the text is no report at all (absent, corrupt, no pid).
+export function reportPid(raw) {
+  if (typeof raw !== "string") return null;
+  try {
+    const doc = JSON.parse(raw);
+    return isObject(doc) && Number.isInteger(doc.pid) && doc.pid > 0 ? doc.pid : null;
+  } catch {
+    return null;
+  }
+}
+
+// Which report the cockpit follows. Only the pir running in the cockpit's own pir pane may move
+// panes: PIR_DASHBOARD_STATE is inherited by everything that pir starts, so a worker running pir's
+// own test suite spawns throwaway dashboards that write -- and on exit delete -- the SAME file, and
+// following them swapped the panes back and forth between the real run and the test rigs' runs
+// (bug 2026-09-28, "the cockpit flickers while a pir run is in progress").
+//
+// isOurs(pid) → bool: the pid is alive and runs in the cockpit's pir pane (the daemon asks `ps`).
+// last: what this returned as `last` the previous time, or null. Returns
+//   { state, last, ignored } -- the state to act on, the memory to hand back next time, and why a
+//   file was not followed (null | { pid } for another pir's report | "unreadable" for a missing or
+//   corrupt file while the cockpit's pir is alive), for the log.
+// Everything doubtful still reads as the list (§2.4) unless the cockpit's own pir is alive and has
+// said something: then the doubt is someone else's write, and what it last said still stands.
+export function followPirReport(raw, { isAlive, isOurs, last }) {
+  const pid = reportPid(raw);
+  if (pid !== null && isOurs(pid)) {
+    const state = readPirState(raw, { isAlive });
+    return { state, last: { pid, state }, ignored: null };
+  }
+  if (last !== null && isOurs(last.pid)) {
+    return { state: last.state, last, ignored: pid !== null ? { pid } : "unreadable" };
+  }
+  // No pir of ours alive to believe: our own quit (it deletes the file), crashed (its dead pid is
+  // left behind), or has not written yet. The list, as §2.4 always had it.
+  let foreign = false;
+  try {
+    foreign = pid !== null && !!isAlive(pid);
+  } catch {
+    foreign = false;
+  }
+  return { state: LIST, last: null, ignored: foreign ? { pid } : null };
+}
+
 export function pirKey(run, worker) {
   const base = PIR_KEY_PREFIX + run.key;
   return worker ? `${base}.${worker.id}` : base;

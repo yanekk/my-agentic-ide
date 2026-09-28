@@ -120,6 +120,14 @@ as `list`. An old pir without the change therefore degrades to a switchable pane
 cockpit never follows, which is safe. The file is `~/.claude/cockpit/pir-dashboard.json`, and
 `cockpit-layout.sh` deletes it on every rebuild, as it empties `cmd`.
 
+**Only the pir in the pir pane is believed** (bug fix 2026-09-28). pir passes
+`PIR_DASHBOARD_STATE` on to everything it starts, so a worker running pir's own test suite
+spawns throwaway dashboards that write, and on exit delete, this same file; following them
+swapped panes back and forth. The daemon follows a report only when its `pid` is alive on the
+pir pane's tty (`ps -o tty= -p`). Another pir's report, and a missing or corrupt file while
+the pane's pir is still alive, change nothing: its last report stands. The `list` fallbacks
+above apply once the pane's own pir is gone (`followPirReport`).
+
 ### 2.5 Following pir
 
 While pir is shown, the file is the only source of truth. The daemon watches its directory

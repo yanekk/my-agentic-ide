@@ -10,6 +10,8 @@ import {
   decidePir,
   startingMode,
   shouldReapPirKey,
+  reportPid,
+  followPirReport,
 } from "../../bin/cockpit-pir-model.mjs";
 
 let pass = 0;
@@ -176,6 +178,41 @@ check("shouldReapPirKey: folder gone but shown → false", shouldReapPirKey(K, r
 check("shouldReapPirKey: folder present → false", shouldReapPirKey(K, reapFacts({ exists: () => true })), false);
 check("shouldReapPirKey: non-pir key → false", shouldReapPirKey("a1b2c3d4-job", reapFacts({})), false);
 check("shouldReapPirKey: folder never recorded → false (kept)", shouldReapPirKey(K, reapFacts({ cwdOfKey: () => null })), false);
+
+// --- followPirReport: only the cockpit's own pir moves panes (bug 2026-09-28) ---
+// 12345 is the cockpit's pir; 777 another live pir (a test rig pir's own suite started); 999 dead.
+const OURS = 12345, RIG = 777, DEAD = 999;
+const follow = (o) => ({ isAlive: (p) => p === OURS || p === RIG, isOurs: (p) => p === OURS, last: null, ...o });
+const runDoc = (pid) => doc({ pid, view: "run", run: RUN });
+const RUNSTATE = { view: "run", run: RUN };
+check("reportPid: a report's pid", reportPid(runDoc(OURS)), OURS);
+check("reportPid: absent → null", reportPid(null), null);
+check("reportPid: corrupt → null", reportPid("{\"pid\":"), null);
+check("reportPid: pid 0 → null", reportPid(doc({ pid: 0 })), null);
+const first = followPirReport(runDoc(OURS), follow({}));
+check("followPirReport: ours is followed", first.state, RUNSTATE);
+check("followPirReport: ours is remembered", first.last, { pid: OURS, state: RUNSTATE });
+check("followPirReport: ours is not ignored", first.ignored, null);
+check("followPirReport: a rig's report is ignored, ours still stands",
+  followPirReport(doc({ pid: RIG }), follow({ last: first.last })),
+  { state: RUNSTATE, last: first.last, ignored: { pid: RIG } });
+check("followPirReport: a rig's RUN before ours ever wrote → the list, ignored",
+  followPirReport(runDoc(RIG), follow({})), { state: LIST, last: null, ignored: { pid: RIG } });
+check("followPirReport: file deleted by a rig while ours is alive → ours still stands",
+  followPirReport(null, follow({ last: first.last })), { state: RUNSTATE, last: first.last, ignored: "unreadable" });
+check("followPirReport: corrupt while ours is alive → ours still stands",
+  followPirReport("{\"version\":1,\"pid\":", follow({ last: first.last })).state, RUNSTATE);
+const oursGone = follow({ isAlive: (p) => p === RIG, isOurs: () => false, last: first.last });
+check("followPirReport: ours quit (file deleted, pid gone) → the list",
+  followPirReport(null, oursGone), { state: LIST, last: null, ignored: null });
+check("followPirReport: ours crashed (its dead pid left) → the list",
+  followPirReport(runDoc(OURS), oursGone), { state: LIST, last: null, ignored: null });
+check("followPirReport: a dead stranger's file → the list, not called foreign",
+  followPirReport(runDoc(DEAD), follow({})), { state: LIST, last: null, ignored: null });
+check("followPirReport: ours relaunched under a new pid is followed at once",
+  followPirReport(doc({ pid: 4242 }), follow({ isOurs: (p) => p === 4242, isAlive: (p) => p === 4242, last: first.last })).state, LIST);
+check("followPirReport: ours at the list is remembered as the list",
+  followPirReport(doc({ pid: OURS }), follow({ last: first.last })).last, { pid: OURS, state: LIST });
 
 console.log(`CHECKS ${pass} ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -47,7 +47,7 @@ chain main 1 2 3 3b 4 4b 4c 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e'" 
   11 11a 11b "11b'" "11b''" 11c "11c'" "11c''" "11c'''" "11c''''" "11c'''''" 11d "11d'" \
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
-  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m2 16n 16o 16p 15m 15n 15o
+  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o
 chain footer 12 12b 12c
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
@@ -305,10 +305,24 @@ chmod +x "$T/bin/wezterm"
 #
 # The value `!fail` makes `ps` exit non-zero: the "no answer at all" branch, which
 # must still read as a shell so a genuinely dead half is still healed.
+#
+# `ps -o tty= -p <pid>` is how the daemon tells the cockpit's own pir from another
+# one writing the same state file (the dashboards a worker's test run spawns). $PSTTY
+# maps a pid to its tty ("12345 ttys21"); an unmapped pid answers `??`, no terminal,
+# which is what a real headless worker's is.
 cat > "$T/bin/ps" <<'PS'
 #!/usr/bin/env bash
-tty=""
-while [ $# -gt 0 ]; do [ "$1" = "-t" ] && { tty="${2:-}"; shift; }; shift; done
+tty=""; pid=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "-t" ] && { tty="${2:-}"; shift; }
+  [ "$1" = "-p" ] && { pid="${2:-}"; shift; }
+  shift
+done
+if [ -n "$pid" ]; then
+  t=$(awk -v p="$pid" '$1 == p { print $2 }' "${PSTTY:-/dev/null}" 2>/dev/null | tail -1)
+  printf '%s\n' "${t:-??}"
+  exit 0
+fi
 if [ -n "$tty" ] && [ -s "${PSFG:-/dev/null}" ]; then
   fg=$(awk -v t="$tty" '$1 == t { $1 = ""; sub(/^[ \t]+/, ""); print }' "$PSFG")
   [ "$fg" = "!fail" ] && exit 1
@@ -324,6 +338,7 @@ chmod +x "$T/bin/ps"
 export PANECWD="$T/panecwd"; : > "$PANECWD"
 export PSBUSY="$T/psbusy"; : > "$PSBUSY"
 export PSFG="$T/psfg"; : > "$PSFG"
+export PSTTY="$T/pstty"; : > "$PSTTY"
 
 # --- stub broot ------------------------------------------------------------
 # Only the CONTROL side is stubbed: the daemon never runs broot itself (it types
@@ -2507,6 +2522,9 @@ RK="pir.proj__slug"; WK="pir.proj__slug.w1"
 RFILE="$T/state/review-$RK.md"
 rm -f "$T/state/pir-dashboard.json"
 fleetclick pir
+# The suite stands in for the cockpit's own pir: its pid is on the pir pane's tty.
+# Any other pid writing the file is some other pir, and is ignored (16m3).
+echo "$$ ttys$(pane_key pir)" > "$PSTTY"
 check  "pir is shown, and with no file it is at its list" '"fleet":{"program":"pir","switchable":true' "$T/state/terminals.json"
 : > "$CALLS"
 pirwrite run "$PRUN"
@@ -2697,14 +2715,19 @@ check  "logged"                                    "pir: run folder is not a git
 check  "the repo stays shown"                      '"agent":"repo"' "$T/state/terminals.json"
 fi
 
-if section 16m "a dead pid, a corrupt file and no file all read as the list"; then
-sleep 0 & DEADPID=$!; wait "$DEADPID"
+if section 16m "the cockpit's pir gone: a dead pid, a corrupt file and no file all read as the list"; then
+# Each case is the pir in the pane going away (a crash leaves its file, a quit
+# deletes it), so it is played by a stand-in on the pane's tty that is then killed.
+# While the pane's pir is alive the same three are someone else's doing (16m3).
 for how in dead corrupt missing; do
-  pirwrite run "$PRUN"
+  sleep 60 & OWNPID=$!
+  echo "$OWNPID ttys$(pane_key pir)" >> "$PSTTY"
+  pirwrite run "$PRUN" "" "$OWNPID"
   waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "$how: the run key's attach to finish"
   X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
+  kill "$OWNPID"; wait "$OWNPID" 2>/dev/null
   case "$how" in
-    dead)    pirwrite run "$PRUN" "" "$DEADPID" ;;
+    dead)    pirwrite run "$PRUN" "" "$OWNPID" ;;
     corrupt) printf '{"version":1,"pid":' > "$T/state/pir-dashboard.json" ;;
     missing) rm -f "$T/state/pir-dashboard.json" ;;
   esac
@@ -2713,6 +2736,35 @@ for how in dead corrupt missing; do
   grew "$how: the run key was left"               "exit $RK → fleet list" "$T/daemon.log" "$X0"
   check "$how: switchable again"                  '"switchable":true' "$T/state/terminals.json"
 done
+fi
+
+if section 16m3 "another pir writing or deleting the file moves nothing"; then
+# The bug of 2026-09-28: pir hands PIR_DASHBOARD_STATE to its workers, a worker's
+# test run starts throwaway dashboards on ttys of their own, and those wrote this
+# file too -- the cockpit followed each, swapping panes back and forth. RIG is such
+# a pir: alive, on another tty. Only the pane's pir ($$ here) is followed.
+pirwrite run "$PRUN"
+waitfor '"agent":"slug"' "$T/state/terminals.json" 10 "the run key's attach to finish"
+sleep 60 & RIGPID=$!
+echo "$RIGPID ttys999" >> "$PSTTY"
+X0="$(countof "exit $RK → fleet list" "$T/daemon.log")"
+E0="$(countof "pir: enter" "$T/daemon.log")"
+I0="$(countof "pir: ignoring pir-dashboard.json from pid $RIGPID" "$T/daemon.log")"
+pirwrite worker "$PRUN" "$PWORK" "$RIGPID"
+waitmore "pir: ignoring pir-dashboard.json from pid $RIGPID" "$T/daemon.log" "$I0" 10 "the rig's report to be judged"
+grew   "a rig's worker report is ignored, and says why" "pir: ignoring pir-dashboard.json from pid $RIGPID: not the pir in the cockpit's pir pane" "$T/daemon.log" "$I0"
+pirwrite list "" "" "$RIGPID"
+U0="$(countof "pir: pir-dashboard.json is missing or unreadable" "$T/daemon.log")"
+rm -f "$T/state/pir-dashboard.json"
+waitmore "pir: pir-dashboard.json is missing or unreadable" "$T/daemon.log" "$U0" 10 "the rig's delete to be judged"
+grew   "a delete while the pane's pir lives keeps its report" "pir: pir-dashboard.json is missing or unreadable while the cockpit's pir (pid $$) runs; keeping its last report" "$T/daemon.log" "$U0"
+same   "...the run key was never left"             "$(countof "exit $RK → fleet list" "$T/daemon.log")" "$X0"
+same   "...and nothing else entered"               "$(countof "pir: enter" "$T/daemon.log")" "$E0"
+check  "the run is still shown"                    '"agent":"slug"' "$T/state/terminals.json"
+kill "$RIGPID"; wait "$RIGPID" 2>/dev/null
+pirwrite list
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the pane's own list to be followed"
+grew   "the pane's pir is still followed after"    "exit $RK → fleet list" "$T/daemon.log" "$X0"
 fi
 
 if section 16m2 "a change the watch never reports is still followed"; then

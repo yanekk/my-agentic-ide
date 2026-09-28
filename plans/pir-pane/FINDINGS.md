@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-28 | 🐞 | Cockpit flickered during pir runs: workers inherit `PIR_DASHBOARD_STATE`, and their test rigs' dashboards (`pir-plan-rig-*`) overwrote and deleted `pir-dashboard.json`. Daemon now believes only the pid on the pir pane's tty (DESIGN 2.4). pir should also stop passing the variable on. |
 | 2026-09-27 | ✅ | T07 verified by hand: live window on the T07 worktree (`config.lua` `repo` pointed there, then restored). PIR, a real run, its worker, back twice, Claude Agents: every click switched first try, diff and notes as expected. |
 | 2026-09-27 | 📌 | The live window runs main's `bin/`, so a feature on a pir branch is live-checked by pointing `~/.claude/cockpit/config.lua` `repo` at its worktree and reopening. Rebuilding closes the terminal a `pir` run may sit in. |
 | 2026-09-27 | 🔄 | T06: at 120 columns the footer's tightest level was 133 wide and wrapped, hiding the switch. The person chose a sixth level (usage without reset times), then cutting at the edge, never wrapping. Switch-only. |

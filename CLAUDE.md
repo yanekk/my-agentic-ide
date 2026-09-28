@@ -219,7 +219,7 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (770 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (776 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
@@ -228,7 +228,7 @@ spikes/agenda-test/     the agenda's store, model, Google client and command (63
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
-spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (79)
+spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
 spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run
 spikes/pty-inject/      PTY harness used to settle how injection behaves
@@ -251,8 +251,9 @@ custom mode, its `customRef`; a `fleet` block, `{ program: "claude"|"pir", switc
 available }`, that draws the `Claude Agents | PIR` switch; and `reviewable`, false only
 with a `pir.` key attached, which hides the `O` hint), `pir-dashboard.json` (what pir's
 dashboard has open — `view`, `run`, `worker`, `pid` — written temp-then-rename by
-the cockpit's own pir, read by the daemon, deleted on every rebuild; a missing,
-corrupt or dead-pid one reads as the runs list), `custom-refs.json` (the
+the cockpit's own pir, read by the daemon, deleted on every rebuild; only a report
+whose pid runs on the pir pane's tty is believed, because pir's workers inherit the
+variable; a missing, corrupt or dead-pid one reads as the runs list once that pir is gone), `custom-refs.json` (the
 per-agent branch/SHA for custom mode — the *only* persisted diff state; the mode
 itself is per-agent and in-memory, so there is no `diff-mode` file any more),
 `custom-ref-pending` (the handoff file the
