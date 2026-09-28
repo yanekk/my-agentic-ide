@@ -13,7 +13,7 @@ over-budget cell they walk past.
 **Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
 `test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
 **Last updated:** 2026-09-28
-**Next `pir-work` will:** review T09.
+**Next `pir-work` will:** implement T10.
 
 ## Tasks
 
@@ -30,11 +30,11 @@ done · ⛔ blocked, needs a human.
 | T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | |
-| T09 | stability-proof | T08 | 🔍 | `stress.sh` built; results in FINDINGS. Deviations: FAIL line gives the failed count and `.out` path, not a check count; on failure the scratch keeps the failed `.out` files only; `STRESS_SUITE` overrides the suite, for testing the harness; summary adds load. |
+| T09 | stability-proof | T08 | ✅ | Review: one defect, run under /bin/bash 3.2 stress.sh exited 0 with nothing run; reproduced with a stub suite, now refuses bash below 5. Probed pass/fail/mixed stub suites, arg errors, Ctrl-C with orphaned fake cockpitd (swept, exit 130, real daemon untouched). Real `--serial 1` and `--parallel 4 --rounds 1`: all pass, 770 checks. |
 | T10 | docs | T09 | ⬜ | |
 | T11 | pir-state-backstop | T07; blocks T09 | ✅ | |
 
-**Review queue:** T09
+**Review queue:** empty
 
 ## Blocked on the user
 
