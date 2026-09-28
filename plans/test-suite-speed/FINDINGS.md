@@ -9,6 +9,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-28 | 📌 | T10: docs now quote T09 (median 106.7s, 770 checks) in run.sh, CLAUDE.md, pir-pane and this DESIGN §5. Full run 100s at load ~7. `docs/cockpit.md` quotes no suite time; left alone. |
 | 2026-09-28 | 📌 | T09 `stress.sh --serial 10`: 10/10 pass, median 106.7s, max 114.9s, load ~5.6. `--parallel 4 --rounds 3`: 12/12 pass, median 115.7s, max 116.9s, load 5.3 to 8.2. 770 checks every run. |
 | 2026-09-28 | 📌 | T09 per chain, T01 baseline (557s, load 3–24) against `TIMINGS=1` (load ~7): main 303→104s, footer 134→14s, dashboard 69→16s, agenda 49→13s. Wall 557s→106s; side chains run beside main (T08). |
 | 2026-09-28 | 📌 | T09 Ctrl-C: SIGINT to stress.sh's group 40s in, two copies live: exit 130 in 0.7s, no cockpitd naming the scratch, scratch removed, the real cockpit's daemon untouched. The `&` copies ignore SIGINT, so cleanup stops them as trees. |

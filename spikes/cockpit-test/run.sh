@@ -12,7 +12,16 @@
 # $TITLELAG names panes whose title should be reported STALE, because WezTerm's
 # really does lag the launch by about a second.
 #
-#   spikes/cockpit-test/run.sh
+#   bash spikes/cockpit-test/run.sh          the test command: every section, prints
+#                                            ALL PASS (N checks); ~107s median on a
+#                                            quiet machine, 770 checks (2026-09-28)
+#   ONLY=11c,13b bash .../run.sh             a partial run while iterating -- NOT the
+#                                            test command, never prints ALL PASS
+#   SECTIONS=1 bash .../run.sh               list section ids and titles, run nothing
+#   TIMINGS=1 bash .../run.sh                add seconds per section after the result
+#   bash spikes/cockpit-test/stress.sh       repeat full runs, serial or concurrent,
+#                                            to prove the suite stable (see its header)
+# Details of each switch are under "the section runner" below.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -414,13 +423,20 @@ chmod +x "$T/bin/claude"
 # times. COCKPIT_TEST_SPEED scales BOTH the daemon's internal timers (through
 # COCKPIT_TIME_SCALE, passed below) AND every `nap` the script sleeps, by the same
 # factor -- so a smaller value runs the identical scenario proportionally faster.
-# 1.0 is the original timing (~119s). The default 0.5 was chosen by sweeping down
-# and measuring pass-rate: 0.5 passed every repeat with a steady ~69s (a ~1.7x
-# speedup) and kept margin on the timing-sensitive worktree-migration checks
-# (section 9c). The speedup is sublinear because fixed costs (node startup,
-# subprocess spawns) and a few detach/re-attach waits do NOT scale -- which is what
-# protects those checks from going flaky. Re-run the sweep any time with e.g.
-# `COCKPIT_TEST_SPEED=0.3 bash run.sh`; go lower and section 9c starts to flake.
+# 1.0 is the original timing. The default 0.5 was chosen by sweeping down and
+# measuring pass-rate, when the suite was a fraction of its present size: 0.5 passed
+# every repeat at ~1.7x the speed of 1.0 and kept margin on the timing-sensitive
+# worktree-migration checks (section 9c). The speedup is sublinear because fixed
+# costs (node startup, subprocess spawns) and a few detach/re-attach waits do NOT
+# scale -- which is what protects those checks from going flaky. Re-run the sweep
+# any time with e.g. `COCKPIT_TEST_SPEED=0.3 bash run.sh`; go lower and section 9c
+# starts to flake.
+# Most waits are now bounded polls (waitfor/waitmore/waituntil) that return the
+# moment the daemon reacts, so SPEED mainly sets the daemon's own timers and the
+# windows that prove something does NOT happen. Measured 2026-09-28 (plans/
+# test-suite-speed T09, 770 checks): 10 serial full runs, median 106.7s, max 114.9s;
+# 3 rounds of 4 concurrent, median 115.7s, max 116.9s; zero failures. Before that
+# plan one run took 6 min 13 s.
 SPEED="${COCKPIT_TEST_SPEED:-0.5}"
 # nap N: sleep N seconds scaled by SPEED, with a small floor so it never hits zero.
 nap() { sleep "$(awk -v b="$1" -v s="$SPEED" 'BEGIN{ v=b*s; if (v<0.05) v=0.05; printf "%.3f", v }')"; }

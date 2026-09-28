@@ -242,7 +242,7 @@ alive, which paths exist) and returns plain objects. The pir-pane suite greps it
 `node:fs`, `node:child_process`, `node:http(s)`, `fetch(`, `Date.now(`, `new Date()` and
 `process.env`, the same check `spikes/usage-test` applies to its model. If that check fails the
 fix is to move the code into the daemon, never to relax the grep. Everything on the pure side
-is tested in milliseconds; everything in the daemon needs the 6-minute wezterm-stubbed suite.
+is tested in milliseconds; everything in the daemon needs the ~2-minute wezterm-stubbed suite.
 
 ### 3.2 Modules
 
@@ -318,8 +318,8 @@ None of it proves the real pir writes the file; that is the pir plan's own tests
 
 **The test command.** The `test` lines at the top. The pir-pane line is guarded because T01
 creates that suite and tasks before it would otherwise fail on a missing file. cockpit-test takes
-about 6 minutes and prints only its section headings plus `ALL PASS (N checks)` on success
-(545 checks measured 2026-09-26); `VERBOSE=1` prints every check. Failures print in full and
+about 107 s and prints only its section headings plus `ALL PASS (N checks)` on success (median
+of 10 runs, 770 checks, 2026-09-28, plans/test-suite-speed T09); `VERBOSE=1` prints every check. Failures print in full and
 exit non-zero. `FORCE_COLOR=3` is set in this machine's session environment, but both suites
 print plain text regardless (measured: zero escape bytes); keep new suites printing no colour.
 

@@ -10,11 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
-`test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
-**Last updated:** 2026-09-27
-**Next `pir-work` will:** T01, once pir-pane and then test-daemon-leaks have merged (the person
-starts it); it re-takes the baseline on the merged script.
+**Status:** T01–T09, T11 done; T10 implemented, awaiting review.
+**Last updated:** 2026-09-28
+**Next `pir-work` will:** review T10.
 
 ## Tasks
 
@@ -32,10 +30,10 @@ done · ⛔ blocked, needs a human.
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | |
 | T09 | stability-proof | T08 | ✅ | |
-| T10 | docs | T09 | ⬜ | |
+| T10 | docs | T09 | 🔍 | Timing figures updated to T09's in run.sh (speed comment, usage header naming ONLY/SECTIONS/TIMINGS/stress.sh), CLAUDE.md (770 checks, partial run is not the test command), pir-pane DESIGN §3/§5, this DESIGN §5. Full run ALL PASS 770, 100s. No deviations. |
 | T11 | pir-state-backstop | T07; blocks T09 | ✅ | |
 
-**Review queue:** empty
+**Review queue:** T10
 
 ## Blocked on the user
 
