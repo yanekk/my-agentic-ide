@@ -156,8 +156,11 @@ pir-pane put 15a–15l, 16a–16p and 15m–15o between 11p and 12, and 12c afte
 **The test command.** The `test` line at the top. It prints only section headings and
 `ALL PASS (N checks)` on success; `VERBOSE=1` prints every check. `FORCE_COLOR=3` is set in this
 machine's session environment, and the suite prints plain text regardless. Keep it that way:
-nothing added here may print escape bytes. It took 6 min 13 s on 2026-09-27 and the target is
-about 2 minutes. T10 updates this line with the measured figure.
+nothing added here may print escape bytes. It took 6 min 13 s on 2026-09-27; after this plan,
+10 serial full runs took a median 106.7 s (max 114.9 s) and 3 rounds of 4 concurrent a median
+115.7 s, 770 checks, zero failures (T09, 2026-09-28). `ONLY=<ids>` runs a few sections while
+iterating (§3.4) and is not the test command; `SECTIONS=1` lists ids, `TIMINGS=1` times sections,
+`spikes/cockpit-test/stress.sh` repeats full runs.
 
 **Setup.** None. A fresh clone needs nothing installed (measured 2026-09-26 for pir-pane).
 
