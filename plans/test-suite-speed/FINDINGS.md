@@ -9,6 +9,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-28 | 📌 | T09 `stress.sh --serial 10`: 10/10 pass, median 106.7s, max 114.9s, load ~5.6. `--parallel 4 --rounds 3`: 12/12 pass, median 115.7s, max 116.9s, load 5.3 to 8.2. 770 checks every run. |
+| 2026-09-28 | 📌 | T09 per chain, T01 baseline (557s, load 3–24) against `TIMINGS=1` (load ~7): main 303→104s, footer 134→14s, dashboard 69→16s, agenda 49→13s. Wall 557s→106s; side chains run beside main (T08). |
+| 2026-09-28 | 📌 | T09 Ctrl-C: SIGINT to stress.sh's group 40s in, two copies live: exit 130 in 0.7s, no cockpitd naming the scratch, scratch removed, the real cockpit's daemon untouched. The `&` copies ignore SIGINT, so cleanup stops them as trees. |
 | 2026-09-28 | 📌 | T11 `TIMINGS=1`, load ~3: 16a–16p 39.5s before, 19.1s after (16m 9.2→1.9, 16n 9.0→3.6); 16m2 adds 0.9s. Full run 2m16s, ALL PASS 770. 16m looped 8× and 15o: 3 rounds of 4 concurrent, zero failures. |
 | 2026-09-28 | 🐞 | Pre-existing, serial order (`CONCURRENT=0`): a Ctrl-C during a 12c `press` can leave its feeder bash and the script(1) clicker running (1 of 12 interrupts); both are `&` jobs, which ignore SIGINT. Concurrent mode's side-chain trap reaps them. |
 | 2026-09-28 | 📌 | T08: before, 3 full runs 162/161/162s (median over 150s), main chain 119s, side chains 40s. Built concurrency: 118/120/119s, 767 checks, load ~3. Output identical to `CONCURRENT=0` (159s). 12 interrupts, nothing left. |
