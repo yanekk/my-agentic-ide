@@ -112,7 +112,10 @@ T="$(mktemp -d)"
 # (plans/test-daemon-leaks/DESIGN.md §2.3).
 . "$ROOT/spikes/lib/test-daemons.sh"
 DPID=""; D2PID=""; D3PID=""; GPID=""; D4PID=""; D5PID=""; D6PID=""; D7PID=""; BBPID=""
-trap 'daemon_stop $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $BBPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
+# SIDE_PIDS: the side-chain subshells (T08). Stopped as a tree, so a run killed
+# while they are mid-chain takes their sleeps, stubs and daemons down with them.
+SIDE_PIDS=""
+trap 'daemon_stop $SIDE_PIDS $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $BBPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 # The reader's launch line, in ONE place: the scheme name is asserted in four
 # sections (the browse launch, two heals and the worktree rebuild) and a change of
@@ -393,6 +396,12 @@ cat > "$AGENTS_JSON" <<JSON
   "sessionId":"s2","name":"second agent","startedAt":0,"status":"idle","state":"done"}]
 JSON
 
+# The side chains' daemons (sections 13, 13b, 14, 14d, 14b) read a SNAPSHOT of
+# the fleet as it starts, never $AGENTS_JSON: the main chain rewrites that file as
+# it goes (a reap, a migration, a stray agent), and with the chains running side
+# by side (T08) what a side daemon saw would depend on how far main had got.
+SIDE_AGENTS="$T/agents-side.json"; cp "$AGENTS_JSON" "$SIDE_AGENTS"
+
 cat > "$T/bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 [ "$1" = "agents" ] && cat "$AGENTS_JSON"
@@ -611,6 +620,9 @@ waituntil() {
   return 1
 }
 
+# The main chain (DESIGN 4.1). Each chain is a function so the dispatch at the
+# bottom can run the three side chains alongside it (T08, DESIGN 3.6).
+run_main() {
 if section 1 "attach: panes retargeted"; then
 # The pane now shows an agent; the log line is only a nudge to reconcile sooner.
 echo "test agent" > "$FLEETSTATE"
@@ -2866,6 +2878,9 @@ PKF="pkill -f"
 check  "the harness intercepted pkill"            "$PKF cockpitd.mjs" "$T/layout-calls"
 fi
 
+}  # run_main
+
+run_footer() {
 # --- the footer chain's helpers (12, 12b, 12c) ------------------------------
 # Defined here, above the chain's first heading and outside every section, so
 # what a section sees never depends on which sections ran before it
@@ -3264,15 +3279,17 @@ rm -f "$SD/usage-cache.json"
 fi
 fi
 
-# --- the agenda chain's helpers (13, 13b, 13c) ------------------------------
-# Above the chain's first heading and outside every gate, like the footer chain's.
-#
-# `same` is REDEFINED here for the rest of the file, with the expected/actual
+}  # run_footer
+
+# `same` is REDEFINED for the agenda and dashboard chains, with the expected/actual
 # failure format. It used to be redefined inside section 13, so the sections after
 # it (the dashboard chain) printed a different failure format depending on whether
 # 13 had run: `ONLY=14c` got `want [..] got [..]`, a full run `expected:/actual:`.
-# Out here, and ungated, every run prints what a full run always printed. It must
-# stay below every main-chain and footer section, which use the first format.
+# Installed first thing by both chains, so every run prints what a full serial run
+# always printed -- including a concurrent one, where the dashboard chain's subshell
+# never sees the agenda chain's redefinition. Main-chain and footer sections keep
+# the first format.
+late_same() {
 same() {  # same <description> <actual> <expected>
   if [ "$2" = "$3" ]; then
     okline "$1"
@@ -3280,6 +3297,12 @@ same() {  # same <description> <actual> <expected>
     echo "  FAIL $1"; echo "       expected: $3"; echo "       actual:   $2"; fail=1
   fi
 }
+}
+
+run_agenda() {
+late_same
+# --- the agenda chain's helpers (13, 13b, 13c) ------------------------------
+# Above the chain's first heading and outside every gate, like the footer chain's.
 # Read one value out of a cache file; `c` is the parsed agenda-cache.json.
 cq() {  # cq <state-dir> <expression over c>
   node -e 'const fs=require("fs");let c={calendars:{}};try{c=JSON.parse(fs.readFileSync(process.argv[1]+"/agenda-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch(e){v="<error>";}process.stdout.write(String(v===undefined?"undefined":v));' "$1" "$2"
@@ -3395,7 +3418,7 @@ d2env() {
   CALLS="$A2/calls.log" FLEETSTATE="$A2/fleetstate" PANESTATE="$A2/panestate" \
   NEXTPANE="$A2/nextpane" NEXTTAB="$A2/nexttab" EDITING="$A2/editing" \
   TITLELAG="$A2/titlelag" ACTIVE="$A2/active" PANECWD="$A2/panecwd" \
-  PSBUSY="$A2/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  PSBUSY="$A2/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS="$AGENDA_TICK_MS" COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
@@ -3551,7 +3574,7 @@ d3env() {
   CALLS="$A3/calls.log" FLEETSTATE="$A3/fleetstate" PANESTATE="$A3/panestate" \
   NEXTPANE="$A3/nextpane" NEXTTAB="$A3/nexttab" EDITING="$A3/editing" \
   TITLELAG="$A3/titlelag" ACTIVE="$A3/active" PANECWD="$A3/panecwd" \
-  PSBUSY="$A3/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  PSBUSY="$A3/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS=3600000 COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
   "$@"
 }
@@ -3618,6 +3641,10 @@ daemon_stop $D3PID; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""
 fi
 
+}  # run_agenda
+
+run_dashboard() {
+late_same
 if section 14 "the bitbucket dashboard: the daemon keeps the PR cache current"; then
 # bitbucket-dashboard T05. THE DAEMON FETCHES AND THE PANE ONLY DRAWS (DESIGN 2.9,
 # 3.1), so refreshPRs is cockpitd's and is tested here, refreshAgenda's sibling.
@@ -3768,7 +3795,7 @@ d4env() {
   CALLS="$A4/calls.log" FLEETSTATE="$A4/fleetstate" PANESTATE="$A4/panestate" \
   NEXTPANE="$A4/nextpane" NEXTTAB="$A4/nexttab" EDITING="$A4/editing" \
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
-  PSBUSY="$A4/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  PSBUSY="$A4/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   "$@"
 }
@@ -3986,7 +4013,7 @@ d6env() {
   CALLS="$A6/calls.log" FLEETSTATE="$A6/fleetstate" PANESTATE="$A6/panestate" \
   NEXTPANE="$A6/nextpane" NEXTTAB="$A6/nexttab" EDITING="$A6/editing" \
   TITLELAG="$A6/titlelag" ACTIVE="$A6/active" PANECWD="$A6/panecwd" \
-  PSBUSY="$A6/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  PSBUSY="$A6/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
   BITBUCKET_BROWSER="$A6/opener.sh" \
   "$@"
@@ -4113,7 +4140,7 @@ d5env() {
   CALLS="$A5/calls.log" FLEETSTATE="$A5/fleetstate" PANESTATE="$A5/panestate" \
   NEXTPANE="$A5/nextpane" NEXTTAB="$A5/nexttab" EDITING="$A5/editing" \
   TITLELAG="$A5/titlelag" ACTIVE="$A5/active" PANECWD="$A5/panecwd" \
-  PSBUSY="$A5/psbusy" AGENTS_JSON="$AGENTS_JSON" \
+  PSBUSY="$A5/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS=3600000 \
   "$@"
 }
@@ -4160,7 +4187,60 @@ same "no line in this suite names the real bitbucket host" \
 same "the bitbucket tick defaults to 60s" \
      "$(grep -c 'COCKPIT_BITBUCKET_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
 fi
-section_close
+}  # run_dashboard
+
+# --- the dispatch (plans/test-suite-speed DESIGN 3.6, T08) --------------------
+#   CONCURRENT=0   run the four chains one after another in this shell, as the
+#                  suite always did: for watching a side chain's output live
+# By default the footer, agenda and dashboard chains each run in a background
+# subshell alongside the main chain. They share nothing with it but the setup
+# above (DESIGN 4.1; the fleet they read is $SIDE_AGENTS, a snapshot). Each writes
+# its output to $T/chain-<name>.out and, when it finishes, "<pass> <fail>" to
+# .count and its section times to .times; the parent prints them in chain order
+# after main, so the output reads exactly as a serial run's. A partial run forks
+# only the side chains it selected (chain_runs).
+side_chain() {   # side_chain <name>: the body of one side chain's subshell
+  local c=$1
+  pass=0; fail=0; SEC_TIMES=(); SEC_CUR=""
+  # Its own daemons AND its own children, stopped however the subshell ends. It
+  # does not inherit the parent's EXIT trap, and must not: that one removes $T.
+  # The children matter on a Ctrl-C: SIGINT reaches the whole group, this
+  # subshell dies of it, but a renderer it backgrounded (strip_frame's) ignores
+  # SIGINT as every `&` job does, and once this shell is gone it is reparented to
+  # pid 1 where the parent's tree walk over $SIDE_PIDS can no longer find it
+  # (measured: 2 of 4 interrupts early in 12c left one running).
+  # SIDE_SELF, not $BASHPID in the trap: inside $(...) that names the substitution.
+  SIDE_SELF=$BASHPID
+  trap 'daemon_stop $(/usr/bin/pgrep -P $SIDE_SELF) $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID' EXIT
+  "run_$c"
+  section_close
+  printf '%s\n' "${SEC_TIMES[@]}" > "$T/chain-$c.times"
+  printf '%s %s\n' "$pass" "$fail" > "$T/chain-$c.count"
+}
+if [ "${CONCURRENT:-1}" = 0 ]; then
+  run_main; run_footer; run_agenda; run_dashboard
+  section_close
+else
+  SIDE=()
+  for c in footer agenda dashboard; do
+    chain_runs "$c" || continue
+    ( side_chain "$c" ) > "$T/chain-$c.out" 2>&1 &
+    SIDE_PIDS="$SIDE_PIDS $!"; SIDE+=("$c")
+  done
+  run_main
+  section_close
+  for p in $SIDE_PIDS; do wait "$p"; done
+  SIDE_PIDS=""
+  for c in "${SIDE[@]}"; do
+    cat "$T/chain-$c.out"
+    if read -r sp sf < "$T/chain-$c.count" 2>/dev/null; then
+      pass=$((pass + sp)); [ "$sf" != 0 ] && fail=1
+      while IFS= read -r l; do [ -n "$l" ] && SEC_TIMES+=("$l"); done < "$T/chain-$c.times"
+    else
+      echo "  FAIL the $c chain did not finish (no $T/chain-$c.count)"; fail=1
+    fi
+  done
+fi
 
 # Every daemon a section started must be gone by now. The main one is otherwise
 # stopped only by the EXIT trap, so stop it (and anything still set) first, or the
