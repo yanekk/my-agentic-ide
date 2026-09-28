@@ -32,7 +32,7 @@ done · ⛔ blocked, needs a human.
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | |
 | T09 | stability-proof | T08 | ✅ | |
-| T10 | docs | T09 | ⬜ | |
+| T10 | docs | T09 | ✅ | |
 | T11 | pir-state-backstop | T07; blocks T09 | ✅ | |
 
 **Review queue:** empty
