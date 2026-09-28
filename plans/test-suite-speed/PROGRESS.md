@@ -10,11 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** Planned 2026-09-27. Nothing built. Building waits for pir-pane and then
-`test-daemon-leaks` to merge to main, because all three edit `spikes/cockpit-test/run.sh` (DESIGN §5).
+**Status:** T01–T08 built and reviewed; T11, T09, T10 remain.
 **Last updated:** 2026-09-28
-**Next `pir-work` will:** T01, once pir-pane and then test-daemon-leaks have merged (the person
-starts it); it re-takes the baseline on the merged script.
+**Next `pir-work` will:** T11 (pir-state-backstop), then T09 once T11 is done.
 
 ## Tasks
 
@@ -30,12 +28,12 @@ done · ⛔ blocked, needs a human.
 | T05 | convert-footer-agenda | T01, T02 | ✅ | |
 | T06 | convert-dashboard | T01, T02 | ✅ | |
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
-| T08 | concurrent-chains | T03, T04, T05, T06, T07 | 🔍 | Median 162s so built: chains are functions, side chains in subshells, 119s, 767 checks. Deviations: side daemons read a fleet snapshot (`SIDE_AGENTS`); `same` redefinition is `late_same`; EXIT trap gains `SIDE_PIDS` (DESIGN §7 said no trap change). |
+| T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | Review clean, no fix commit. Full run 121s, 767 checks. Probed: side-chain FAIL and a killed side chain both give FAILURES/exit 1; Ctrl-C at 4/12/25/75s leaves nothing; partial output identical to `CONCURRENT=0`. EXIT-trap `SIDE_PIDS` deviation accepted: additive, needed by the concurrency, not the leak fix §7 excludes. |
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
 | T11 | pir-state-backstop | T07; blocks T09 | ⬜ | |
 
-**Review queue:** T08
+**Review queue:** empty
 
 ## Blocked on the user
 
