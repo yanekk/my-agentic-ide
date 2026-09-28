@@ -1,6 +1,6 @@
 # T11 — pir-state-backstop
 
-**Phase:** 2 · **Depends on:** T07 · **Weight:** medium
+**Phase:** 2 · **Depends on:** T07; blocks T09 · **Weight:** medium
 
 Added 2026-09-27 during T07, with the person's approval. Unlike every other task in this plan it
 changes `bin/cockpitd.mjs` (DESIGN §4 reserves a daemon change for the person's decision; this

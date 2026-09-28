@@ -33,7 +33,7 @@ done · ⛔ blocked, needs a human.
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ⬜ | |
 | T09 | stability-proof | T08 | ⬜ | |
 | T10 | docs | T09 | ⬜ | |
-| T11 | pir-state-backstop | T07 | ⬜ | |
+| T11 | pir-state-backstop | T07; blocks T09 | ⬜ | |
 
 **Review queue:** T07
 
