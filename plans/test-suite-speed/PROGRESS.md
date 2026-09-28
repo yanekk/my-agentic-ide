@@ -10,9 +10,9 @@ over-budget cell they walk past.
 
 **Plan reviewed:** 2026-09-27 — 3 fixed, 2 decided with the user
 
-**Status:** T01–T09, T11 done; T10 implemented, awaiting review.
+**Status:** All tasks T01–T11 done.
 **Last updated:** 2026-09-28
-**Next `pir-work` will:** review T10.
+**Next `pir-work` will:** nothing; the plan is complete.
 
 ## Tasks
 
@@ -30,10 +30,10 @@ done · ⛔ blocked, needs a human.
 | T07 | convert-pir-pane | T01, T02 | ✅ | |
 | T08 | concurrent-chains | T03, T04, T05, T06, T07 | ✅ | |
 | T09 | stability-proof | T08 | ✅ | |
-| T10 | docs | T09 | 🔍 | Timing figures updated to T09's in run.sh (speed comment, usage header naming ONLY/SECTIONS/TIMINGS/stress.sh), CLAUDE.md (770 checks, partial run is not the test command), pir-pane DESIGN §3/§5, this DESIGN §5. Full run ALL PASS 770, 100s. No deviations. |
+| T10 | docs | T09 | ✅ | Review clean, no fix commit. Figures match T09 FINDINGS; grep for 6-minute claims clean; run.sh usage header checked against the runner (partial runs print PARTIAL RUN, SECTIONS=1 lists only); swept docs/ and other DESIGNs for stale times. Full suite ALL PASS 770 checks, 101s. |
 | T11 | pir-state-backstop | T07; blocks T09 | ✅ | |
 
-**Review queue:** T10
+**Review queue:** empty
 
 ## Blocked on the user
 
