@@ -40,6 +40,7 @@ FINDINGS.md.
 | [T05](tasks/T05-convert-footer-agenda.md) | convert-footer-agenda | T01, T02 | medium |
 | [T06](tasks/T06-convert-dashboard.md) | convert-dashboard | T01, T02 | medium |
 | [T07](tasks/T07-convert-pir-pane.md) | convert-pir-pane | T01, T02 | medium |
+| [T11](tasks/T11-pir-state-backstop.md) | pir-state-backstop | T07; blocks T09 | medium |
 
 T04 and T07 run their chain from section 1 through `ONLY=`, since both are late in the main
 chain; they cannot be faster to iterate on than the prefix before them.

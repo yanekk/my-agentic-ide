@@ -9,6 +9,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-27 | 🐞 | T07: macOS `fs.watch` dropped a second `pir-dashboard.json` change made ~0.4s after the first: 5/384 lost under 4 concurrent suites, 0/288 at 1.5s. The suite spaces pir writes (`pirspace`); T11, added with the person's yes, is the daemon backstop. |
+| 2026-09-27 | 📌 | T07 pir sections 15a–16p, 15m–15o, `TIMINGS=1`: before 75.7s (load ~40), after 46.6s (load ~2); 21.7s before the spacing. 16m and 16n stay ~9s each, mostly spacing. 554 checks unchanged. |
 | 2026-09-27 | 📌 | T04 review: with the fence guard deleted, 11c'''' failed only 8 of 10 runs. Its "still starting" window (nap 1.5) can hold no healer pass, since ticks skip while reconcile holds the lock. Pre-existing; left for T09. |
 | 2026-09-27 | 📌 | T04, load ~3.5, 0 orphans: 11–11p 146s before, 47s after; full run 457s, ALL PASS (767 checks). Agent switches poll `"agent":` in terminals.json, which showTerminal writes last. |
 | 2026-09-27 | 🐞 | T04: 11c'''' "a browser sitting at a shell is never questioned" flaked at load 23. A healer tick that read the pane table before the retitle queried broot after the truncation. Now truncates once the daemon logs the shell status. |
