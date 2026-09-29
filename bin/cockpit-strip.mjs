@@ -371,7 +371,7 @@ function renderFooter() {
   hitZones = zones;
 
   if (!usageSeg) {
-    process.stdout.write(`${ESC}2J${ESC}H${pre}${diff}${ESC}K`);
+    paint(`${pre}${diff}${ESC}K`);
     return;
   }
   // Right-align the usage readout: pad so it ends at the window's right edge when
@@ -382,7 +382,7 @@ function renderFooter() {
   let line = `${pre}${diff}${" ".repeat(gap)}${usageDrawn}`;
   // Still too wide at the last level: cut, never wrap (see the levels above).
   if (fleetSeg && cols > 0) line = cutTo(line, cols);
-  process.stdout.write(`${ESC}2J${ESC}H${line}${ESC}K`);
+  paint(`${line}${ESC}K`);
 }
 
 // A left-click at column `x` on the footer: if it landed on a diff-mode label,
@@ -451,7 +451,7 @@ function renderStrip() {
   const row = (s, active) => `${active ? `${ESC}7m` : ""}${clip(s)}${ESC}0m${ESC}K\r\n`;
 
   const zones = [];
-  let out = `${ESC}2J${ESC}H`;                         // clear, cursor home
+  let out = "";
   out += `${ESC}1mTERMINALS${ESC}0m${ESC}K\r\n`;       // pane row 1
   out += `${rule}${ESC}K\r\n`;                         // pane row 2
   let rowNum = 3;                                      // first terminal lands here
@@ -490,7 +490,19 @@ function renderStrip() {
   zones.push({ action: "add", row: rowNum, start: 1, end: ADD.length });
 
   stripZones = zones;
-  process.stdout.write(out);
+  paint(out);
+}
+
+// Write a frame without the pane ever showing a blank one: the same fix, and the
+// same reasoning, as paint() in cockpit-welcome.mjs. An erase-everything `2J` before
+// each 2s repaint let WezTerm draw the pane empty; now an unchanged frame is skipped,
+// a changed one overwrites in place (`J` clears whatever sat below it), all inside
+// DEC 2026 synchronized output. A resize resets `lastFrame`.
+let lastFrame = null;
+function paint(frame) {
+  if (frame === lastFrame) return;
+  lastFrame = frame;
+  process.stdout.write(`${ESC}?2026h${ESC}H${frame}${ESC}J${ESC}?2026l`);
 }
 
 // A left-click at pane-local (x, y) on the strip: a terminal row's label area makes
@@ -520,7 +532,7 @@ enableMouse(FOOTER ? (x) => onFooterClick(x) : onStripClick);
 // Also watch usage-cache.json (written by the tap): a fresh reading repaints the
 // footer at once, rather than waiting up to 2s for the belt-and-braces interval.
 try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json") render(); }); } catch {}
-process.stdout.on("resize", () => { render(); schedulePin(); });
+process.stdout.on("resize", () => { lastFrame = null; render(); schedulePin(); });
 setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
 schedulePin();                                        // the pane may open already oversized
 

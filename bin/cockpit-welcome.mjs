@@ -274,7 +274,22 @@ function render() {
   }
 
   // No trailing newline: writing one on the last row would scroll the pane.
-  process.stdout.write(`${ESC}2J${ESC}H` + lines.map((l) => l + `${ESC}K`).join("\r\n"));
+  paint(lines.map((l) => l + `${ESC}K`).join("\r\n"));
+}
+
+// Write a frame without the pane ever showing a blank one. The old `2J` (erase the
+// whole screen) before every repaint was the flicker: WezTerm could draw the pane
+// between the erase and the frame, and repaints come every 2s and on every watched
+// file's rename even when nothing changed. So an unchanged frame is not written at
+// all, a changed one overwrites in place (every row already ends in `K`, and the
+// closing `J` clears anything below the last row), and the whole write sits inside
+// DEC 2026 synchronized output so WezTerm presents it in one go. A resize resets
+// `lastFrame`, because the terminal may have reflowed what is on screen.
+let lastFrame = null;
+function paint(frame) {
+  if (frame === lastFrame) return;
+  lastFrame = frame;
+  process.stdout.write(`${ESC}?2026h${ESC}H${frame}${ESC}J${ESC}?2026l`);
 }
 
 // --- clicks ----------------------------------------------------------------
@@ -353,7 +368,7 @@ function enableMouse() {
 process.stdout.write(`${ESC}?25l`);                // hide the cursor
 render();
 enableMouse();
-process.stdout.on("resize", render);
+process.stdout.on("resize", () => { lastFrame = null; render(); });
 setInterval(render, 2000);                          // repaint if a resize is missed
 // Watch the state DIRECTORY, not the files: `note` and the agenda's store both
 // replace them atomically (temp + rename), so a file watch would go deaf after

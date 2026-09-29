@@ -2974,7 +2974,11 @@ STRIP_ANSI='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/
 # code points. The legend is full of 1-column BMP glyphs (↺ ⌥ · →), so code
 # points equal columns here -- which is what the one-row width assertion needs.
 LEN='const s=require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,"");process.stdout.write(String([...s].length))'
-SHA='process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(process.argv[1])).digest("hex"))'
+# The hash normalises the frame's envelope back to the one the pins were taken with:
+# a paint used to open with `2J` (erase all) + `H`, and now opens with DEC 2026's
+# begin-sync + `H` and closes with `J` + end-sync, so an unchanged frame never flashes
+# blank. Only the envelope is swapped; every byte of the frame itself is still pinned.
+SHA='const b=require("fs").readFileSync(process.argv[1],"latin1").split("\x1b[?2026h\x1b[H").join("\x1b[2J\x1b[H").split("\x1b[J\x1b[?2026l").join("");process.stdout.write(require("crypto").createHash("sha256").update(b,"latin1").digest("hex"))'
 # The renderer's start-up writes, in order: hide the cursor, the frame, then turn on
 # mouse reporting (and, on a tty, raw mode straight after). So MOUSE_ON in the
 # output means the first frame is complete and a click can be read. CURSOR_ON is

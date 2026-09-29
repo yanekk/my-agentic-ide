@@ -503,6 +503,31 @@ same "a headless paint fabricates no click verb" \
   "$([ -e "$C/cmd" ] && echo yes || echo no)" "no"
 
 echo
+echo "== 14. an unchanged pane is not repainted, and no paint blanks it first =="
+# The dashboard flickered with nothing changing: every 2s tick (and every watched
+# rename) opened with `2J`, erase-the-whole-screen, and WezTerm could show the pane
+# blank before the frame landed. A paint now overwrites in place inside DEC 2026
+# synchronized output, and a frame identical to the last one is not written at all.
+# The clock is frozen so the tick past 2s has nothing new to draw.
+cat > "$T/ticks.mjs" <<'TICKS'
+Object.defineProperty(process.stdout, "columns", { value: 140, configurable: true });
+Object.defineProperty(process.stdout, "rows",    { value: 24,  configurable: true });
+Date.now = () => 1790000000000;
+let buf = "";
+process.stdout.write = (s) => { buf += s; return true; };
+await import(process.argv[2]);
+setTimeout(() => {
+  const paints = buf.split("\x1b[?2026h").length - 1;
+  process.stderr.write(`paints=${paints} erase=${buf.includes("\x1b[2J") ? "yes" : "no"}\n`);
+  process.exit(0);
+}, 2600);
+TICKS
+out="$(COCKPIT_DIR="$C" node "$T/ticks.mjs" "$ROOT/bin/cockpit-welcome.mjs" 2>&1 >/dev/null)"
+printf '%s\n' "$out" > "$T/out"
+check  "one paint across a 2s tick that changed nothing" "paints=1" "$T/out"
+check  "...and no paint erases the whole screen first"   "erase=no" "$T/out"
+
+echo
 daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass checks)"; else echo "FAILURES"; fi
 exit "$fail"
