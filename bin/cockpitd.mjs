@@ -18,6 +18,7 @@
 // Started for you by bin/cockpit-layout.sh.
 
 import { execFile, execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -97,6 +98,12 @@ const ms = (base) => Math.round(base * TIME_SCALE);
 // an auto-reload can never silently destroy work in progress.
 const AUTO_RELOAD = process.env.COCKPIT_AUTO_RELOAD !== "0";
 const RELOAD_DEBOUNCE_MS = ms(1200);
+// The debounce is trailing, so a writer that never pauses for 1.2s would hold a
+// real change back for ever -- and now that ignored-path churn (pir's status
+// files, several writes a second) also lands in the queue, that is the normal
+// case in a busy repo. A burst is therefore settled at most this long after its
+// first event, however much keeps arriving.
+const RELOAD_MAX_WAIT_MS = ms(4000);
 const ANNOTATION_DEBOUNCE_MS = ms(250);
 // Above this many lines a review is sent as a bracketed paste, which the prompt
 // box collapses to a tidy `[Pasted text +N lines]` chip. Below it, raw newlines
@@ -2481,13 +2488,20 @@ function stopWatchers() {
  * This is what makes a restored pane current rather than a snapshot of whenever
  * you last looked at it. The agent keeps writing while you are elsewhere, so
  * without this the whole point of parking the pane would be undone: it would come
- * back instantly and out of date. Reloading in the background costs one `R` per
- * quiet second of agent writes, in a pane nobody is looking at.
+ * back instantly and out of date. Reloading costs one `R` per settled burst of
+ * writes that actually changes the diff (see settleReload) -- in a parked pane
+ * nobody is looking at, or the visible one, where each needless `R` is a flicker.
  */
 const worktreeWatches = new Map();      // jobId -> fs.FSWatcher
 const headWatches = new Map();          // jobId -> fs.FSWatcher (git reflog / HEAD)
+const reloadQueues = new Map();         // jobId -> { timer, since, names, head }
+const reloadChains = new Map();         // jobId -> Promise: settles run one at a time
+const shownPrints = new Map();          // jobId -> { print, at }: the diff the last R showed
 
 function stopWorktreeWatch(jobId) {
+  const q = reloadQueues.get(jobId);
+  if (q) { clearTimeout(q.timer); reloadQueues.delete(jobId); }
+  shownPrints.delete(jobId);
   const w = worktreeWatches.get(jobId);
   if (w) { try { w.close(); } catch {} worktreeWatches.delete(jobId); }
   const h = headWatches.get(jobId);
@@ -2675,14 +2689,127 @@ function reloadDiff(jobId, reviewFile) {
   if (pending.trim()) return;
 
   const status = diffPaneStatus(pane);
-  if (status === "editing") return log(`not reloading ${jobId}: annotation editor is open`);
-  if (status !== "running") return;
-  sendRaw(pane, "R");
+  if (status === "editing") { log(`not reloading ${jobId}: annotation editor is open`); return false; }
+  if (status !== "running") return false;
+  return sendRaw(pane, "R");
+}
+
+/**
+ * Queue a reload for `jobId`: `name` is a worktree-relative path the watch saw, or
+ * null for a HEAD movement (which bypasses the ignore filter -- the reflog is not a
+ * worktree path). Coalesced: every event inside the window joins one settle.
+ */
+function queueReload(jobId, worktree, reviewFile, name) {
+  let q = reloadQueues.get(jobId);
+  if (!q) {
+    q = { timer: null, since: Date.now(), names: new Set(), head: false };
+    reloadQueues.set(jobId, q);
+  }
+  if (name === null) q.head = true; else q.names.add(name);
+  clearTimeout(q.timer);
+  const wait = Math.max(0, Math.min(RELOAD_DEBOUNCE_MS, q.since + RELOAD_MAX_WAIT_MS - Date.now()));
+  q.timer = setTimeout(() => {
+    if (reloadQueues.get(jobId) !== q) return;
+    reloadQueues.delete(jobId);         // events from here on start the next burst
+    const prev = reloadChains.get(jobId) ?? Promise.resolve();
+    const run = prev
+      .then(() => settleReload(jobId, worktree, reviewFile, [...q.names], q.head))
+      .catch((e) => log(`reload check failed for ${jobId}: ${e.message}`));
+    reloadChains.set(jobId, run);
+    run.then(() => { if (reloadChains.get(jobId) === run) reloadChains.delete(jobId); });
+  }, wait);
+}
+
+/**
+ * Decide whether a settled burst deserves an `R`. Every `R` makes revdiff re-run
+ * git and repaint the whole pane, which is visible as a flicker even when the
+ * result is identical -- and a repo with pir running rewrites gitignored status
+ * and log files several times a second, so without this the pane flickered every
+ * couple of seconds over a diff that had not changed (measured on
+ * plan-implement-review: 39 events in 20s, all under ignored plans/x/.parallel/,
+ * 7 reloads). Two gates, cheapest first:
+ *  1. every changed path ignored by git -- `check-ignore` applies ALL the sources
+ *     (each .gitignore, .git/info/exclude, core.excludesFile) and never calls a
+ *     tracked file ignored, which a pattern match on .gitignore alone would get
+ *     wrong both ways (`.claude/worktrees/` is excluded only through info/exclude);
+ *  2. the diff's fingerprint unchanged since the last R we sent -- catches the
+ *     rest: a file rewritten with the same bytes, edits inside a nested repo the
+ *     parent's diff cannot see, and worktree edits in lastcommit mode.
+ */
+async function settleReload(jobId, worktree, reviewFile, names, head) {
+  if (!diffs.has(jobId) || modeOf(jobId) === "browse") return;
+  if (!head && (await unignoredPaths(worktree, names)).length === 0) return;
+  const mode = modeOf(jobId);
+  const print = await diffFingerprint(worktree, mode, refOf(jobId));
+  const shown = shownPrints.get(jobId);
+  // A baseline older than the pane's last launch says nothing about what the pane
+  // shows now; so does a fingerprint that could not be taken. Both reload.
+  if (print !== null && shown && shown.print === print && shown.at >= (diffLaunchedAt.get(jobId) ?? 0)) return;
+  if (reloadDiff(jobId, reviewFile) && print !== null) shownPrints.set(jobId, { print, at: Date.now() });
+}
+
+/** The subset of `names` git does not ignore. On any doubt, all of them. */
+async function unignoredPaths(worktree, names) {
+  // Paths go on the command line (execFile has no stdin), so a big burst -- 600+
+  // distinct paths in 20s on a repo with pir running -- is asked in batches.
+  const live = [];
+  for (let i = 0; i < names.length; i += 500) {
+    const batch = names.slice(i, i + 500);
+    try {
+      // -z needs --stdin, so newline output; quotePath off keeps a non-ASCII name
+      // verbatim. A name git still quotes (a `"` or newline in it) fails to match
+      // and just counts as live.
+      const { stdout } = await execFileAsync("git",
+        ["-C", worktree, "-c", "core.quotePath=false", "check-ignore", "--", ...batch]);
+      const ignored = new Set(stdout.split("\n"));
+      live.push(...batch.filter((n) => !ignored.has(n)));
+    } catch {
+      live.push(...batch);   // exit 1 = none ignored; anything else = unknown, so all count
+    }
+    if (live.length) return live;   // one live path is enough to go on to the fingerprint
+  }
+  return live;
+}
+
+/**
+ * A hash of everything the diff pane's range can show, so an identical result is
+ * recognisable without asking revdiff. null when git could not answer (a file
+ * vanishing mid-read, a root commit with no HEAD~1): the caller then reloads.
+ * GIT_OPTIONAL_LOCKS=0 stops `git diff` refreshing the index, so asking cannot
+ * itself write into the repo.
+ */
+async function diffFingerprint(worktree, mode, ref) {
+  const git = async (args) => (await execFileAsync("git", ["-C", worktree, ...args], {
+    maxBuffer: 64 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+  })).stdout;
+  try {
+    const h = crypto.createHash("sha1").update(`${mode}\0${ref ?? ""}\0`);
+    if (mode === "lastcommit") {
+      // HEAD~1 -> HEAD has no working tree: only a HEAD movement can change it.
+      h.update(await git(["rev-parse", "HEAD", "HEAD~1"]));
+      return h.digest("hex");
+    }
+    const base = mode === "custom" && ref ? ref : "HEAD";
+    h.update(await git(["rev-parse", "HEAD", base]));
+    h.update(await git(["diff", "--no-ext-diff", "--no-color", "--binary", base, "--"]));
+    // --untracked: new files are in the diff too. A trailing `/` is a nested repo
+    // (a worktree git lists as one untracked entry); its contents are not the
+    // parent's diff, so only its presence counts.
+    const untracked = (await git(["ls-files", "-o", "--exclude-standard", "-z"]))
+      .split("\0").filter(Boolean);
+    h.update(untracked.join("\0"));
+    const files = untracked.filter((p) => !p.endsWith("/"));
+    for (let i = 0; i < files.length; i += 200) {
+      h.update(await git(["hash-object", "--", ...files.slice(i, i + 200)]));
+    }
+    return h.digest("hex");
+  } catch {
+    return null;
+  }
 }
 
 function watchWorktree(jobId, worktree, reviewFile) {
   if (!AUTO_RELOAD || worktreeWatches.has(jobId)) return;
-  let timer = null;
   let w;
   try {
     // fs.watch throws synchronously if the dir is gone -- and an agent's worktree
@@ -2690,9 +2817,8 @@ function watchWorktree(jobId, worktree, reviewFile) {
     // missing watch must not take the daemon down; the pane still shows the last
     // diff, and the next attach re-tries.
     w = fs.watch(worktree, { recursive: true }, (_e, name) => {
-      if (!name || name.startsWith(".git/") || name.includes("node_modules")) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
+      if (!name || name === ".git" || name.startsWith(".git/") || name.includes("node_modules")) return;
+      queueReload(jobId, worktree, reviewFile, name);
     });
   } catch (e) { return log(`could not watch worktree for ${jobId}: ${e.message}`); }
   worktreeWatches.set(jobId, w);
@@ -2728,14 +2854,12 @@ function watchHead(jobId, worktree, reviewFile) {
   const onLogs = fs.existsSync(logsDir);
   const target = onLogs ? logsDir : gitDir;
 
-  let timer = null;
   try {
     const w = fs.watch(target, (_e, name) => {
       // In logs/ the reflog is `HEAD`; on the git-dir fallback, `logs` appearing
       // is the first ref update. Ignore everything else (lock churn, index, ...).
       if (name && name !== "HEAD" && name !== "logs") return;
-      clearTimeout(timer);
-      timer = setTimeout(() => reloadDiff(jobId, reviewFile), RELOAD_DEBOUNCE_MS);
+      queueReload(jobId, worktree, reviewFile, null);
     });
     headWatches.set(jobId, w);
   } catch (e) { log(`could not watch HEAD for ${jobId}: ${e.message}`); }

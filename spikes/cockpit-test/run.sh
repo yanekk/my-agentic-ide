@@ -42,7 +42,7 @@ T_START=${EPOCHREALTIME/,/.}
 declare -A CHAIN_OF=()
 SECTION_ORDER=()
 chain() { local c=$1 id; shift; for id; do SECTION_ORDER+=("$id"); CHAIN_OF[$id]=$c; done; }
-chain main 1 2 3 3b 4 4b 4c 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e'" 5f "5f'" \
+chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e'" 5f "5f'" \
   5g "5g'" 6 6b 7 8 9 9b 9c 9d 10 \
   11 11a 11b "11b'" "11b''" 11c "11c'" "11c''" "11c'''" "11c''''" "11c'''''" 11d "11d'" \
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
@@ -810,6 +810,54 @@ waitmore "annotation editor is open" "$T/daemon.log" "$E0" 10 "the reload refuse
 refute "no reload while a comment is half-typed" "send-text --pane-id 31 --no-paste" "$CALLS"
 check  "and the daemon said why"                 "annotation editor is open" "$T/daemon.log"
 : > "$EDITING"
+fi
+
+if section 4d "ignored churn and identical rewrites send no reload; a real change does"; then
+# Every R makes revdiff re-run git and repaint, a visible flicker even over an
+# identical diff. A repo with pir running rewrites gitignored status files several
+# times a second, and the pane flickered for ever over a diff that never changed.
+# Three kinds of path the diff cannot show: ignored through .gitignore, ignored
+# ONLY through .git/info/exclude (a .gitignore-only check calls it live), and a
+# nested worktree git does not ignore at all (the parent's diff lists it as one
+# entry and never sees inside it -- that one is the fingerprint's to catch).
+printf 'churn/\n' > "$WT/.gitignore"
+echo 'excluded-only/' >> "$WT/.git/info/exclude"
+mkdir -p "$WT/churn" "$WT/excluded-only"
+git -C "$WT" worktree add -q -b nested-wt "$WT/nested" 2>/dev/null
+: > "$CALLS"
+echo "setup done" >> "$WT/tracked.txt"     # a real change, so the baseline is fresh
+waitfor 'STDIN:R\n' "$CALLS" 10 "the setup's reload"
+nap 2.5   # window: RELOAD_DEBOUNCE_MS (1200, scaled) for any trailing setup event, 1300 margin
+
+: > "$CALLS"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  echo x >> "$WT/churn/status.log"; echo x >> "$WT/excluded-only/run.log"
+  echo x >> "$WT/nested/scratch.txt"; nap 0.2
+done
+nap 2.5   # window: the burst settles RELOAD_DEBOUNCE_MS after its last event, 1300 margin
+refute "writes under .gitignore / info/exclude / a nested worktree send no reload" "STDIN:R\n" "$CALLS"
+
+cp "$WT/tracked.txt" "$T/same.txt"; cat "$T/same.txt" > "$WT/tracked.txt"
+nap 2.5   # window: as above
+refute "a tracked file rewritten with identical bytes sends no reload" "STDIN:R\n" "$CALLS"
+
+echo "real change" >> "$WT/tracked.txt"
+waitfor 'STDIN:R\n' "$CALLS" 10 "a reload for a real change"
+check "a real change to a tracked file still reloads" "send-text --pane-id 31 --no-paste" "$CALLS"
+nap 2.5
+
+# Endless ignored churn must not starve a real change: the trailing debounce keeps
+# restarting, so only RELOAD_MAX_WAIT_MS (4000, scaled) gets it out. The churn runs
+# ~6s with gaps far under the debounce, and the R must land before it stops.
+: > "$CALLS"
+echo "real change under churn" >> "$WT/tracked.txt"
+for _ in $(seq 1 30); do echo x >> "$WT/churn/status.log"; nap 0.2; done
+check "a real change lands while ignored churn never pauses" "STDIN:R\n" "$CALLS"
+
+git -C "$WT" worktree remove --force "$WT/nested"; git -C "$WT" branch -qD nested-wt
+rm -rf "$WT/churn" "$WT/excluded-only" "$WT/.gitignore"
+sed -i '' '/^excluded-only\/$/d' "$WT/.git/info/exclude"
+nap 2.5   # let the cleanup's own reload settle before section 5 clears $CALLS
 fi
 
 if section 5 "switching BACK restores both panes (the whole point)"; then
