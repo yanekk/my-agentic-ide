@@ -2,6 +2,8 @@
 
 Run this in `~/src/plan-implement-review` (for example `pir plan "$(sed -n '/^---8<---$/,/^--->8---$/p' plans/pir-usage-api/PIR-PROMPT.md | sed '1d;$d')"` from the agentic-ide checkout, or paste the block into `/pir-plan`). The "contract" part of the block is what the agentic-ide cockpit builds its reader against; if it changes in the pir planning session, change it here too and tell the agentic-ide plan (`plans/pir-usage-api/`).
 
+Settled since by pir's plan (`plans/api-service/DESIGN.md` on `pir/api-service`, 2026-09-30): fixed port 47717, fail if taken; a foreign `Host` is answered 403; error bodies are `{"version":1,"error":"..."}`; runs hand readings to the service through `~/.pir/usage.json`. The contract below is otherwise unchanged. The cockpit-side brief is `COCKPIT-PROMPT.md` beside this file.
+
 ---8<---
 Give pir a permanent local service that answers a REST API over HTTP, with Claude subscription usage as its first endpoint. This is for the agentic-ide cockpit (~/src/agentic-ide), whose footer shows how much of the 5-hour and weekly subscription limit is used. The cockpit gets those numbers from a statusline hook that only ordinary Claude Code sessions run; pir's workers are SDK sessions with no statusline, so during a pir run the footer goes stale. pir already receives the numbers: they only need a way out.
 
