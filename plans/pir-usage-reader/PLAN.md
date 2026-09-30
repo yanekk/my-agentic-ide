@@ -13,17 +13,16 @@ Track state in [PROGRESS.md](PROGRESS.md). Read [DESIGN.md](DESIGN.md) first.
   plain values; T02 adds the world-touching half against a stand-in server.
 - The daemon is wired last among the code tasks, so `cockpitd.mjs` gains a few lines that call
   something already proven.
-- The live check is the final task and waits on another repo. Everything before it is provable
-  now.
+- The real-machine check is not a task. It needs the merged code and pir's service installed, so
+  it is the checklist in § After the merge; T06 builds its script and proves it on the stand-in.
 
-No spike: the two machine claims the design rests on (Node's `Host` header, `fetch` timeout and
-refusal behaviour) were probed at plan time and are in FINDINGS. No rig and no drill: no surface
-is built or changed.
+No spike: the machine claim the design rests on (`fetch`'s timeout and refusal behaviour) was
+probed at plan time and is in FINDINGS. No rig and no drill: no surface is built or changed.
 
 ```
 Phase 1  ▸  T01, T02        the rule and the reader     no daemon involved
 Phase 2  ▸  T03, T04, T05   daemon, installer, docs     stand-in service only
-Phase 3  ▸  T06             live check                  needs pir's service installed
+Phase 3  ▸  T06             the live-check script       stand-in service only
 ```
 
 ---
@@ -49,15 +48,33 @@ correct `usage-cache.json`, and every failure state is proven.
 At the end: a cockpit daemon keeps the cache fresh from a stand-in service, the installer reports
 the service, and the project's documents say so.
 
-## Phase 3 — Live
+## Phase 3 — The live-check script
 
 | # | Task | Depends on |
 |---|---|---|
-| [T06](tasks/T06-live-check.md) | live-check | T03, T04 |
+| [T06](tasks/T06-live-check-script.md) | live-check-script | T02, T03 |
 
-T06 also waits on the other repo: pir's `plans/api-service` reviewed, built, merged and
-`./install.sh` run in `~/src/plan-implement-review`, after which `pir service` prints
-`running at http://127.0.0.1:47717`. Until then T06 is ⛔.
+At the end: `bash spikes/usage-test/live-check.sh` gives a verdict against a stand-in service.
+
+## After the merge
+
+Not a task (person, 2026-09-30, plan review): a pir build merges only when every task is done,
+and the check needs the merged code in the main checkout. It waits on this plan merged to `main`
+and on pir's `plans/api-service` built, merged and `./install.sh` run in
+`~/src/plan-implement-review`. A session runs it with the person; bins are DESIGN §5.3.
+
+1. `pir service` prints `running at`. `bash spikes/usage-test/live-check.sh` prints `agree`. On
+   `no reading`, start a pir run on the subscription and repeat.
+2. Person: close and reopen the cockpit window (this closes every agent terminal and revdiff),
+   with a pir run working. Glance at the bar, bottom right: numbers in colour, no `as of`.
+3. `bash spikes/usage-test/live-check.sh follow`, with the pir run still working: `agree` and
+   `moved` at least 2.
+4. With the person's yes: `grep -c 'usage: pir service' ~/.claude/cockpit/daemon.log`, `pir
+   service off`, wait 70 s, the count rose by 1; `pir service on`, wait 35 s, the count rose by
+   1 again and the last line ends in `ok`. Run `pir service on` even if a check failed, and
+   finish on `pir service` printing `running at`.
+5. FINDINGS gets a ✅ row dated with the person's answer to step 2, the machine result stated
+   separately, and the outstanding line leaves PROGRESS.
 
 ---
 
@@ -79,10 +96,10 @@ T06 also waits on the other repo: pir's `plans/api-service` reviewed, built, mer
 T01 → T02 → T03 → T05
 ```
 
-T04 runs beside T03. T06 follows T03 and T04.
+T04 runs beside T03. T06 follows T03 and runs beside T05.
 
-Leaves: T06, the final deliverable, and T05. T05 is terminal because documents are consumed by
-later sessions, not by a task; T06 does not read them.
+Leaves: T05 and T06. T05 is terminal because documents are consumed by later sessions, not by a
+task. T06 is terminal because its script is consumed by § After the merge, not by a task.
 
 ## Parallel width
 
@@ -101,10 +118,5 @@ server and timing, and that suite's timing is sensitive under load.
 
 ## Decisions still open
 
-- T06's person half needs the new daemon code running in the live cockpit. Under a parallel pir
-  run that code reaches the main checkout only at the merge, so the task may have to stay open
-  across it. pir-pane T07 had the same shape. The plan review should confirm how the person
-  wants that handled. It does not block T01 to T05.
-- The §5.3 bins are a proposal until the plan review.
-- The contract is copied from a pir plan that is not yet reviewed. If its review changes §2.1
-  there, DESIGN §2.1 here and T01/T02 change with it.
+None. The contract is copied from pir's plan as reviewed (3e2f4bd). If pir's build changes its
+DESIGN §2.1, DESIGN §2.1 here and T01/T02 change with it.

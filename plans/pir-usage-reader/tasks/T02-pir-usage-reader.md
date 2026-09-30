@@ -47,7 +47,7 @@ export async function pollPirUsage({ home, dir, now = Date.now, alive, timeoutMs
 
 `fetch` is called with `redirect: "error"` and `signal: AbortSignal.timeout(timeoutMs)`, and the
 body is read inside the same limit. Reason: headers can arrive and the body never. No header of
-our own is set, so Node sends `Host: 127.0.0.1:{port}`. `dir` undefined means the store's own
+our own is set. `dir` undefined means the store's own
 default (`COCKPIT_DIR` or `~/.claude/cockpit`). A failed `writeCache` is state `ok`,
 `wrote: false`.
 
@@ -76,8 +76,7 @@ home whose `.pir/api.json` the test writes. `home` and `dir` are passed explicit
 - [ ] A 302 to another address: `unreachable`, and the target is never requested.
 - [ ] 403, 404, 500: `http` with the status.
 - [ ] 200 with a non-JSON body: `bad-body`.
-- [ ] The request as the server saw it: method `GET`, path `/v1/usage`, `Host` equal to
-      `127.0.0.1:{port}`, no `Authorization`.
+- [ ] The request as the server saw it: method `GET`, path `/v1/usage`, no `Authorization`.
 - [ ] `pollPirUsage`, documented body, empty dir: cache written, mode 0600, `writtenAt` equal to
       `observed_at`, `wrote: true`.
 - [ ] Polled again: `wrote: false`, the cache file's inode and mtime unchanged.

@@ -42,9 +42,10 @@ footer is unchanged: the feature is a second writer of a file the footer already
 
 ### 2.1 The contract being read (version 1)
 
-Copied from `plans/pir-usage-api/COCKPIT-PROMPT.md`, which copies pir's
-`plans/api-service/DESIGN.md` §2.1 (branch `pir/api-service`, commit dab1019, re-read
-2026-09-30 and found to agree). If that section changes, this one changes with it.
+Copied from pir's `plans/api-service/DESIGN.md` §2.1 (`~/src/plan-implement-review`, branch
+`pir/api-service`, commit 3e2f4bd, that plan's own review, re-read 2026-09-30). If that section
+changes, this one changes with it. `plans/pir-usage-api/COCKPIT-PROMPT.md` is the older brief and
+still describes a `Host` check that pir's review dropped.
 
 **Discovery.** While the service is up it keeps `${PIR_HOME ?? HOME}/.pir/api.json`:
 
@@ -57,8 +58,7 @@ its `url`; it never assumes the port. Reason: on a scratch home the OS picks the
 this file names it, which is how tests stay off the real service.
 
 **Request.** `GET {url}/v1/usage`, no body, no headers of our own, no authentication. The service
-answers 403 unless `Host` is `127.0.0.1:{port}` or `localhost:{port}`; Node's `fetch` to the url as
-given sends exactly that (measured, FINDINGS).
+does not check the `Host` header.
 
 **Response.** 200, `application/json`:
 
@@ -75,8 +75,8 @@ given sends exactly that (measured, FINDINGS).
 
 `observed_at` is ms since epoch when a pir worker received the numbers. `rate_limits` has the
 shape `normalizeRateLimits` already takes. Either window may be null. Nothing known is 200 with
-`"observed_at": null, "rate_limits": null`. Errors are 403, 404, 405 and 500 with a small JSON
-body; the reader treats every non-200 alike.
+`"observed_at": null, "rate_limits": null`. Errors are 404, 405 and 500 with a small JSON body; the
+reader treats every non-200 alike.
 
 ### 2.2 When the daemon polls
 
@@ -158,7 +158,11 @@ When `bin/install.sh` finds `pir`, it prints one more line (person, 2026-09-30):
   warn  pir-api  optional -- not running; the usage bar will not refresh during pir runs (pir service on)
 ```
 
-`ok` for states `ok` and `empty`, `warn` for every other. It is never counted in `MISSING`, never
+`ok` for states `ok` and `empty`, `warn` for every other. The state comes from `GET /v1/usage`
+through the cockpit's own reader, not from pir's `GET /health` (person, 2026-09-30, plan review).
+Reason: the line is about whether the bar will be fed, and one reader means the installer and the
+daemon cannot disagree; the cost is that a service whose usage answer is broken reads `not running`
+here while `pir service` says running. It is never counted in `MISSING`, never
 fails the install and never starts the service. With `pir` absent the line is not printed.
 Reason: the footer is silent about the feed, so this and `daemon.log` are the two places that say
 why a bar went stale.
@@ -205,7 +209,7 @@ milliseconds with plain values; one that leaks needs a live pir service to check
 - `cockpit-usage-model.mjs`: gains `PIR_FUTURE_TOLERANCE_MS`, `parsePirApiFile(text)`,
   `decidePirReading(cache, body, nowMs)`. `renderUsage` and `normalizeRateLimits` are untouched.
 - `cockpit-usage-pir.mjs` (new): `fetchPirUsage`, `pollPirUsage`, and a CLI with `--status` (the
-  installer's line) and `--once` (one poll, for T06). One poll function serves the daemon and the
+  installer's line) and `--once` (one poll, for the live check). One poll function serves the daemon and the
   CLI. Reason: the live check then runs the code the daemon runs.
 - `cockpitd.mjs`: `refreshUsage()`, `USAGE_TICK_MS` with the test seam `COCKPIT_USAGE_TICK_MS`,
   in the shape of `refreshPRs`.
@@ -255,6 +259,8 @@ state lives in the daemon's memory and resets to `absent` on a rebuild.
   change of state, and the real strip drawing the pir-fed reading.
 - **Installer** (`spikes/usage-test/run.sh`): assertions on the real lines of `bin/install.sh`,
   as `spikes/pir-pane-test` does for the `pir` line.
+- **Live-check script** (`spikes/usage-test/live-check.test.mjs`): `live-check.sh` run against the
+  stand-in, a scratch `PIR_HOME` and a scratch cockpit dir; every verdict it can print.
 
 No surface is built or changed, so there is no rig task and no drill. The footer drawing from the
 cache is already proven by cockpit-test §12b.
@@ -269,12 +275,14 @@ cache is already proven by cockpit-test §12b.
 | Runtime | Node v24.2.0 (built-in `fetch`, `AbortSignal.timeout`), zsh, bash |
 | Tools | `jq`, `curl` present (T06 uses them) |
 | pir | `~/.local/bin/pir`, installed, with no `service` command yet; `~/.pir/` holds no `api.json` (2026-09-30) |
-| Absent | pir's API service: planned on branch `pir/api-service`, not reviewed or built |
+| Absent | pir's API service: plan reviewed on branch `pir/api-service` (3e2f4bd), build started, nothing merged or installed (2026-09-30) |
 
 **The test command.** Three suites, each a self-contained `run.sh`, run from the repo root.
 Measured 2026-09-30 in a fresh worktree with no setup: usage-test green, pir-pane-test 95,
-cockpit-test 780, `git status --porcelain` empty afterwards. They are quiet on green (one summary
-line per suite, `ALL PASS`), print failures in full, and `VERBOSE=1` restores the per-check lines.
+cockpit-test 780, `git status --porcelain` empty afterwards; re-measured at plan review, 1 s, 1 s
+and 160 s. They are quiet on green: no per-check lines, `ALL PASS` last. usage-test prints 11
+lines, pir-pane-test 1, cockpit-test one heading per section (206 lines). They print failures in
+full, and `VERBOSE=1` restores the per-check lines.
 Nothing forces colour here (`FORCE_COLOR`, `CLICOLOR_FORCE` and `CI` unset) and the suites emit
 none. `pir-pane-test` is in the list because T04 edits `install.sh` beside the block it asserts on.
 
@@ -284,8 +292,8 @@ none. `pir-pane-test` is in the list because T04 edits `install.sh` beside the b
 
 | Cannot be tested automatically | Why |
 |---|---|
-| That the real pir service speaks the contract of §2.1 | It lives in another repo and is not built; T06's worker half checks it once it is |
-| That the live cockpit's bar stays lit through a pir run | Needs the person's real window rebuilt on the new code, which closes every agent terminal (T06) |
+| That the real pir service speaks the contract of §2.1 | It lives in another repo and is not installed; PLAN § After the merge, step 1 |
+| That the live cockpit's bar stays lit through a pir run | Needs the person's real window rebuilt on the merged code, which closes every agent terminal; PLAN § After the merge, steps 2 and 3 |
 
 ### 5.2 Seatbelts
 
@@ -294,7 +302,7 @@ none. `pir-pane-test` is in the list because T04 edits `install.sh` beside the b
 | `PIR_HOME` exported to a scratch folder at the top of `usage-test`, `cockpit-test` and `daemon-leak-test` | No test daemon or test reader can resolve the real `~/.pir/api.json`, even when the caller's environment sets `PIR_HOME` or the suite forgets `HOME` |
 | Loopback-only `url`, redirects refused (§2.6) | A file cannot send the daemon to the network |
 | 2 s request limit, one poll in flight | A hung service cannot hold the tick or pile up requests |
-| `COCKPIT_DIR` scratch in every suite, and in T06's `--once` | No test and no live check writes the real `usage-cache.json` |
+| `COCKPIT_DIR` scratch in every suite, and in `live-check.sh`'s `--once` | No test and no live check writes the real `usage-cache.json` |
 
 `spikes/pir-pane-drill/` already sets all three of `HOME`, `COCKPIT_DIR` and `PIR_HOME` to
 scratch. `spikes/pane-swap/live*.sh` and `spikes/browse-mode/probe-pair-slot.sh` are hand spikes
@@ -302,16 +310,17 @@ outside the test command and are left alone.
 
 ### 5.3 Outside the code: who acts
 
-Proposed; the plan review puts them in front of the person. Nothing here costs money or is seen
-by anyone else.
+Shown to the person and granted as it stands, 2026-09-30, plan review. Nothing here costs money or
+is seen by anyone else, and none needs a login. The rules are in `.claude/settings.json`.
 
-| Action | Bin | Why |
-|---|---|---|
-| The three suites, and `bash spikes/daemon-leak-test/run.sh` (T03 edits it) | worker | Stand-in server, scratch `HOME`, `PIR_HOME`, `COCKPIT_DIR` |
-| `bash spikes/usage-test/live-check.sh` (T06): GETs on the real pir service, one poll into a scratch `COCKPIT_DIR`, reading the real `usage-cache.json` and `daemon.log` | worker | Read-only on loopback and on two local files; changes nothing |
-| `pir service off`, then `pir service on` (T06) | ask | Stops a login service on the person's machine; taken back by `pir service on` |
-| Closing and reopening the live cockpit window (T06) | person | Closes every agent terminal and revdiff; needs the GUI |
-| `bin/install.sh` on the real machine | not run | It rewrites `~/.wezterm.lua` and `settings.json`; T04 is proven on the script's lines and the CLI it calls |
+| Action | Command | Bin | Why this bin | Way back |
+|---|---|---|---|---|
+| The test command and the daemon-leak suite (T03 edits it) | `bash spikes/usage-test/run.sh`, `bash spikes/pir-pane-test/run.sh`, `bash spikes/cockpit-test/run.sh`, `bash spikes/daemon-leak-test/run.sh` | worker | Stand-in server, scratch `HOME`, `PIR_HOME`, `COCKPIT_DIR` | nothing changed |
+| Read the pir service's state, after the merge | `pir service` | worker | Prints only. Added at plan review: the plan used it without a row | nothing changed |
+| The live check, after the merge | `bash spikes/usage-test/live-check.sh`, `bash spikes/usage-test/live-check.sh follow`, `grep -c 'usage: pir service' ~/.claude/cockpit/daemon.log` | worker | GETs on loopback, one poll into a scratch `COCKPIT_DIR`, reads of the real `usage-cache.json` and `daemon.log`; prints no percentage | nothing changed |
+| Stop and start pir's service, after the merge | `pir service off`, `pir service on` | ask | Stops a login service on the person's machine; the person kept it at `ask` | `pir service on` |
+| Close and reopen the live cockpit window, after the merge | none | person | Closes every agent terminal and revdiff; needs the GUI | reopening is the way back |
+| `bin/install.sh` on the real machine | not run | none | It rewrites `~/.wezterm.lua` and `settings.json`; T04 is proven on the script's lines and the CLI it calls | none needed |
 
 ---
 
@@ -332,6 +341,15 @@ entry and needs no clean-up.
 - 2026-09-30, person: `bin/install.sh` reports the service with one line.
 - 2026-09-30, person: `pirBase` was unset on the planning branch; planning went ahead with
   `main` as the base.
+- 2026-09-30, person, plan review: the real-machine check is a checklist after the merge (PLAN
+  § After the merge), not a task. Reason: it needs the merged code in the main checkout, and a
+  pir build merges only when every task is done. T06 builds the script and proves it on the
+  stand-in.
+- 2026-09-30, person, plan review: the person reopens the window and glances once; the session
+  follows the real cache for 20 minutes. Reason: a pir reading is told from a tap write by its
+  `writtenAt`, so nobody has to keep ordinary sessions idle or watch the bar.
+- 2026-09-30, person, plan review: the installer's line asks `/v1/usage`, not `/health` (§2.7).
+- 2026-09-30, person, plan review: the §5.3 bins stand; `pir service off`/`on` stay at `ask`.
 - No prototype: nothing new appears on screen.
 - Extend `cockpit-usage-model.mjs` and reuse `normalizeRateLimits`, `readCache`, `writeCache`
   rather than a second model or store. Reason: the response's `rate_limits` is the shape the

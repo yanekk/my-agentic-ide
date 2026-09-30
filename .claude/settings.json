@@ -8,7 +8,17 @@
       "Bash(bash spikes/cockpit-test/run.sh)",
       "Bash(bash spikes/pir-pane-swap/probe.sh)",
       "Bash(bash spikes/pir-pane-drill/drill.sh)",
-      "Bash(bash spikes/pir-pane-drill/rig-check.sh)"
+      "Bash(bash spikes/pir-pane-drill/rig-check.sh)",
+      "Bash(bash spikes/usage-test/run.sh)",
+      "Bash(bash spikes/daemon-leak-test/run.sh)",
+      "Bash(pir service)",
+      "Bash(bash spikes/usage-test/live-check.sh)",
+      "Bash(bash spikes/usage-test/live-check.sh follow)",
+      "Bash(grep -c 'usage: pir service' ~/.claude/cockpit/daemon.log)"
+    ],
+    "ask": [
+      "Bash(pir service off)",
+      "Bash(pir service on)"
     ]
   }
 }

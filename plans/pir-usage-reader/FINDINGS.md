@@ -15,8 +15,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-09-30 | 📌 | `spikes/cockpit-test` fails two broot `--conf` checks (11, 11c') when the checkout path holds a symlink, as `$TMPDIR` does (`/var` → `/private/var`): the suite's `$ROOT` is logical, the daemon's is resolved. Green from the physical path. |
+| 2026-09-30 | 📌 | pir's `plans/api-service` was reviewed after this plan was written (3e2f4bd): the `Host` check and its 403 are gone, `GET /health` was added, `pir service` decides "running" from it. Build started there, nothing installed. |
 | 2026-09-30 | 📌 | Planning ran with `PIR_RUN=1` in the environment and no `PIR_HOME`. Test daemons get `HOME=$T/home` but inherit any `PIR_HOME` the caller exports, so the suites must export a scratch `PIR_HOME` themselves (DESIGN §5.2). |
-| 2026-09-30 | 📌 | Installed pir (`~/.local/bin/pir`) knows only `plan`, `start`, `notify`; no `service` command, and `~/.pir/` has no `api.json`. pir's `plans/api-service` is on branch `pir/api-service` (dab1019), not on its main. |
+| 2026-09-30 | 📌 | Installed pir (`~/.local/bin/pir`) knows only `plan`, `start`, `notify`; no `service` command, and `~/.pir/` has no `api.json`. pir's `plans/api-service` is on branch `pir/api-service`, not on its main. |
 | 2026-09-30 | 📌 | Node v24.2.0 probe: `fetch("http://127.0.0.1:PORT/…")` sends `Host: 127.0.0.1:PORT`; `AbortSignal.timeout(300)` on a hung server rejects with `TimeoutError` at 304 ms; a refused port rejects with `TypeError`. |
 | 2026-09-30 | 📌 | `cockpit-usage-tap.mjs` writes unconditionally with `Date.now()` as `writtenAt`. Newest-wins is therefore enforced only on the daemon's side; the tap is out of scope. |
 | 2026-09-30 | 📌 | `plans/usage-limits/PROGRESS.md` Status line says T03/T04 not started while its table marks them ✅. Left alone: another plan's file. |

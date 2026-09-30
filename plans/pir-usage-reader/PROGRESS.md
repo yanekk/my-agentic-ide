@@ -8,7 +8,7 @@ the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. The cell is an index; the account is the
 commit message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — run `/pir-review-plan` before the first `/pir-work`
+**Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
 **Status:** Planned 2026-09-30. Nothing built.
 **Last updated:** 2026-09-30
@@ -26,11 +26,16 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-poll | T01, T02 | ⬜ | |
 | T04 | install-report | T02 | ⬜ | |
 | T05 | docs | T03, T04 | ⬜ | |
-| T06 | live-check | T03, T04 | ⬜ | Also waits on pir's `plans/api-service` built and installed: `pir service` must print `running at`. |
+| T06 | live-check-script | T02, T03 | ⬜ | |
 
 **Review queue:** (empty)
 
 ## Blocked on the user
 
-Nothing yet. T06 will need pir's service installed from `~/src/plan-implement-review`, a yes to
-`pir service off`/`on`, and the cockpit window reopened on the new code.
+Nothing.
+
+## Outstanding after the merge
+
+PLAN § After the merge, not yet run. It waits on this plan merged and on pir's service installed
+from `~/src/plan-implement-review`; it needs a yes to `pir service off`/`on` and the cockpit
+window reopened.
