@@ -34,7 +34,11 @@ fetch_body() {
   [ -n "$url" ] || return 1
   curl -s --fail --max-time 2 "$url/v1/usage"
 }
-observed_of() { jq -r '.observed_at' 2>/dev/null <<<"$1"; }
+# Only a number counts as a reading; anything else the reader would call bad-body.
+observed_of() {
+  jq -r 'if (.observed_at | type) == "number" then .observed_at
+         elif .observed_at == null then "null" else "" end' 2>/dev/null <<<"$1"
+}
 
 # --- step 1: the contract -------------------------------------------------------
 step_contract() {
@@ -66,6 +70,9 @@ step_contract() {
     [ "$attempt" = 3 ] && { echo "moving too fast to compare"; return 2; }
   done
 
+  # A dated reading with no drawable window is the reader's "empty": it rightly
+  # writes nothing, so there is nothing to compare -- not checkable, not a differ.
+  [ "$once" = "empty kept" ] && { echo "no reading"; return 2; }
   [ "$once" = "ok wrote" ] || { echo "differ once: $once"; return 1; }
   cache="$(cat "$scratch/usage-cache.json" 2>/dev/null)" || { echo "differ cache missing"; return 1; }
 
@@ -104,7 +111,7 @@ step_contract() {
 step_follow() {
   local dir="${LIVE_COCKPIT_DIR:-$HOME/.claude/cockpit}"
   local follow="${LIVE_FOLLOW_SECS:-1200}" poll="${LIVE_POLL_SECS:-30}"
-  local n i body obs written last="" moved=0 failed=0 checked=0 unchecked=0 lag logline logstate
+  local n i body obs last="" moved=0 failed=0 checked=0 unchecked=0 lag logline logstate
   n=$(( follow / poll + 1 ))
   for (( i = 0; i < n; i++ )); do
     (( i > 0 )) && sleep "$poll"
@@ -116,13 +123,18 @@ step_follow() {
     checked=$((checked + 1))
     [ -n "$last" ] && [ "$obs" != "$last" ] && moved=$((moved + 1))
     last="$obs"
-    written="$(jq -r '.writtenAt // empty' "$dir/usage-cache.json" 2>/dev/null)"
     # A tap write is newer than any pir reading and passes; only a cache more than
     # 35 s behind the service (a poll and a margin) says the daemon is not following.
-    if [ -z "$written" ]; then
+    # Compared in jq, not (( )): bash arithmetic is integer-only, and a fractional
+    # observed_at (the reader accepts one) made (( )) error out and read as a pass.
+    # Prints "" for a pass, "nocache", or the lag in whole seconds.
+    lag="$(jq -r --argjson o "$obs" '.writtenAt as $w
+      | if ($w | type) != "number" then "nocache"
+        elif $w < $o - 35000 then (($o - $w) / 1000 | floor | tostring)
+        else "" end' "$dir/usage-cache.json" 2>/dev/null)" || lag="nocache"
+    if [ "$lag" = "nocache" ]; then
       failed=$((failed + 1)); echo "$(date +%H:%M:%S) fail no cache"
-    elif (( written < obs - 35000 )); then
-      lag=$(( (obs - written) / 1000 ))
+    elif [ -n "$lag" ]; then
       failed=$((failed + 1)); echo "$(date +%H:%M:%S) fail behind ${lag}s"
     fi
   done

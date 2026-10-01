@@ -104,6 +104,15 @@ section("step 1, the contract");
   eq("the other window null: agree", last(r), "agree");
 }
 {
+  // A reading with no drawable window: the reader correctly writes nothing, so
+  // there is nothing to compare -- not checkable, never a false differ.
+  const b = docBody(); b.rate_limits = { five_hour: null, seven_day: { used_percentage: 88 } };
+  srv.body = b;
+  const r = await run([], ctx);
+  eq("no drawable window: no reading", last(r), "no reading");
+  eq("no drawable window: exit 2", r.code, 2);
+}
+{
   const r = await run([], { ...ctx, home: scratch("noapi") });
   eq("no api.json: off absent", last(r), "off absent");
   eq("no api.json: exit 2", r.code, 2);
@@ -149,6 +158,19 @@ const snapshot = () => fs.readdirSync(live).sort().map((f) => `${f}:${fs.statSyn
   eq("... exit 1", r.code, 1);
   ok("... every sample failed", has(r, "failed 3"), r.out);
   ok("... a failing sample names its lag", r.lines.some((l) => /^\d\d:\d\d:\d\d fail behind 30\ds$/.test(l)), r.out);
+}
+{
+  // A fractional observed_at (the reader accepts one): bash (( )) is integer-only
+  // and used to error out, which read as a passing sample.
+  srv.body = docBody(OBS + 0.5);
+  seedCache(OBS - 300000);
+  const r = await run(["follow"], ctx);
+  eq("fractional observed_at, cache 5 minutes behind: differ", last(r), "differ");
+  ok("... every sample failed", has(r, "failed 3"), r.out);
+  seedCache(OBS + 0.5);
+  const r2 = await run(["follow"], ctx);
+  eq("fractional observed_at, cache equal: agree", last(r2), "agree");
+  srv.body = docBody();
 }
 {
   fs.rmSync(CACHE);
