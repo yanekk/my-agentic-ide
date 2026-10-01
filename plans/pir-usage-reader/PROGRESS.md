@@ -11,8 +11,8 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
 **Status:** Planned 2026-09-30. Nothing built.
-**Last updated:** 2026-09-30
-**Next `pir-work` will:** implement T01, the only task with no dependency.
+**Last updated:** 2026-10-01
+**Next `pir-work` will:** review T06.
 
 ## Tasks
 
@@ -26,9 +26,9 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-poll | T01, T02 | ✅ | |
 | T04 | install-report | T02 | ✅ | |
 | T05 | docs | T03, T04 | ⬜ | |
-| T06 | live-check-script | T02, T03 | ⬜ | |
+| T06 | live-check-script | T02, T03 | 🔍 | `live-check.sh` and 36 checks. Deviations: follow counts a sample with no service reading as unchecked, all unchecked exits 2 `no reading`; step 1 brackets `--once` with two GETs, retrying if `observed_at` moved; scratch dir under `TMPDIR`; step 1 `differ` path untested, its jq checked by hand. |
 
-**Review queue:** (empty)
+**Review queue:** T06
 
 ## Blocked on the user
 
