@@ -12,7 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned 2026-09-30. Nothing built.
 **Last updated:** 2026-10-01
-**Next `pir-work` will:** review T06.
+**Next `pir-work` will:** implement T05.
 
 ## Tasks
 
@@ -26,9 +26,9 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-poll | T01, T02 | ✅ | |
 | T04 | install-report | T02 | ✅ | |
 | T05 | docs | T03, T04 | ⬜ | |
-| T06 | live-check-script | T02, T03 | 🔍 | `live-check.sh` and 36 checks. Deviations: follow counts a sample with no service reading as unchecked, all unchecked exits 2 `no reading`; step 1 brackets `--once` with two GETs, retrying if `observed_at` moved; scratch dir under `TMPDIR`; step 1 `differ` path untested, its jq checked by hand. |
+| T06 | live-check-script | T02, T03 | ✅ | Reviewed: two fixes, each reproduced by a test red on the implementing commit. Step 1 said differ on a reading with no drawable window, now no reading. Follow's integer-only bash compare passed a 5-minute-stale cache when observed_at was fractional, now jq. Probed retry, log grep, scratch cleanup. Step 1 differ path still untested. Not run live. |
 
-**Review queue:** T06
+**Review queue:** empty
 
 ## Blocked on the user
 
