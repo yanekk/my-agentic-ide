@@ -1301,7 +1301,9 @@ daemons get a scratch `HOME` but would inherit a `PIR_HOME` the caller exports, 
 `usage-test`, `cockpit-test` and `daemon-leak-test` each export a scratch `PIR_HOME` at the top:
 no test can resolve the real `~/.pir/api.json`. Whether the real service speaks the contract,
 and the live bar staying lit through a real pir run, are checks run by hand after the merge
-(`plans/pir-usage-reader/PLAN.md`, § After the merge).
+(`plans/pir-usage-reader/PLAN.md`, § After the merge), with `spikes/usage-test/live-check.sh`
+(step 1, the contract) and `live-check.sh follow` (step 2, the live cache, read-only). It is not
+run by `run.sh`; `live-check.test.mjs` proves its verdicts against the stand-in.
 
 ## Configuration
 

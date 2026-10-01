@@ -233,7 +233,7 @@ spikes/agenda-test/     the agenda's store, model, Google client and command (63
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
-spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line (248)
+spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in (289)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
 spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run

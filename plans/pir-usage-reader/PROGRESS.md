@@ -12,7 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned 2026-09-30. Nothing built.
 **Last updated:** 2026-10-01
-**Next `pir-work` will:** implement T06, the last task.
+**Next `pir-work` will:** nothing; every task is ✅. PLAN § After the merge remains.
 
 ## Tasks
 
@@ -26,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-poll | T01, T02 | ✅ | |
 | T04 | install-report | T02 | ✅ | |
 | T05 | docs | T03, T04 | ✅ | Reviewed clean, no fix commit. Grepped every path, function, env var, state and log string in both docs against the code; usage-test 248 and cockpit-test 815 re-counted green. Configuration-table rows `COCKPIT_USAGE_TICK_MS`/`PIR_HOME` accepted as in scope. |
-| T06 | live-check-script | T02, T03 | ⬜ | |
+| T06 | live-check-script | T02, T03 | ✅ | |
 
 **Review queue:** empty
 
