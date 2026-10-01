@@ -186,6 +186,10 @@ reversible with `cockpit-usage-tap.mjs --uninstall`), and the stop-notify hook
 (`cockpit-stop-notify.mjs`, the Stop-event sound; reversible with `--uninstall`).
 `--start-dir ~/git` for a machine that keeps repos somewhere else; re-runs
 remember it. It never replaces a `~/.wezterm.lua` of your own without `--force`.
+When it finds `pir` it prints one more line, `pir-api`: `ok` with the address of pir's local API
+service, or an optional `warn` when the service is not running (the usage bar then will not
+refresh during pir runs). It asks through `cockpit-usage-pir.mjs --status`, never counts as
+missing and never starts the service.
 
 After that, just open WezTerm. `~/.wezterm.lua` symlinks to `wezterm/cockpit.lua`,
 whose `default_prog` builds the layout, starts the daemon, and launches the fleet
@@ -208,9 +212,10 @@ bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events RE
 bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, age+NEW/ACTIVE/STALE tags, summarizeDiffstat, paginate, two-line render + press emphasis, hit-zones
 bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments, listPRDiffstat
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
-bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what the footer's usage segment draws)
+bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what the footer's usage segment draws); parsePirApiFile (loopback-only) + decidePirReading (newest writtenAt wins, future-dated ignored)
 bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer temp so concurrent sessions don't tear it)
 bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
+bin/cockpit-usage-pir.mjs     the pir usage feed: reads .pir/api.json, GETs pir's /v1/usage (2 s limit, redirects refused), writes the cache when newer; the daemon's 30 s poll, --status (installer) and --once (live check)
 bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a PIR worker that finished; still dings when one parks for the person; --install/--uninstall register it (superseding a plain afplay Stop hook)
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-pir-model.mjs      pure: read pir-dashboard.json, decidePir (what to follow), pirKey, startingMode, shouldReapPirKey
@@ -219,7 +224,7 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (780 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (815 checks, ~111s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
@@ -228,6 +233,7 @@ spikes/agenda-test/     the agenda's store, model, Google client and command (63
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
+spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in (289)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
 spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run
@@ -277,7 +283,11 @@ written by `config` like the Anthropic key — `bitbucket-key` masked on read), 
 (the fetched PRs per repo plus the cached `meUuid`, written by the daemon and watched by the pane)
 and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
 click verb, read by the pane) — both `0600` (the cache holds PR titles) and **lockless**, one writer
-each so an atomic temp-then-rename covers the read/write race, all three agenda files `0600` — the cache included, it holds your meeting titles — under
+each so an atomic temp-then-rename covers the read/write race, `usage-cache.json` (what the footer's
+usage bar draws, `0600`) with **two writers**: the statusline tap after every turn, unconditionally,
+and the daemon's 30 s poll of pir's service, which reads `${PIR_HOME ?? HOME}/.pir/api.json`, keeps no file
+of its own and writes only a reading newer than the cache (newest wins: `observed_at` > `writtenAt`),
+all three agenda files `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to
 `cockpit-note.mjs`, `cockpit-agenda.mjs` and `cockpit-config.mjs`, relinked on every
 rebuild — the whole of how the commands are "inside the cockpit only"), and `cmd`
