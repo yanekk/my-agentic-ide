@@ -12,7 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned 2026-09-30. Nothing built.
 **Last updated:** 2026-10-01
-**Next `pir-work` will:** implement T01, the only task with no dependency.
+**Next `pir-work` will:** implement T04 (T05, T06 wait on it or are ready per their dependencies).
 
 ## Tasks
 
@@ -23,12 +23,12 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T01 | pir-reading-decision | — | ✅ | |
 | T02 | pir-usage-reader | T01 | ✅ | |
-| T03 | daemon-poll | T01, T02 | 🔍 | `refreshUsage` in cockpitd, 30 s tick, start call. cockpit-test chain `usage` §15, 36 checks (815 total); daemon-leak 59. Deviations: daemon-leak-test exports `PIR_HOME` under its own `$TP`, not `$T` (it tainted `$T2`'s fakes), and its launch count 7→8. The hang window is an unscaled `sleep 1`. |
+| T03 | daemon-poll | T01, T02 | ✅ | Review clean, no fix commit. Both recorded deviations accepted (`$TP` keeps `$T2` fakes unmatched; 8 launches). Probed: gutting the in-flight guard turns §15 red (run); hang window fits the 2 s limit; `ONLY=15` green; four full runs, one flaked in 5f/7 (see FINDINGS); daemon-leak 59 green, no daemon left. |
 | T04 | install-report | T02 | ⬜ | |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** empty
 
 ## Blocked on the user
 

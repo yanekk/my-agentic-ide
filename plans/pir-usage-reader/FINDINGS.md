@@ -15,6 +15,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-01 | 📌 | T03 review: one of four full `cockpit-test` runs failed 5f (diff-mode label clicks) and 7 (`kill-pane --pane-id 34`) at load 3.5 with other workers running; the three reruns were green. Untouched main-chain sections; timing flake, left alone. |
 | 2026-09-30 | 📌 | `spikes/cockpit-test` fails two broot `--conf` checks (11, 11c') when the checkout path holds a symlink, as `$TMPDIR` does (`/var` → `/private/var`): the suite's `$ROOT` is logical, the daemon's is resolved. Green from the physical path. |
 | 2026-09-30 | 📌 | pir's `plans/api-service` was reviewed after this plan was written (3e2f4bd): the `Host` check and its 403 are gone, `GET /health` was added, `pir service` decides "running" from it. Build started there, nothing installed. |
 | 2026-09-30 | 📌 | Planning ran with `PIR_RUN=1` in the environment and no `PIR_HOME`. Test daemons get `HOME=$T/home` but inherit any `PIR_HOME` the caller exports, so the suites must export a scratch `PIR_HOME` themselves (DESIGN §5.2). |
