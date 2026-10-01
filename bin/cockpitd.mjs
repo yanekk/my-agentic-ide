@@ -52,6 +52,10 @@ import { decidePir, followPirReport, isPirKey, shouldReapPirKey, startingMode } 
 // the daemon is the other writer of that file: it clears an agent's list whenever
 // it launches a FRESH viewer. One helper rather than a second copy (DESIGN 3.5).
 import { withLock } from "./cockpit-agenda-store.mjs";
+// The pir usage feed (pir-usage-reader DESIGN 3.2): the reader finds pir's local
+// service, asks it, and applies newest-wins to usage-cache.json. The daemon only
+// owns the tick and the log-on-change.
+import { pirHome, pollPirUsage } from "./cockpit-usage-pir.mjs";
 
 const execFileAsync = promisify(execFile);
 // The directory this daemon lives in, so it can launch its sibling scripts
@@ -3359,6 +3363,48 @@ async function refreshPRs(reason) {
 }
 
 // ---------------------------------------------------------------------------
+// The pir usage feed (pir-usage-reader DESIGN 2.2, 2.5)
+//
+// pir's workers have no statusline, so during a pir run the tap never writes the
+// cache and the footer's bar would dim. pir serves the same numbers locally; this
+// tick asks for them every 30 s. Test seam only, as COCKPIT_BITBUCKET_TICK_MS is,
+// and not scaled by ms(): a suite cannot wait even a scaled tick.
+const USAGE_TICK_MS = Number(process.env.COCKPIT_USAGE_TICK_MS) || 30_000;
+
+// One poll in flight (DESIGN 2.2). The reader's own 2 s limit bounds a poll, so a
+// hung service costs at most the ticks inside that limit, never a pile-up.
+let usagePolling = false;
+// The last LOGGED state. Starting at "absent" is what keeps a pir-less machine's
+// daemon.log free of the feature entirely (DESIGN 2.5).
+let usageState = "absent";
+
+/**
+ * One poll of pir's usage service. NEVER THROWS AND NEVER REJECTS.
+ *
+ * Logs `usage: pir service <state>` only when the state changes, never per poll,
+ * and nothing but the state: no url, port, percentage or body, because daemon.log
+ * is pasted into conversations (DESIGN 2.5). DIR is passed explicitly so the
+ * daemon and the store cannot resolve two different cockpit dirs.
+ */
+async function refreshUsage() {
+  if (usagePolling) return;
+  usagePolling = true;
+  try {
+    const r = await pollPirUsage({ home: pirHome(), dir: DIR });
+    const key = r.state === "http" ? `http ${r.status}` : r.state;
+    if (key !== usageState) {
+      usageState = key;
+      log(`usage: pir service ${key}`);
+    }
+  } catch (e) {
+    // pollPirUsage never rejects; this is the backstop, constructor name only.
+    log(`usage: poll failed, ${e?.name ?? "Error"}`);
+  } finally {
+    usagePolling = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The dashboard's click verbs (bitbucket-dashboard T08, DESIGN 2.5/2.7/2.8/3.4)
 //
 // A click in the welcome pane's dashboard is turned into a fixed verb by
@@ -4056,6 +4102,8 @@ setInterval(() => refreshAgenda("tick"), AGENDA_TICK_MS);
 // The dashboard's every-minute trigger (bitbucket-dashboard DESIGN 2.9), own env
 // seam for the same reason the agenda's has one.
 setInterval(() => refreshPRs("tick"), PR_TICK_MS);
+// The pir usage feed's every-30-s trigger (pir-usage-reader DESIGN 2.2).
+setInterval(refreshUsage, USAGE_TICK_MS);
 reconcile();
 // DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
 // only fires when an agent WAS attached -- at start-up none is, so without this
@@ -4066,6 +4114,9 @@ refreshAgenda("start");
 // The dashboard's start-up trigger (bitbucket-dashboard DESIGN 2.9). Costs nothing
 // unconfigured: refreshPRs returns before any call.
 refreshPRs("start");
+// And at start, so a rebuilt window does not wait half a minute for the bar. Costs
+// one failed file read when pir is absent, and logs nothing then.
+refreshUsage();
 
 const shutdown = () => {
   stopWatchers();

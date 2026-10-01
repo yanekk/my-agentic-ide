@@ -51,6 +51,7 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
 chain footer 12 12b 12c
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
+chain usage 15
 
 # The headings as written below: `if section <id> "<title>"; then`, the id
 # double-quoted when it carries primes.
@@ -121,10 +122,11 @@ T="$(mktemp -d)"
 # (plans/test-daemon-leaks/DESIGN.md §2.3).
 . "$ROOT/spikes/lib/test-daemons.sh"
 DPID=""; D2PID=""; D3PID=""; GPID=""; D4PID=""; D5PID=""; D6PID=""; D7PID=""; BBPID=""
+DUPID=""; USPID=""   # the usage chain's daemon and pir stand-in (section 15)
 # SIDE_PIDS: the side-chain subshells (T08). Stopped as a tree, so a run killed
 # while they are mid-chain takes their sleeps, stubs and daemons down with them.
 SIDE_PIDS=""
-trap 'daemon_stop $SIDE_PIDS $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $BBPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
+trap 'daemon_stop $SIDE_PIDS $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $BBPID $DUPID $USPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 # The reader's launch line, in ONE place: the scheme name is asserted in four
 # sections (the browse launch, two heals and the worktree rebuild) and a change of
@@ -133,6 +135,13 @@ MICRO_SCHEME="one-dark"
 MICRO_LAUNCH="micro -readonly true -colorscheme $MICRO_SCHEME"
 
 mkdir -p "$T/bin" "$T/state"
+# Seatbelt (pir-usage-reader DESIGN 5.2): every cockpitd here polls
+# ${PIR_HOME ?? HOME}/.pir/api.json. HOME is scratch per daemon, but a PIR_HOME the
+# caller exports would win over it, so this suite exports its own before any
+# daemon starts. It holds no .pir/, so every daemon but the usage chain's (which
+# sets its own) reads `absent` and logs nothing.
+export PIR_HOME="$T/pir-home"
+mkdir -p "$PIR_HOME"
 # --- stub wezterm ----------------------------------------------------------
 # Records every call, and emulates enough of the mux to exercise the per-agent
 # panes: `get-text` renders a fake fleet pane from $FLEETSTATE (which is how the
@@ -4317,6 +4326,235 @@ same "the bitbucket tick defaults to 60s" \
 fi
 }  # run_dashboard
 
+run_usage() {
+late_same
+# --- the usage chain (15): the pir usage feed, pir-usage-reader T03 ------------
+# Modelled on the agenda chain: its own daemon, its own state dir and wezterm-stub
+# files, a loopback stand-in for pir's service printing `PORT n`, a mode file and a
+# hits file. The daemon's PIR_HOME is the chain's own scratch home; the api.json in
+# it is the only thing that names the stand-in (DESIGN 2.1).
+U="$T/usage"; US="$U/state"; UPH="$U/pir-home"
+mkdir -p "$US" "$UPH/.pir"
+echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$WT"'"}' > "$US/panes.json"
+: > "$US/fleet.log"
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$U/panestate"
+echo 31 > "$U/nextpane"; echo 1 > "$U/nexttab"
+echo list > "$U/fleetstate"
+for f in editing titlelag active panecwd psbusy calls.log; do : > "$U/$f"; done
+UHITS="$U/hits.log"; : > "$UHITS"
+UMODE="$U/mode"; echo ok > "$UMODE"
+UREADING="$U/reading.json"
+ULOG="$U/daemon.log"
+# The usage tick has its own env seam, not scaled by COCKPIT_TIME_SCALE, so it is
+# scaled here exactly as the agenda's is: `nap 0.8` is one tick at any SPEED.
+USAGE_TICK_MS="$(awk -v s="$SPEED" 'BEGIN{ v=800*s; if (v<50) v=50; printf "%d", v }')"
+
+cat > "$U/pirstub.mjs" <<'PSTUB'
+import http from "node:http";
+import fs from "node:fs";
+// argv: mode file, hits file, reading file. The mode is read per request, so one
+// long-lived daemon is walked through every state in turn.
+const [, , MODE, HITS, READING] = process.argv;
+const mode = () => { try { return fs.readFileSync(MODE, "utf8").trim(); } catch { return "ok"; } };
+const server = http.createServer((req, res) => {
+  fs.appendFileSync(HITS, `${req.method} ${req.url}\n`);
+  const m = mode();
+  if (m === "hang") return;                       // never answers: the 2 s limit's case
+  res.setHeader("content-type", "application/json");
+  if (m === "500") { res.statusCode = 500; return res.end('{"error":"boom"}'); }
+  if (m === "nulls") return res.end('{"version":1,"observed_at":null,"rate_limits":null}');
+  res.end(fs.readFileSync(READING, "utf8"));
+});
+server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
+PSTUB
+ustub_start() {   # start the stand-in; sets USPID and UPORT
+  : > "$U/pirstub.out"
+  node "$U/pirstub.mjs" "$UMODE" "$UHITS" "$UREADING" > "$U/pirstub.out" 2>&1 &
+  USPID=$!
+  waituntil 10 "the pir stand-in to listen" grep -q '^PORT ' "$U/pirstub.out"
+  UPORT="$(sed -n 's/^PORT //p' "$U/pirstub.out" | head -1)"
+}
+# api.json as pir writes it: temp-then-rename, so the daemon never reads half a file.
+uapi() {  # uapi <pid>
+  printf '{"version":1,"url":"http://127.0.0.1:%s","pid":%s}\n' "$UPORT" "$1" > "$UPH/.pir/api.json.tmp"
+  mv "$UPH/.pir/api.json.tmp" "$UPH/.pir/api.json"
+}
+ureading() {  # ureading <observed_at ms> <5h %> <7d %>
+  printf '{"version":1,"observed_at":%s,"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}}}\n' \
+    "$1" "$2" "$UR5" "$3" "$UR7" > "$UREADING.tmp"
+  mv "$UREADING.tmp" "$UREADING"
+}
+# One value out of usage-cache.json; `c` is the parsed file, null when absent.
+ucq() {
+  node -e 'let c=null;try{c=JSON.parse(require("fs").readFileSync(process.argv[1]+"/usage-cache.json","utf8"));}catch{}let v;try{v=eval(process.argv[2]);}catch{v="<error>";}process.stdout.write(String(v))' "$US" "$1"
+}
+# inode and mtime in ms: "the daemon did not touch the file" is both unchanged.
+ustat() { node -e 'try{const s=require("fs").statSync(process.argv[1]);process.stdout.write(s.ino+" "+s.mtimeMs)}catch{process.stdout.write("none")}' "$US/usage-cache.json"; }
+uhits() { grep -c . "$UHITS"; }
+uhits_ge() { [ "$(uhits)" -ge "$1" ]; }
+ulines() { grep -cxE '.* usage: pir service '"$1" "$ULOG"; }
+ulines_ge() { [ "$(ulines "$1")" -ge "$2" ]; }   # a poll condition: re-counted every try
+ucache_at() { [ "$(ucq 'c&&c.writtenAt')" = "$1" ]; }
+
+uenv() {
+  HOME="$T/home" PIR_HOME="$UPH" SHELL=/bin/zsh COCKPIT_OWNER_PID="$$" \
+  COCKPIT_DIR="$US" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  CALLS="$U/calls.log" FLEETSTATE="$U/fleetstate" PANESTATE="$U/panestate" \
+  NEXTPANE="$U/nextpane" NEXTTAB="$U/nexttab" EDITING="$U/editing" \
+  TITLELAG="$U/titlelag" ACTIVE="$U/active" PANECWD="$U/panecwd" \
+  PSBUSY="$U/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
+  AGENDA_ORIGIN="http://127.0.0.1:9" COCKPIT_USAGE_TICK_MS="$USAGE_TICK_MS" \
+  "$@"
+}
+
+# The footer, rendered once on the daemon's own state dir (section 12b's capture,
+# its helpers being the footer chain's and so not visible here).
+UMOUSE_ON=$'\033[?1006h'
+UCAP="$U/strip-cap"; UPLAIN="$U/strip-plain"
+ustrip() {  # ustrip <cols>
+  local p
+  : > "$UCAP"
+  ( COCKPIT_DIR="$US" COLUMNS="$1" node "$ROOT/bin/cockpit-strip.mjs" footer > "$UCAP" 2>&1 ) &
+  p=$!
+  waituntil 10 "the footer to draw a frame" grep -qF -- "$UMOUSE_ON" "$UCAP"
+  kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1],"utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g,""))' "$UCAP" > "$UPLAIN"
+}
+
+if section 15 "the pir usage feed: the daemon polls pir's service into the cache"; then
+NOWMS=$(node -e 'process.stdout.write(String(Date.now()))')
+UR5=$(( NOWMS / 1000 + 3600 )); UR7=$(( NOWMS / 1000 + 3 * 86400 ))
+R1=$(( NOWMS - 60000 )); SEED=$(( NOWMS - 40000 )); R2=$(( NOWMS - 20000 ))
+ustub_start
+uenv node "$ROOT/bin/cockpitd.mjs" > "$ULOG" 2>&1 &
+DUPID=$!
+waituntil 10 "the usage daemon to boot" test -s "$U/calls.log"
+# No api.json: two and a half ticks, and the feature is invisible.
+nap 2
+same "no api.json: no usage: line in the log"     "$(grep -c 'usage:' "$ULOG")" "0"
+same "...and no usage-cache.json"                 "$([ -e "$US/usage-cache.json" ] && echo yes || echo no)" "no"
+same "...and nothing asked the stand-in"          "$(uhits)" "0"
+
+# A reading appears: written with observed_at as writtenAt, one ok line.
+ureading "$R1" 50 60
+uapi $$
+waituntil 10 "the daemon to write the stand-in's reading" ucache_at "$R1"
+same "the cache holds the reading at writtenAt = observed_at" "$(ucq 'c.writtenAt')" "$R1"
+same "...with its numbers"                        "$(ucq 'c.fiveHour.usedPct+"/"+c.sevenDay.usedPct')" "50/60"
+same "...and the log says ok once"                "$(ulines ok)" "1"
+
+# The same reading three more ticks: polled, never rewritten, never re-logged.
+ST=$(ustat); H=$(uhits)
+waituntil 10 "three more polls of the same reading" uhits_ge $(( H + 3 ))
+same "the same reading leaves the file alone (inode, mtime)" "$(ustat)" "$ST"
+same "...still one ok line"                       "$(ulines ok)" "1"
+
+# A newer tap write survives the older pir reading (newest wins, DESIGN 2.3).
+printf '{"writtenAt":%s,"fiveHour":{"usedPct":11,"resetsAt":%s},"sevenDay":{"usedPct":22,"resetsAt":%s}}\n' \
+  "$SEED" "$UR5" "$UR7" > "$US/usage-cache.json.seed"
+mv "$US/usage-cache.json.seed" "$US/usage-cache.json"
+H=$(uhits)
+waituntil 10 "three polls against the seeded cache" uhits_ge $(( H + 3 ))
+same "a newer tap reading survives three polls"   "$(ucq 'c.writtenAt+" "+c.fiveHour.usedPct')" "$SEED 11"
+
+# The stand-in moves on: the cache follows within a tick.
+ureading "$R2" 97 77
+waituntil 5 "the cache to follow the newer reading" ucache_at "$R2"
+same "a newer pir reading replaces the cache"     "$(ucq 'c.writtenAt+" "+c.fiveHour.usedPct+"/"+c.sevenDay.usedPct')" "$R2 97/77"
+
+# End to end: the real footer draws the pir-fed reading, fresh.
+ustrip 200
+check  "the footer draws the pir reading's 5h"    "5h 97%" "$UPLAIN"
+check  "...and its 7d"                            "7d 77%" "$UPLAIN"
+refute "...not dimmed"                            "$(printf '\033[2m5h')" "$UCAP"
+refute "...with no as-of stamp"                   "as of" "$UPLAIN"
+
+# 500 for three ticks: one line, cache untouched.
+ST=$(ustat); H=$(uhits)
+echo 500 > "$UMODE"
+waituntil 10 "three polls answered 500" uhits_ge $(( H + 3 ))
+same "a 500 logs http 500 once"                   "$(ulines 'http 500')" "1"
+same "...and leaves the cache alone"              "$(ustat)" "$ST"
+
+# The stand-in stops: unreachable, once.
+daemon_stop $USPID; USPID=""
+waituntil 10 "the daemon to log unreachable" grep -qF 'usage: pir service unreachable' "$ULOG"
+nap 2
+same "a stopped service logs unreachable once"    "$(ulines unreachable)" "1"
+
+# A stale api.json naming a dead pid: no request at all.
+ustub_start
+( : ) & DEADPID=$!; wait "$DEADPID" 2>/dev/null
+echo ok > "$UMODE"
+H=$(uhits)
+uapi "$DEADPID"
+waituntil 10 "the daemon to log dead" grep -qF 'usage: pir service dead' "$ULOG"
+nap 2
+same "a dead pid logs dead once"                  "$(ulines dead)" "1"
+same "...and sends nothing to the port"           "$(uhits)" "$H"
+
+# Service up with nothing to report: empty, cache untouched.
+ST=$(ustat)
+echo nulls > "$UMODE"
+uapi $$
+waituntil 10 "the daemon to log empty" grep -qF 'usage: pir service empty' "$ULOG"
+H=$(uhits); waituntil 10 "two more polls of the nulls" uhits_ge $(( H + 2 ))
+same "a nulls body logs empty once"               "$(ulines empty)" "1"
+same "...and leaves the cache alone"              "$(ustat)" "$ST"
+
+# Back to a reading: the feed's return is logged too.
+echo ok > "$UMODE"
+waituntil 10 "the daemon to log ok again" ulines_ge ok 2
+H=$(uhits); waituntil 10 "two more polls" uhits_ge $(( H + 2 ))
+same "the feed coming back logs one more ok"      "$(ulines ok)" "2"
+
+# A service that never answers holds neither the daemon nor the next poll.
+echo hang > "$UMODE"
+H=$(uhits)
+waituntil 10 "the hung request to arrive" uhits_ge $(( H + 1 ))
+C=$(countof "ARGV:" "$U/calls.log")
+# One unscaled second: the reader's 2 s limit is fixed, so the window that proves
+# no second request is sent must sit inside it at any SPEED.
+sleep 1
+grew "the daemon keeps reconciling while a poll hangs" "ARGV:" "$U/calls.log" "$C"
+same "...one poll in flight, not one per tick"    "$(uhits)" "$(( H + 1 ))"
+waituntil 10 "the next tick to poll again after the 2 s limit" uhits_ge $(( H + 2 ))
+waituntil 5 "the limit to log unreachable" ulines_ge unreachable 2
+same "the limit reads as unreachable"             "$(ulines unreachable)" "2"
+
+# End to end, stale: a reading 20 minutes old into an empty cache draws dim.
+OLD=$(( $(node -e 'process.stdout.write(String(Date.now()))') - 1200000 ))
+rm -f "$US/usage-cache.json"
+ureading "$OLD" 97 77
+echo ok > "$UMODE"
+waituntil 10 "the daemon to write the old reading" ucache_at "$OLD"
+ustrip 200
+check  "an old pir reading draws dim"             "$(printf '\033[2m5h')" "$UCAP"
+check  "...stamped as of"                         "as of" "$UPLAIN"
+
+# Nothing but the state reaches daemon.log (DESIGN 2.5): no url, port or body.
+same "the log names no host"                      "$(grep -cE '127\.0\.0\.1|localhost' "$ULOG")" "0"
+same "...and no port of the stand-in's"           "$(grep -cF ":$UPORT" "$ULOG")" "0"
+same "...and nothing from a body"                 "$(grep -cE 'used_percentage|rate_limits|observed_at|97%|77%' "$ULOG")" "0"
+same "every usage line is a bare state"           "$(grep 'usage:' "$ULOG" | grep -vcE 'usage: pir service (ok|empty|dead|unreachable|http 500)$')" "0"
+
+# The fence (DESIGN 5.2): both suites export a scratch PIR_HOME before any daemon.
+fence_before() {  # fence_before <file>: the export's line precedes the first daemon start
+  local e d
+  e=$(grep -nE '^export PIR_HOME="\$T[A-Z0-9]*/' "$1" | head -1 | cut -d: -f1)
+  d=$(grep -nF 'cockpitd.mjs" >' "$1" | head -1 | cut -d: -f1)
+  [ -n "$e" ] && [ -n "$d" ] && [ "$e" -lt "$d" ] && echo yes || echo no
+}
+same "cockpit-test exports a scratch PIR_HOME before any daemon" "$(fence_before "$HERE/run.sh")" "yes"
+same "daemon-leak-test does too" "$(fence_before "$ROOT/spikes/daemon-leak-test/run.sh")" "yes"
+same "the main chain's daemon logs no usage: line" "$(grep -c 'usage:' "$T/daemon.log")" "0"
+same "the usage tick defaults to 30s" \
+     "$(grep -c 'COCKPIT_USAGE_TICK_MS) || 30_000' "$ROOT/bin/cockpitd.mjs")" "1"
+
+daemon_stop $DUPID $USPID; DUPID=""; USPID=""
+fi
+}  # run_usage
+
 # --- the dispatch (plans/test-suite-speed DESIGN 3.6, T08) --------------------
 #   CONCURRENT=0   run the four chains one after another in this shell, as the
 #                  suite always did: for watching a side chain's output live
@@ -4339,18 +4577,18 @@ side_chain() {   # side_chain <name>: the body of one side chain's subshell
   # (measured: 2 of 4 interrupts early in 12c left one running).
   # SIDE_SELF, not $BASHPID in the trap: inside $(...) that names the substitution.
   SIDE_SELF=$BASHPID
-  trap 'daemon_stop $(/usr/bin/pgrep -P $SIDE_SELF) $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID' EXIT
+  trap 'daemon_stop $(/usr/bin/pgrep -P $SIDE_SELF) $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $BBPID $DUPID $USPID' EXIT
   "run_$c"
   section_close
   printf '%s\n' "${SEC_TIMES[@]}" > "$T/chain-$c.times"
   printf '%s %s\n' "$pass" "$fail" > "$T/chain-$c.count"
 }
 if [ "${CONCURRENT:-1}" = 0 ]; then
-  run_main; run_footer; run_agenda; run_dashboard
+  run_main; run_footer; run_agenda; run_dashboard; run_usage
   section_close
 else
   SIDE=()
-  for c in footer agenda dashboard; do
+  for c in footer agenda dashboard usage; do
     chain_runs "$c" || continue
     ( side_chain "$c" ) > "$T/chain-$c.out" 2>&1 &
     SIDE_PIDS="$SIDE_PIDS $!"; SIDE+=("$c")
