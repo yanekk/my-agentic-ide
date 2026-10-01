@@ -18,6 +18,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 T="$(mktemp -d)"
 . "$ROOT/spikes/lib/test-daemons.sh"
 trap 'daemon_sweep "$T"; rm -rf "$T"' EXIT
+# Seatbelt (pir-usage-reader DESIGN 5.2): whatever PIR_HOME the caller exports, no
+# reader or daemon started from here may resolve the real ~/.pir/api.json and so
+# send a request to the real pir service. Tests pass their own home explicitly too.
+export PIR_HOME="$T/pir-home"
+mkdir -p "$PIR_HOME"
 
 REAL_DIR="${HOME}/.claude/cockpit"
 # Names for the whole directory, so a test that CREATES or DELETES the real
@@ -51,6 +56,10 @@ for suite in "$HERE"/*.test.mjs; do
   mkdir -p "$d"
   COCKPIT_DIR="$d" node "$suite" || fail=1
 done
+
+echo
+echo "== the pir seatbelt =="
+same "a scratch PIR_HOME is exported to children" "$(bash -c 'printf %s "${PIR_HOME:-}"')" "$T/pir-home"
 
 echo
 echo "== the pure model keeps its side of the boundary (DESIGN 3.1) =="
