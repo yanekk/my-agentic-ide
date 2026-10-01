@@ -11,7 +11,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
 **Status:** Planned 2026-09-30. Nothing built.
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 **Next `pir-work` will:** implement T01, the only task with no dependency.
 
 ## Tasks
@@ -22,13 +22,13 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | pir-reading-decision | — | ✅ | |
-| T02 | pir-usage-reader | T01 | ⬜ | |
+| T02 | pir-usage-reader | T01 | 🔍 | `bin/cockpit-usage-pir.mjs` and 51 checks in `pir.test.mjs`; scratch `PIR_HOME` exported in `run.sh`, one bash check. Deviations: CLI prints an http failure as `http 500` (`off http 500`, `http 500 kept`), not bare `http`; `pirHome` falls back to `os.homedir()` when `HOME` is unset too. |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
 | T04 | install-report | T02 | ⬜ | |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** (empty)
+**Review queue:** T02
 
 ## Blocked on the user
 
