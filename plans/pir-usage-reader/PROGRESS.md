@@ -11,7 +11,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
 **Status:** Planned 2026-09-30. Nothing built.
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 **Next `pir-work` will:** implement T01, the only task with no dependency.
 
 ## Tasks
@@ -24,11 +24,11 @@ done · ⛔ blocked, needs a human.
 | T01 | pir-reading-decision | — | ✅ | |
 | T02 | pir-usage-reader | T01 | ✅ | |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
-| T04 | install-report | T02 | ⬜ | |
+| T04 | install-report | T02 | 🔍 | `pir-api` line in `bin/install.sh` after the `pir` block; 11 bash checks in `usage-test/run.sh` on its real lines, run with a scratch `PIR_HOME` and a stand-in service. Deviation: added `|| true` to the reader call although install.sh has no `set -e`, so the block also survives `set -e`; a mutation test confirmed the check catches its removal. |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** (empty)
+**Review queue:** T04
 
 ## Blocked on the user
 

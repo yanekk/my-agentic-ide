@@ -62,6 +62,74 @@ echo "== the pir seatbelt =="
 same "a scratch PIR_HOME is exported to children" "$(bash -c 'printf %s "${PIR_HOME:-}"')" "$T/pir-home"
 
 echo
+echo "== the installer reports pir's API service (pir-usage-reader T04, DESIGN 2.7) =="
+# Asserted on the REAL lines of bin/install.sh, as spikes/pir-pane-test does for the
+# `pir` line: the installer has no dry run, and a copy of its lines would drift. The
+# block is the `if [ -n "$PIR_PATH" ]; then` ... `fi` that calls the reader; the `pir`
+# line's own guard of the same shape is skipped because it does not.
+INSTALL="$ROOT/bin/install.sh"
+api_block="$(awk 'BEGIN{n=0} /^if \[ -n "\$PIR_PATH" \]; then$/{on=1; blk=""} on{blk=blk $0 "\n"} on&&/^fi$/{on=0; if (blk ~ /cockpit-usage-pir\.mjs/) {printf "%s", blk; exit}}' "$INSTALL")"
+yes_no() { if eval "$1"; then echo 1; else echo 0; fi; }
+same "the pir-api block exists and asks cockpit-usage-pir.mjs --status" \
+     "$(yes_no 'printf "%s" "$api_block" | grep -q "cockpit-usage-pir\.mjs\" --status"')" "1"
+same "it sits inside a PIR_PATH non-empty guard" \
+     "$(yes_no 'printf "%s" "$api_block" | head -1 | grep -q "^if \[ -n \"\$PIR_PATH\" \]; then$"')" "1"
+same "it has no bad, die, exit or MISSING" \
+     "$(yes_no 'printf "%s" "$api_block" | grep -qE "\b(bad|die|exit|MISSING)\b"')" "0"
+same "it has an ok branch" "$(yes_no 'printf "%s" "$api_block" | grep -qE "^[[:space:]]*ok "')" "1"
+same "its warn branch names pir service on" \
+     "$(yes_no 'printf "%s" "$api_block" | grep -qE "^[[:space:]]*warn .*\(pir service on\)"')" "1"
+
+# Run the real block with stubbed ok/warn/bad, the real reader, and PIR_HOME at a
+# scratch home. `set -e` is on in the subshell so a reader exiting 1 would be seen to
+# end it -- the block must survive that and the whole run must exit 0.
+run_api_block() { # $1 = PIR_HOME
+  ( set -e
+    ok()   { echo "ok $*"; }
+    warn() { echo "warn $*"; }
+    bad()  { echo "BAD $*"; }
+    REPO="$ROOT"; PIR_PATH=/opt/pir; MISSING=0
+    export PIR_HOME="$1"
+    eval "$api_block"
+    echo "MISSING=$MISSING" )
+}
+NOAPI="$T/pir-noapi"; mkdir -p "$NOAPI/.pir"
+out="$(run_api_block "$NOAPI")"; st=$?
+same "no api.json: exit 0"                     "$st" "0"
+same "no api.json: prints the warn line" \
+     "$(printf '%s\n' "$out" | head -1)" \
+     "warn pir-api  optional -- not running; the usage bar will not refresh during pir runs (pir service on)"
+same "no api.json: MISSING untouched"          "$(printf '%s\n' "$out" | tail -1)" "MISSING=0"
+
+# A stand-in service: answers GET /v1/usage with pir's documented "nothing known yet"
+# (state empty, which the installer reports as running, DESIGN 2.7) and writes the
+# api.json naming itself, with its own pid so the reader believes it alive.
+UPHOME="$T/pir-up"; mkdir -p "$UPHOME/.pir"
+node -e '
+  const http = require("http"), fs = require("fs"), path = require("path");
+  const s = http.createServer((q, r) => {
+    r.writeHead(200, { "content-type": "application/json" });
+    r.end(JSON.stringify({ version: 1, observed_at: null, rate_limits: null }));
+  });
+  s.listen(0, "127.0.0.1", () => {
+    const f = path.join(process.argv[1], ".pir", "api.json");
+    fs.writeFileSync(f + ".tmp", JSON.stringify({ version: 1, url: "http://127.0.0.1:" + s.address().port, pid: process.pid }));
+    fs.renameSync(f + ".tmp", f);
+  });
+  setTimeout(() => process.exit(0), 30000).unref();   // a backstop, never the normal end
+' "$UPHOME" &
+STANDIN=$!
+for _ in $(seq 1 100); do [ -f "$UPHOME/.pir/api.json" ] && break; sleep 0.05; done
+origin="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).url)' "$UPHOME/.pir/api.json" 2>/dev/null)"
+out="$(run_api_block "$UPHOME")"; st=$?
+kill "$STANDIN" 2>/dev/null; wait "$STANDIN" 2>/dev/null
+same "service up: exit 0"                      "$st" "0"
+same "service up: prints the ok line with its origin" \
+     "$(printf '%s\n' "$out" | head -1)" "ok pir-api  $origin"
+same "service up: the origin is a loopback url" \
+     "$(yes_no '[[ "$origin" =~ ^http://127\.0\.0\.1:[0-9]+$ ]]')" "1"
+
+echo
 echo "== the pure model keeps its side of the boundary (DESIGN 3.1) =="
 # The model turns a rate_limits object plus `now` into what the footer draws, and
 # it must do so with no clock, no fs, no network and no env -- `now` arrives as a
