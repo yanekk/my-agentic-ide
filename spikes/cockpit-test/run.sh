@@ -48,7 +48,7 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
   16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o
-chain footer 12 12b 12c
+chain footer 12 12b 12c 12d
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
 
@@ -164,7 +164,14 @@ echo 1  > "$NEXTTAB"
 
 cat > "$T/bin/wezterm" <<'STUB'
 #!/usr/bin/env bash
-# invoked as: wezterm cli <subcommand> [args...]
+# invoked as: wezterm cli --no-auto-start <subcommand> [args...]
+# The flag is noted on its own and dropped, so ARGV lines read as before.
+if [ "${2:-}" = "--no-auto-start" ]; then
+  echo "$3" >> "$CALLS.noauto"
+  set -- "$1" "${@:3}"
+else
+  echo "${2:-}" >> "$CALLS.auto"
+fi
 sub="${2:-}"
 
 {
@@ -3407,6 +3414,30 @@ rm -f "$SD/usage-cache.json"
 fi
 fi
 
+if section 12d "the footer pins itself back to one row -- and retries, bounded"; then
+# A footer that opens two rows tall (LINES stands in for the pty) and STAYS two
+# rows, as when the shrink lands mid-swap on an attach and the layout settles at
+# two again. It used to try once per height and never again; now a height gets
+# three tries, one per 2s tick, each borrowing focus and handing it straight back.
+# Its own stub state, so its focus calls cannot touch the main chain's.
+PIN="$T/pin"; mkdir -p "$PIN"
+printf '9 0 sh\n20 0 sh\n' > "$PIN/panes"; echo 20 > "$PIN/active"; : > "$PIN/calls.log"
+printf '{"agent":"test agent","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' > "$SD/terminals.json"
+( CALLS="$PIN/calls.log" PANESTATE="$PIN/panes" ACTIVE="$PIN/active" WEZTERM_PANE=9 LINES=2 \
+  COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$PIN/out" 2>&1 ) &
+PINP=$!
+adjusts() { grep -cxF "ARGV: cli adjust-pane-size --pane-id 9 --amount 1 Down" "$PIN/calls.log"; }
+pinned3() { [ "$(adjusts)" -ge 3 ]; }
+waituntil 12 "three pin attempts" pinned3
+sleep 2.6                                           # one more tick: no fourth try
+kill "$PINP" 2>/dev/null; wait "$PINP" 2>/dev/null
+same "an oversized footer is shrunk three times, not once and not for ever" "$(adjusts)" "3"
+same "...each borrowing focus" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 9" "$PIN/calls.log")" "3"
+same "...and handing it straight back" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 20" "$PIN/calls.log")" "3"
+fi
+
 }  # run_footer
 
 # `same` is REDEFINED for the agenda and dashboard chains, with the expected/actual
@@ -4375,6 +4406,11 @@ fi
 # tripwire would report it on every run (DESIGN §2.5).
 daemon_stop $DPID $D2PID $D3PID $D4PID $D5PID $D6PID; DPID=""; D2PID=""; D3PID=""; D4PID=""; D5PID=""; D6PID=""
 if daemon_tripwire "$T"; then okline "no cockpitd of this run is left running"; else fail=1; fi
+# Every cli call the daemons made carried --no-auto-start: one without it, against a
+# dead socket, spawns a headless mux whose default_prog builds a ghost cockpit.
+AUTO=$(cat $(find "$T" -name 'calls.log.auto') /dev/null | sort | uniq -c | tr '\n' ' ')
+if [ -z "$AUTO" ] && { [ -n "$PARTIAL" ] || [ -s "$T/calls.log.noauto" ]; }; then okline "every wezterm cli call carried --no-auto-start"
+else echo "  FAIL wezterm cli calls without --no-auto-start: ${AUTO:-none, but none with it either}"; fail=1; fi
 
 echo
 if [ "$fail" != 0 ]; then echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"

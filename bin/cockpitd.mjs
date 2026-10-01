@@ -123,8 +123,16 @@ const MUX_LINK = path.join(WEZ_DIR, "default-org.wezfurlong.wezterm");
 const REPAIR_COOLDOWN_MS = 5000;
 let lastRepair = 0;
 
+// `--no-auto-start` on every call: this daemon is nohup'd and outlives its window,
+// and a cli that cannot reach its GUI otherwise spawns `wezterm-mux-server
+// --daemonize` -- which runs default_prog, i.e. cockpit-layout.sh, i.e. a whole
+// invisible second cockpit whose `pkill -f cockpitd.mjs` kills the daemon of the
+// window that just opened. Measured 2026-10-01: three such ghosts in five minutes,
+// each leaving the real window with no daemon. A refused call is logged instead.
+const WEZ_CLI = ["cli", "--no-auto-start"];
+
 function wezRaw(args, stdin) {
-  return execFileSync("wezterm", ["cli", ...args], {
+  return execFileSync("wezterm", [...WEZ_CLI, ...args], {
     input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
   });
 }
@@ -159,10 +167,15 @@ function repairMuxSocket() {
     return false;
   }
 
+  // WEZTERM_UNIX_SOCKET, inherited from the window that started us, outranks the
+  // symlink: left alone it keeps naming the dead window's socket and the repaired
+  // link is never consulted. Each candidate is tried through the variable as well.
+  const inherited = process.env.WEZTERM_UNIX_SOCKET;
   for (const { full } of candidates) {
     try {
       fs.rmSync(MUX_LINK, { force: true });
       fs.symlinkSync(full, MUX_LINK);
+      if (inherited !== undefined) process.env.WEZTERM_UNIX_SOCKET = full;
       wezRaw(["list"]);                       // prove it before believing it
       log(`repaired stale mux socket → ${path.basename(full)}`);
       return true;
@@ -170,6 +183,7 @@ function repairMuxSocket() {
       /* dead socket too; try the next */
     }
   }
+  if (inherited !== undefined) process.env.WEZTERM_UNIX_SOCKET = inherited;
   return false;
 }
 
@@ -3563,7 +3577,7 @@ async function paneState() {
   let text;
   try {
     const { stdout } = await execFileAsync(
-      "wezterm", ["cli", "get-text", "--pane-id", String(panes.fleet)],
+      "wezterm", [...WEZ_CLI, "get-text", "--pane-id", String(panes.fleet)],
       { timeout: 4000, maxBuffer: 8 << 20 },
     );
     text = stdout;

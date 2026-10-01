@@ -124,22 +124,35 @@ const SELF = Number.parseInt(process.env.WEZTERM_PANE ?? "", 10);
 
 function wez(args) {
   try {
-    return execFileSync("wezterm", ["cli", ...args],
+    // --no-auto-start: a cli that cannot reach its GUI would otherwise spawn a
+    // headless mux, whose default_prog builds a ghost cockpit (see cockpitd.mjs).
+    return execFileSync("wezterm", ["cli", "--no-auto-start", ...args],
                         { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch { return null; }
 }
 
-// The row count of the last correction we tried. Focus is borrowed for ~100ms
-// per attempt, so a drift that cannot be fixed (no wezterm cli, a pane at its
-// minimum) must not be retried on every tick -- only a NEW height is worth
-// another go.
+// The row count of the last correction we tried, and how many tries it has had.
+// Focus is borrowed for ~100ms per attempt, so a drift that cannot be fixed (no
+// wezterm cli, a pane at its minimum) must not be retried on every tick. But ONE
+// try per height was too few: attaching an agent re-splits the slots, the footer
+// grows to two rows mid-swap, and the 250ms-debounced try lands while the daemon
+// is still moving panes -- the shrink goes to a pane that is about to be replaced,
+// the layout settles at two rows again, and a height already "tried" was never
+// tried again (seen 2026-10-01: stuck at two rows for the life of the attach). So
+// a height gets PIN_TRIES goes, one per 2s tick, which is after the swap settles.
+const PIN_TRIES = 3;
 let pinned = 0;
+let pinTries = 0;
 
 function pinHeight() {
-  const rows = process.stdout.rows || 1;
-  if (rows <= 1) { pinned = 0; return; }        // right size: arm for the next drift
-  if (rows === pinned || !Number.isInteger(SELF)) return;
-  pinned = rows;
+  // LINES, like COLUMNS for the width: the seam a piped test render (no TTY) uses
+  // to stand in for an oversized pane.
+  const rows = process.stdout.rows || Number(process.env.LINES) || 1;
+  if (rows <= 1) { pinned = 0; pinTries = 0; return; }   // right size: arm for the next drift
+  if (!Number.isInteger(SELF)) return;
+  if (rows !== pinned) { pinned = rows; pinTries = 0; }
+  if (pinTries >= PIN_TRIES) return;
+  pinTries++;
 
   const out = wez(["list", "--format", "json"]);
   if (out === null) return;
