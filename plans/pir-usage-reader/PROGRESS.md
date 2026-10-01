@@ -11,7 +11,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
 **Status:** Planned 2026-09-30. Nothing built.
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-01
 **Next `pir-work` will:** implement T01, the only task with no dependency.
 
 ## Tasks
@@ -25,10 +25,10 @@ done · ⛔ blocked, needs a human.
 | T02 | pir-usage-reader | T01 | ✅ | |
 | T03 | daemon-poll | T01, T02 | ✅ | |
 | T04 | install-report | T02 | ✅ | |
-| T05 | docs | T03, T04 | ⬜ | |
+| T05 | docs | T03, T04 | 🔍 | CLAUDE.md: file-table rows (usage-pir, model, usage-test 248, cockpit-test 815 / ~111s median of 3), install `pir-api` sentence, `usage-cache.json` two writers. docs/cockpit.md: new section "The pir usage feed". Deviation: also two env rows (`COCKPIT_USAGE_TICK_MS`, `PIR_HOME`) in its Configuration table. |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** (empty)
+**Review queue:** T05
 
 ## Blocked on the user
 

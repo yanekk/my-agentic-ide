@@ -1235,6 +1235,74 @@ drives the switch, the swap, following and the claude-only guards with a stubbed
 and a stubbed `pir` that the tests write the state file for. Neither proves the real pir
 writes the file; that is pir's own tests and a hands-on check (plan T07).
 
+## The pir usage feed
+
+The footer's usage bar draws `usage-cache.json`, and its first writer,
+`cockpit-usage-tap.mjs`, is a statusline command: it runs after each turn of an ordinary
+Claude Code session. pir's workers are SDK sessions with no statusline, so during a pir run
+nobody wrote the cache and the bar dimmed to `as of HH:MM` after 15 minutes. pir serves the
+same numbers from a local HTTP service; the daemon polls it and is the cache's second writer.
+The footer is unchanged. The plan is `plans/pir-usage-reader/`.
+
+### The contract
+
+The source is pir's own `plans/api-service/DESIGN.md` §2.1 (`~/src/plan-implement-review`),
+copied into `plans/pir-usage-reader/DESIGN.md` §2.1; when pir's changes, ours follows. While the
+service is up it keeps `${PIR_HOME ?? HOME}/.pir/api.json` (`version`, `url`, `pid`). The reader
+reads that file before every poll and never assumes a port, which is how the tests stay off the
+real service: on a scratch home the OS picks the port and only the file names it. It then sends
+`GET {url}/v1/usage`, with no header of its own, and gets `version`, `observed_at` (ms) and
+`rate_limits` in the shape `normalizeRateLimits` already takes.
+
+`bin/cockpit-usage-pir.mjs` does the world-touching half (`fetchPirUsage`, `pollPirUsage`);
+the rules are pure, in `cockpit-usage-model.mjs` (`parsePirApiFile`, `decidePirReading`). One
+poll function serves the daemon's tick, the installer's `--status` and the live check's
+`--once`, so the three cannot disagree about whether the service is up.
+
+### When, and which reading wins
+
+`refreshUsage()` runs once at daemon start and every 30 s (`COCKPIT_USAGE_TICK_MS`), one poll
+in flight, each request bounded at 2 s for headers and body. A reading is written only when its
+`observed_at` is **strictly newer** than the cache's `writtenAt`, and then replaces the whole
+cache, both windows. The tap writes unconditionally with the time of its turn, so comparing the
+two times is the whole rule. An equal time writes nothing, or the footer would repaint every
+poll. "The higher number wins" was declined: after a reset it would keep showing the old number.
+
+### Readings from the future
+
+`observed_at` more than 60 s ahead of the daemon's clock (`PIR_FUTURE_TOLERANCE_MS`) is
+ignored, state `future`. Up to 60 s ahead it is treated as heard now. A cache whose own
+`writtenAt` is ahead of the clock counts as older than any valid reading. Either way the reason
+is the same: a future `writtenAt` would beat every real reading and hold off the stale mark
+until the clock caught up.
+
+### States, and one log line per change
+
+Every poll ends in one state: `absent`, `bad-file`, `dead`, `unreachable`, `http {status}`,
+`bad-body`, `empty`, `future` or `ok`. Only `ok` can write; every other leaves the cache alone
+and the bar ages as before. `daemon.log` gets `usage: pir service {state}` only when the state
+differs from the last poll's. The daemon starts at `absent`, so a machine without pir logs
+nothing. No url, percentage or body is logged, because `daemon.log` is pasted into
+conversations. A stale `api.json` whose `pid` is gone is `dead` and sends no request.
+
+### Loopback only
+
+`parsePirApiFile` accepts a `url` only as plain `http://127.0.0.1:{port}` or
+`http://localhost:{port}`: no other host, no https, no path, query or credentials, and a port.
+Anything else is `bad-file` and nothing is sent. The fetch uses `redirect: "error"`. The daemon
+runs unattended, and a file on disk must not be able to point it at the network.
+
+### Testing it, and the `PIR_HOME` fence
+
+`spikes/usage-test` covers the pure rules, the reader against a stand-in `node:http` server on an
+OS-chosen port, both CLI modes and the installer's `pir-api` line, and greps the model for
+anything impure. `spikes/cockpit-test` §15 runs a real daemon against the stand-in. Test
+daemons get a scratch `HOME` but would inherit a `PIR_HOME` the caller exports, so
+`usage-test`, `cockpit-test` and `daemon-leak-test` each export a scratch `PIR_HOME` at the top:
+no test can resolve the real `~/.pir/api.json`. Whether the real service speaks the contract,
+and the live bar staying lit through a real pir run, are checks run by hand after the merge
+(`plans/pir-usage-reader/PLAN.md`, § After the merge).
+
 ## Configuration
 
 | Env | Effect |
@@ -1245,6 +1313,8 @@ writes the file; that is pir's own tests and a hands-on check (plan T07).
 | `COCKPIT_REPO` | Which repo's notes a terminal sees. Exported into every cockpit-spawned shell; `note` falls back to `panes.json` when it is absent. Not something to set by hand. |
 | `COCKPIT_BIN` | Where the cockpit's own commands live (`~/.claude/cockpit/bin`). Set by the layout script; on the `PATH` of cockpit shells only. |
 | `AGENDA_DRY_RUN=1` | `agenda add` prints the sign-in URL it *would* open and stops — binds no port, opens no browser, writes nothing. The safe way to inspect the flow. |
+| `COCKPIT_USAGE_TICK_MS` | How often the daemon polls pir's usage service (default 30000). A test seam. |
+| `PIR_HOME` | Where the pir usage feed looks for `.pir/api.json` (default `HOME`). The suites set it to scratch. |
 | `COCKPIT_AGENDA_TICK_MS` | How often the daemon looks for a stale calendar (default 60000). |
 | `COCKPIT_AGENDA_STALE_MS` | How old a fetch must be before that tick refetches it (default 60000). |
 | `AGENDA_ORIGIN` | Re-point Google's endpoints at a loopback stub. The tests' whole reason for existing offline; never set by hand. |
