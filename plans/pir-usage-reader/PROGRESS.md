@@ -24,11 +24,11 @@ done · ⛔ blocked, needs a human.
 | T01 | pir-reading-decision | — | ✅ | |
 | T02 | pir-usage-reader | T01 | ✅ | |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
-| T04 | install-report | T02 | 🔍 | `pir-api` line in `bin/install.sh` after the `pir` block; 11 bash checks in `usage-test/run.sh` on its real lines, run with a scratch `PIR_HOME` and a stand-in service. Deviation: added `|| true` to the reader call although install.sh has no `set -e`, so the block also survives `set -e`; a mutation test confirmed the check catches its removal. |
+| T04 | install-report | T02 | ✅ | Reviewed clean, no fix commit. `pir-api` line after the `pir` block; `|| true` deviation accepted (harmless, survives `set -e`). Probed: three mutations (drop `|| true`, break the running match, keep the `running` prefix) each turned the suite red; all three test suites green; installer not run on the real machine. |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** T04
+**Review queue:** empty
 
 ## Blocked on the user
 
