@@ -21,7 +21,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | pir-reading-decision | — | ⬜ | |
+| T01 | pir-reading-decision | — | ✅ | |
 | T02 | pir-usage-reader | T01 | ⬜ | |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
 | T04 | install-report | T02 | ⬜ | |
