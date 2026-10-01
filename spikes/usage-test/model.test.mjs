@@ -15,6 +15,9 @@ import {
   WARN_PCT,
   CRIT_PCT,
   STALE_MS,
+  PIR_FUTURE_TOLERANCE_MS,
+  parsePirApiFile,
+  decidePirReading,
 } from "../../bin/cockpit-usage-model.mjs";
 
 // Wed 2026-09-16 14:20:00 UTC. A reset later the same day, and one the next day
@@ -170,6 +173,151 @@ section("one window null draws only the other");
     role: "warn",
     reset: "Thu 09:00",
   });
+}
+
+// --- parsePirApiFile (plans/pir-usage-reader DESIGN 2.1, 2.5, 2.6) -----------
+section("parsePirApiFile: only a plain loopback http origin is accepted");
+{
+  const file = (o) => JSON.stringify({ version: 1, url: "http://127.0.0.1:47717", pid: 4711, ...o });
+  eq("the documented file", parsePirApiFile(file({})), { origin: "http://127.0.0.1:47717", pid: 4711 });
+  eq("localhost is accepted", parsePirApiFile(file({ url: "http://localhost:47717" })),
+     { origin: "http://localhost:47717", pid: 4711 });
+  eq("a trailing slash is accepted, origin has none", parsePirApiFile(file({ url: "http://127.0.0.1:47717/" })),
+     { origin: "http://127.0.0.1:47717", pid: 4711 });
+
+  eq("not JSON", parsePirApiFile("{ version: 1"), null);
+  eq("empty string", parsePirApiFile(""), null);
+  eq("an array", parsePirApiFile("[1]"), null);
+  eq("JSON null", parsePirApiFile("null"), null);
+  eq("not a string", parsePirApiFile(undefined), null);
+  eq("version 2", parsePirApiFile(file({ version: 2 })), null);
+  eq("version missing", parsePirApiFile(JSON.stringify({ url: "http://127.0.0.1:47717", pid: 4711 })), null);
+  eq("version \"1\" (a string)", parsePirApiFile(file({ version: "1" })), null);
+
+  eq("https", parsePirApiFile(file({ url: "https://127.0.0.1:47717" })), null);
+  eq("host example.com", parsePirApiFile(file({ url: "http://example.com:47717" })), null);
+  eq("host 127.0.0.1.example.com", parsePirApiFile(file({ url: "http://127.0.0.1.example.com:47717" })), null);
+  eq("host 0.0.0.0", parsePirApiFile(file({ url: "http://0.0.0.0:47717" })), null);
+  eq("no port", parsePirApiFile(file({ url: "http://127.0.0.1" })), null);
+  eq("a path", parsePirApiFile(file({ url: "http://127.0.0.1:47717/v1" })), null);
+  eq("a query", parsePirApiFile(file({ url: "http://127.0.0.1:47717/?x=1" })), null);
+  eq("a hash", parsePirApiFile(file({ url: "http://127.0.0.1:47717/#x" })), null);
+  eq("credentials user:pw@", parsePirApiFile(file({ url: "http://user:pw@127.0.0.1:47717" })), null);
+  eq("url not a URL", parsePirApiFile(file({ url: "not a url" })), null);
+  eq("url missing", parsePirApiFile(JSON.stringify({ version: 1, pid: 4711 })), null);
+
+  eq("pid 0", parsePirApiFile(file({ pid: 0 })), null);
+  eq("pid negative", parsePirApiFile(file({ pid: -4711 })), null);
+  eq("pid a float", parsePirApiFile(file({ pid: 47.11 })), null);
+  eq("pid a string", parsePirApiFile(file({ pid: "4711" })), null);
+  eq("pid missing", parsePirApiFile(JSON.stringify({ version: 1, url: "http://127.0.0.1:47717" })), null);
+}
+
+// --- decidePirReading (DESIGN 2.3, 2.4, 2.5, 3.3) --------------------------
+section("decidePirReading: newest wins, every failure quiet");
+{
+  const OBS = NOW - 5000; // heard five seconds ago
+  const body = (o) => ({
+    version: 1,
+    observed_at: OBS,
+    rate_limits: {
+      five_hour: { used_percentage: 97.49, resets_at: R5 },
+      seven_day: { used_percentage: 77, resets_at: R7 },
+    },
+    ...o,
+  });
+  const reading = (at) => ({
+    writtenAt: at,
+    fiveHour: { usedPct: 97, resetsAt: R5 },
+    sevenDay: { usedPct: 77, resetsAt: R7 },
+  });
+  const cacheAt = (t) => ({ writtenAt: t, fiveHour: { usedPct: 10, resetsAt: R5 }, sevenDay: null });
+
+  eq("PIR_FUTURE_TOLERANCE_MS is 60 s", PIR_FUTURE_TOLERANCE_MS, 60000);
+
+  // The documented body against no cache: written, stamped with observed_at, rounded.
+  eq("no cache: written at observed_at, 97.49 rounds to 97", decidePirReading(null, body({}), NOW),
+     { state: "ok", write: reading(OBS) });
+  eq("readCache's 0 writtenAt (unreadable stamp) loses", decidePirReading(cacheAt(0), body({}), NOW),
+     { state: "ok", write: reading(OBS) });
+  eq("a cache with no usable writtenAt counts as no cache",
+     decidePirReading({ fiveHour: null, sevenDay: null }, body({}), NOW), { state: "ok", write: reading(OBS) });
+
+  // Strictly newer.
+  eq("newer than the cache by 1 ms writes", decidePirReading(cacheAt(OBS - 1), body({}), NOW),
+     { state: "ok", write: reading(OBS) });
+  eq("equal to the cache writes nothing, still ok", decidePirReading(cacheAt(OBS), body({}), NOW),
+     { state: "ok", write: null });
+  eq("older than the cache writes nothing, still ok", decidePirReading(cacheAt(OBS + 1), body({}), NOW),
+     { state: "ok", write: null });
+
+  // One window null replaces the whole cache; both null inside an object is empty.
+  eq("one window null writes, that window null",
+     decidePirReading(cacheAt(OBS - 1000), body({ rate_limits: { five_hour: null, seven_day: { used_percentage: 77, resets_at: R7 } } }), NOW),
+     { state: "ok", write: { writtenAt: OBS, fiveHour: null, sevenDay: { usedPct: 77, resetsAt: R7 } } });
+  eq("both windows null inside an object: empty",
+     decidePirReading(null, body({ rate_limits: { five_hour: null, seven_day: null } }), NOW), { state: "empty", write: null });
+  eq("an empty rate_limits object: empty", decidePirReading(null, body({ rate_limits: {} }), NOW),
+     { state: "empty", write: null });
+
+  // The service's "nothing known" and the half-null malformations.
+  eq("nulls body: empty", decidePirReading(null, { version: 1, observed_at: null, rate_limits: null }, NOW),
+     { state: "empty", write: null });
+  eq("observed_at null, rate_limits set: bad-body", decidePirReading(null, body({ observed_at: null }), NOW),
+     { state: "bad-body", write: null });
+  eq("observed_at set, rate_limits null: bad-body", decidePirReading(null, body({ rate_limits: null }), NOW),
+     { state: "bad-body", write: null });
+  eq("observed_at missing, rate_limits missing: bad-body", decidePirReading(null, { version: 1 }, NOW),
+     { state: "bad-body", write: null });
+
+  const bad = { state: "bad-body", write: null };
+  eq("version 2: bad-body", decidePirReading(null, body({ version: 2 }), NOW), bad);
+  eq("version missing: bad-body", decidePirReading(null, { observed_at: OBS, rate_limits: {} }, NOW), bad);
+  eq("body a string: bad-body", decidePirReading(null, "ok", NOW), bad);
+  eq("body null: bad-body", decidePirReading(null, null, NOW), bad);
+  eq("body an array: bad-body", decidePirReading(null, [body({})], NOW), bad);
+  eq("observed_at a string: bad-body", decidePirReading(null, body({ observed_at: String(OBS) }), NOW), bad);
+  eq("observed_at 0: bad-body", decidePirReading(null, body({ observed_at: 0 }), NOW), bad);
+  eq("observed_at negative: bad-body", decidePirReading(null, body({ observed_at: -OBS }), NOW), bad);
+  eq("observed_at NaN: bad-body", decidePirReading(null, body({ observed_at: NaN }), NOW), bad);
+  eq("observed_at Infinity: bad-body", decidePirReading(null, body({ observed_at: Infinity }), NOW), bad);
+  eq("rate_limits an array: bad-body", decidePirReading(null, body({ rate_limits: [] }), NOW), bad);
+  eq("rate_limits a string: bad-body", decidePirReading(null, body({ rate_limits: "x" }), NOW), bad);
+
+  // The future: up to 60 s ahead is heard now; beyond, ignored.
+  eq("observed_at now + 60 000: ok, writtenAt clamped to now",
+     decidePirReading(null, body({ observed_at: NOW + 60000 }), NOW), { state: "ok", write: reading(NOW) });
+  eq("observed_at now + 60 001: future, no write",
+     decidePirReading(null, body({ observed_at: NOW + 60001 }), NOW), { state: "future", write: null });
+  eq("a future reading does not write even over an old cache",
+     decidePirReading(cacheAt(1), body({ observed_at: NOW + 60001 }), NOW), { state: "future", write: null });
+  // A clamped near-future reading vs a cache stamped exactly now: equal, not written.
+  eq("near-future clamped to now ties a cache at now: no write",
+     decidePirReading(cacheAt(NOW), body({ observed_at: NOW + 10 }), NOW), { state: "ok", write: null });
+
+  // A cache dated ahead of the clock loses to any valid reading, even an old one.
+  eq("a cache ahead of now loses to a valid reading",
+     decidePirReading(cacheAt(NOW + 3600000), body({}), NOW), { state: "ok", write: reading(OBS) });
+  eq("a cache ahead of now loses even to an hour-old reading",
+     decidePirReading(cacheAt(NOW + 1), body({ observed_at: NOW - 3600000 }), NOW),
+     { state: "ok", write: reading(NOW - 3600000) });
+
+  // A reset already past is written exactly as heard.
+  const PAST = Math.floor((NOW - 7200000) / 1000);
+  eq("resets_at in the past is written as heard",
+     decidePirReading(null, body({ rate_limits: { five_hour: { used_percentage: 12, resets_at: PAST }, seven_day: null } }), NOW),
+     { state: "ok", write: { writtenAt: OBS, fiveHour: { usedPct: 12, resetsAt: PAST }, sevenDay: null } });
+
+  // Inputs are not mutated.
+  const c = cacheAt(OBS - 1), b = body({});
+  const cBefore = JSON.stringify(c), bBefore = JSON.stringify(b);
+  const out = decidePirReading(c, b, NOW);
+  eq("the cache is not mutated", JSON.stringify(c), cBefore);
+  eq("the body is not mutated", JSON.stringify(b), bBefore);
+  ok("the write is a new object, not the cache", out.write !== c && out.write !== b.rate_limits);
+  const fb = Object.freeze({ ...b, rate_limits: Object.freeze({ ...b.rate_limits }) });
+  eq("a frozen body decides the same", decidePirReading(Object.freeze(cacheAt(OBS - 1)), fb, NOW),
+     { state: "ok", write: reading(OBS) });
 }
 
 done();

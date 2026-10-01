@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
-**Status:** Planned 2026-09-30. Nothing built.
-**Last updated:** 2026-09-30
-**Next `pir-work` will:** implement T01, the only task with no dependency.
+**Status:** T01 implemented, awaiting review.
+**Last updated:** 2026-10-01
+**Next `pir-work` will:** review T01.
 
 ## Tasks
 
@@ -21,14 +21,14 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T01 | pir-reading-decision | — | ⬜ | |
+| T01 | pir-reading-decision | — | 🔍 | `PIR_FUTURE_TOLERANCE_MS`, `parsePirApiFile`, `decidePirReading` in the model; 66 new model assertions, purity grep unedited. Deviations: a cache whose `writtenAt` is not a finite number counts as no cache (DESIGN §2.3 "unreadable"); `:80` reads as no port because `URL` drops it. |
 | T02 | pir-usage-reader | T01 | ⬜ | |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
 | T04 | install-report | T02 | ⬜ | |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** (empty)
+**Review queue:** T01
 
 ## Blocked on the user
 
