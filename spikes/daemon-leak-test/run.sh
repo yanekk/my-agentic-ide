@@ -19,12 +19,22 @@ T="$(mktemp -d)"
 # A second scratch folder: the stand-in for the real cockpit and for another
 # run, whose daemons nothing aimed at $T may ever touch.
 T2="$(mktemp -d)"
+# A third, for PIR_HOME alone (below). Not under $T or $T2: daemon_pids knows a
+# test daemon by ANY path in its environment, so a PIR_HOME exported under $T
+# would make every $T2 stand-in read as one of $T's.
+TP="$(mktemp -d)"
 cleanup() {
   daemon_sweep "$T"
   daemon_sweep "$T2"
-  rm -rf "$T" "$T2"
+  rm -rf "$T" "$T2" "$TP"
 }
 trap cleanup EXIT
+# Seatbelt (pir-usage-reader DESIGN 5.2): the real cockpitd started below polls
+# ${PIR_HOME ?? HOME}/.pir/api.json. Exported to scratch here, before any daemon,
+# so a PIR_HOME the caller exports can never point a test daemon at the real
+# pir service.
+export PIR_HOME="$TP/pir-home"
+mkdir -p "$PIR_HOME"
 
 pass=0; fail=0
 ok()  { pass=$((pass + 1)); echo "ok   $1"; }
@@ -285,8 +295,8 @@ for f in "$ROOT"/spikes/*-test/run.sh; do
   owners=$(grep -c 'COCKPIT_OWNER_PID="\$\$"' "$f")
   is "$(basename "$(dirname "$f")"): $launches daemon launches, each with an owner" "$owners" "$launches"
 done
-is "cockpit-test has its seven launches (the fence is not counting nothing)" \
-  "$(grep -cE 'bin/cockpitd\.mjs"?[^|#]*&[[:space:]]*$' "$ROOT/spikes/cockpit-test/run.sh")" 7
+is "cockpit-test has its eight launches (the fence is not counting nothing)" \
+  "$(grep -cE 'bin/cockpitd\.mjs"?[^|#]*&[[:space:]]*$' "$ROOT/spikes/cockpit-test/run.sh")" 8
 # The real cockpit must be unable to get the backstop at all.
 is "COCKPIT_OWNER_PID never in bin/cockpit-layout.sh or wezterm/cockpit.lua" \
   "$(cat "$ROOT/bin/cockpit-layout.sh" "$ROOT/wezterm/cockpit.lua" | grep -c COCKPIT_OWNER_PID)" 0
