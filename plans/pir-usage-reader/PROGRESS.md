@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-09-30 — 9 fixed, 4 decided with the user
 
-**Status:** Planned 2026-09-30. Nothing built.
+**Status:** T01, T02 done.
 **Last updated:** 2026-10-01
-**Next `pir-work` will:** implement T01, the only task with no dependency.
+**Next `pir-work` will:** implement T03 or T04, both now unblocked.
 
 ## Tasks
 
@@ -22,13 +22,13 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T01 | pir-reading-decision | — | ✅ | |
-| T02 | pir-usage-reader | T01 | 🔍 | `bin/cockpit-usage-pir.mjs` and 51 checks in `pir.test.mjs`; scratch `PIR_HOME` exported in `run.sh`, one bash check. Deviations: CLI prints an http failure as `http 500` (`off http 500`, `http 500 kept`), not bare `http`; `pirHome` falls back to `os.homedir()` when `HOME` is unset too. |
+| T02 | pir-usage-reader | T01 | ✅ | Review clean, no fix commit; three suites green. Accepted deviations: CLI prints `http 500`, matching DESIGN §2.5's `http {status}`; the `os.homedir()` fallback is pir's own `index-store` rule. Probed: mutations dropping `redirect: "error"` or the newer-only write each fail the suite; api.json as a directory reads `bad-file`. |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
 | T04 | install-report | T02 | ⬜ | |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
-**Review queue:** T02
+**Review queue:** empty
 
 ## Blocked on the user
 
