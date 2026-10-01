@@ -351,7 +351,13 @@ function renderFooter() {
   let nameKept = true;
   let captionKept = true;
   let usageDrawn = usageSeg;
-  if (usageSeg && cols > 0) {
+  // With NO usage segment the same levels apply, but only once the line would
+  // otherwise wrap: a footer that fits stays byte-for-byte today's (level one is
+  // the full line). Gating the trim on usage alone left a machine that never
+  // writes a usage cache (a company Bedrock session) with no trim and no cut, so a
+  // long agent name -- `sdet-tools / worktree-pr-comment` at 215 columns, 244 wide
+  // -- wrapped and the one-row pane showed only part of it (2026-10-01).
+  if (cols > 0) {
     const levels = [
       { keys: [...PRIMARY, ...SECONDARY], name: true, caption: true },
       { keys: [...PRIMARY], name: true, caption: true },
@@ -371,7 +377,7 @@ function renderFooter() {
       const p = buildPre(lv.keys, lv.name);
       const { diff } = buildDiff(p, lv.caption);
       const u = lv.shortUsage ? usageShort : usageSeg;
-      if (vlen(p) + vlen(diff) + 1 + vlen(u) <= cols) { chosen = lv; break; }
+      if (vlen(p) + vlen(diff) + (u ? 1 + vlen(u) : 0) <= cols) { chosen = lv; break; }
     }
     keysKept = chosen.keys;
     nameKept = chosen.name;
@@ -384,7 +390,8 @@ function renderFooter() {
   hitZones = zones;
 
   if (!usageSeg) {
-    paint(`${pre}${diff}${ESC}K`);
+    // Still too wide at the last level: cut, never wrap. cutTo is a no-op on a fit.
+    paint(`${cols > 0 ? cutTo(`${pre}${diff}`, cols) : `${pre}${diff}`}${ESC}K`);
     return;
   }
   // Right-align the usage readout: pad so it ends at the window's right edge when

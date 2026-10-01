@@ -3388,6 +3388,24 @@ ffooter "test agent" "" 100
 check  "100, no switch: reset times kept (no new level without the switch)" "↺" "$PLAIN"
 rm -f "$SD/usage-cache.json"
 
+# NO usage cache at all (a company Bedrock machine never writes one): the trim used
+# to be gated on usage, so a long agent name wrapped the line and the one-row pane
+# showed only part of it. Measured live: 244 wide at 215 columns.
+LONG="sdet-tools / worktree-pane-display-and-more"
+ffooter "$LONG" "$FL_CLAUDE" 215
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 215 ]; then okline "no usage, 215: a long name keeps the footer one row ($NW <= 215)"
+else echo "  FAIL the no-usage footer wrapped: width $NW > 215 columns"; fail=1; fi
+check  "no usage, 215: the name is kept"                  "$LONG" "$PLAIN"
+check  "no usage, 215: ...the primary keys too"           "send→claude" "$PLAIN"
+refute "no usage, 215: ...the dim secondary keys go first" "zoom" "$PLAIN"
+ffooter "$LONG" "$FL_CLAUDE" 300
+check  "no usage, 300: a line that fits is not trimmed"   "zoom" "$PLAIN"
+ffooter "$LONG" "$FL_CLAUDE" 60
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 60 ]; then okline "no usage, 60: cut at the edge, never wrapped ($NW <= 60)"
+else echo "  FAIL the no-usage 60 footer wrapped: width $NW > 60 columns"; fail=1; fi
+
 # The click path, under script(1) exactly like section 12's click().
 if command -v script >/dev/null; then
 cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it

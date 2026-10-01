@@ -219,7 +219,7 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (784 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (790 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
