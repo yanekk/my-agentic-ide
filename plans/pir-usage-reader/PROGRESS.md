@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | T01 | pir-reading-decision | — | ✅ | |
 | T02 | pir-usage-reader | T01 | ✅ | |
 | T03 | daemon-poll | T01, T02 | ⬜ | |
-| T04 | install-report | T02 | ⬜ | |
+| T04 | install-report | T02 | ✅ | |
 | T05 | docs | T03, T04 | ⬜ | |
 | T06 | live-check-script | T02, T03 | ⬜ | |
 
