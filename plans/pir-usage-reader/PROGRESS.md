@@ -25,7 +25,7 @@ done · ⛔ blocked, needs a human.
 | T02 | pir-usage-reader | T01 | ✅ | |
 | T03 | daemon-poll | T01, T02 | ✅ | |
 | T04 | install-report | T02 | ✅ | |
-| T05 | docs | T03, T04 | ✅ | Reviewed clean, no fix commit. Grepped every path, function, env var, state and log string in both docs against the code; usage-test 248 and cockpit-test 815 re-counted green. Configuration-table rows `COCKPIT_USAGE_TICK_MS`/`PIR_HOME` accepted as in scope. |
+| T05 | docs | T03, T04 | ✅ | Reviewed clean, no fix commit. Grepped every path, function, env var, state and log string in both docs against the code; usage-test 248 and cockpit-test 815 re-counted green; usage-test moved to 289 when T06 merged, doc updated. Configuration-table rows `COCKPIT_USAGE_TICK_MS`/`PIR_HOME` accepted as in scope. |
 | T06 | live-check-script | T02, T03 | ✅ | |
 
 **Review queue:** empty
