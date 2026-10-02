@@ -257,5 +257,8 @@ return {
     -- \r->\n substitution uses to type a review without submitting: Enter still
     -- sends \r and submits, Option+Enter only opens a new line in the input box.
     { key = "Enter", mods = "ALT", action = act.SendString("\n") },
+    -- Cmd+Enter does the same: the two are easy to mix up, and a line break is
+    -- the harmless outcome of hitting the wrong one.
+    { key = "Enter", mods = "CMD", action = act.SendString("\n") },
   },
 }
