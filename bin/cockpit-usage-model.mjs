@@ -152,3 +152,50 @@ export function renderUsage(cache, nowMs) {
     windows,
   };
 }
+
+// --- the Aperture daily budget (the company gateway) ---
+// On a machine whose sessions run on Bedrock through the company's Tailscale
+// Aperture gateway the footer shows that gateway's budget instead of Claude's
+// rate limits. Aperture answers GetMyQuotas with buckets in NANODOLLARS that refill
+// CONTINUOUSLY at `rate` ("$100/day" measured 2026-10-02 as +$0.0700 in 60.5s,
+// i.e. ~0.07% of the bucket a minute) -- a leaky bucket, not a counter that resets,
+// so there is no reset instant to draw and only the percentage is shown. The
+// daemon polls every minute, which already tracks the refill to well under 1%,
+// so nothing here extrapolates it between polls.
+//
+// The EFFECTIVE balance/capacity is used when present: it adds the overdraft
+// buckets (e.g. "Power User Bucket") that Aperture draws from once the default one
+// is empty, so it is what can actually still be spent. A bucket without them falls
+// back to its own current/capacity. With several top-level buckets the most-used
+// one is shown, because it is the one that runs out first.
+
+// One bucket -> used percentage, or null when its numbers are missing or useless.
+function bucketUsedPct(b) {
+  if (!b || typeof b !== "object") return null;
+  const eff = b.effectiveCapacityNanodollars != null;
+  const bal = Number(eff ? b.effectiveBalanceNanodollars : b.currentNanodollars);
+  const cap = Number(eff ? b.effectiveCapacityNanodollars : b.capacityNanodollars);
+  if (!Number.isFinite(bal) || !Number.isFinite(cap) || cap <= 0) return null;
+  return Math.max(0, Math.round((1 - bal / cap) * 100));
+}
+
+// GetMyQuotas' JSON -> the cache record { writtenAt, usedPct }, or null when no
+// bucket is drawable (the caller then leaves the last reading alone).
+export function normalizeQuotas(json, nowMs) {
+  const pcts = (json && Array.isArray(json.buckets) ? json.buckets : [])
+    .map(bucketUsedPct).filter((p) => p !== null);
+  if (pcts.length === 0) return null;
+  return { writtenAt: nowMs, usedPct: Math.max(...pcts) };
+}
+
+// The cache and now -> the same shape renderUsage returns, one window with no
+// reset, so the strip formats and colours it exactly as it does Claude's.
+export function renderAperture(cache, nowMs) {
+  if (!cache || typeof cache !== "object" || typeof cache.usedPct !== "number") return null;
+  const stale = nowMs - cache.writtenAt > STALE_MS;
+  return {
+    stale,
+    asOf: stale ? hhmm(cache.writtenAt) : null,
+    windows: [{ key: "aperture", pct: cache.usedPct, role: roleFor(cache.usedPct), reset: null }],
+  };
+}

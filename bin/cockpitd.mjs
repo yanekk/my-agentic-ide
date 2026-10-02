@@ -45,6 +45,7 @@ import {
 } from "./cockpit-bitbucket-store.mjs";
 
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
+import { refreshApertureCache } from "./cockpit-aperture-client.mjs";
 // The pure half of following the pir dashboard (pir-pane DESIGN 3.1): this daemon
 // gathers the facts (file text, pid liveness, folders, git) and the model decides.
 import { decidePir, followPirReport, isPirKey, shouldReapPirKey, startingMode } from "./cockpit-pir-model.mjs";
@@ -3373,6 +3374,38 @@ async function refreshPRs(reason) {
 }
 
 // ---------------------------------------------------------------------------
+// The footer's Aperture budget: keeping aperture-cache.json current
+//
+// The same split as the agenda and the PR dashboard: the daemon fetches, the
+// footer only draws. Only on a machine whose settings.json routes Claude through
+// Bedrock (bedrockConfigured), against that same gateway's origin -- off Bedrock
+// there is no call at all and the footer shows Claude's own rate limits instead.
+// A failed fetch writes nothing: the last reading stays and the footer dims it
+// once it is 15 minutes old. Nothing but the outcome kind is logged.
+// ---------------------------------------------------------------------------
+
+// Test seams, like the PR dashboard's: a suite cannot wait a real minute, and
+// must never reach the real gateway.
+const APERTURE_TICK_MS = Number(process.env.COCKPIT_APERTURE_TICK_MS) || 60_000;
+const APERTURE_ORIGIN = process.env.COCKPIT_APERTURE_ORIGIN || "";
+let apertureFetching = false;
+
+async function refreshAperture(reason) {
+  if (apertureFetching) return;
+  apertureFetching = true;
+  try {
+    const outcome = await refreshApertureCache({ origin: APERTURE_ORIGIN || undefined });
+    // A failed pass is logged at start only: offline, a per-tick line would add one
+    // to daemon.log every minute. The footer's stale mark is the lasting signal.
+    if (outcome !== "ok" && outcome !== "off" && reason !== "tick") log(`aperture ${reason}: ${outcome}`);
+  } catch (e) {
+    log(`aperture ${reason}: pass failed, ${e?.name ?? "Error"}`);
+  } finally {
+    apertureFetching = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The dashboard's click verbs (bitbucket-dashboard T08, DESIGN 2.5/2.7/2.8/3.4)
 //
 // A click in the welcome pane's dashboard is turned into a fixed verb by
@@ -4070,6 +4103,8 @@ setInterval(() => refreshAgenda("tick"), AGENDA_TICK_MS);
 // The dashboard's every-minute trigger (bitbucket-dashboard DESIGN 2.9), own env
 // seam for the same reason the agenda's has one.
 setInterval(() => refreshPRs("tick"), PR_TICK_MS);
+// The footer's Aperture budget, every minute; a no-op off Bedrock.
+setInterval(() => refreshAperture("tick"), APERTURE_TICK_MS);
 reconcile();
 // DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
 // only fires when an agent WAS attached -- at start-up none is, so without this
@@ -4080,6 +4115,7 @@ refreshAgenda("start");
 // The dashboard's start-up trigger (bitbucket-dashboard DESIGN 2.9). Costs nothing
 // unconfigured: refreshPRs returns before any call.
 refreshPRs("start");
+refreshAperture("start");
 
 const shutdown = () => {
   stopWatchers();

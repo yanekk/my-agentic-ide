@@ -115,3 +115,40 @@ export function bedrockConfigured(file = settingsPath()) {
     return t !== "" && t !== "0" && t !== "false";
   } catch { return false; }
 }
+
+/**
+ * The company gateway's origin (scheme://host[:port]) from settings.json's
+ * env.ANTHROPIC_BEDROCK_BASE_URL -- the same gateway the sessions use, and the one
+ * that serves Aperture's GetMyQuotas -- or null when it is absent or not a URL.
+ * Never throws.
+ */
+export function bedrockGatewayOrigin(file = settingsPath()) {
+  try {
+    const url = JSON.parse(fs.readFileSync(file, "utf8"))?.env?.ANTHROPIC_BEDROCK_BASE_URL;
+    return url ? new URL(String(url)).origin : null;
+  } catch { return null; }
+}
+
+// aperture-cache.json -- { writtenAt: <ms>, usedPct: <n> }, 0600 like the usage
+// cache (it is account spend). ONE writer, the daemon, so a fixed temp is safe here,
+// as for bitbucket-cache.json; the read tolerates anything, as readCache does.
+const APERTURE_FILE = "aperture-cache.json";
+
+export function readApertureCache(dir = cockpitDir()) {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(dir, APERTURE_FILE), "utf8"));
+    const usedPct = Number(data?.usedPct);
+    if (!Number.isFinite(usedPct)) return null;
+    return { writtenAt: Number(data.writtenAt) || 0, usedPct };
+  } catch { return null; }
+}
+
+export function writeApertureCache(cache, dir = cockpitDir()) {
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, APERTURE_FILE);
+  const tmp = `${file}.tmp`;
+  const data = { writtenAt: Number(cache?.writtenAt) || 0, usedPct: Number(cache?.usedPct) || 0 };
+  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: MODE });
+  fs.chmodSync(tmp, MODE);
+  fs.renameSync(tmp, file);
+}

@@ -132,6 +132,14 @@ sessions run on Bedrock that reading describes an account the work is not spendi
 (`bedrockConfigured` in the store, re-read every repaint; `COCKPIT_CLAUDE_SETTINGS` overrides the path
 for tests).
 
+In its place the footer shows the company gateway's **Aperture** budget (added 2026-10-02): one
+`aperture NN%` window, used percentage, same roles and staleness, no reset mark. The daemon POSTs
+the gateway's `GetMyQuotas` (the RPC its `/quotas` page calls, keyless under the Tailscale identity)
+every minute to the origin of `ANTHROPIC_BEDROCK_BASE_URL` and writes `aperture-cache.json`. The bucket
+refills continuously at `$100/day` (measured +$0.0700 in 60.5s), so there is no reset instant and a
+one-minute poll needs no extrapolation. The figure is the **effective** balance, overdraft buckets
+included, since that is what can still be spent; the most-used bucket wins if there are several.
+
 Only `five_hour` and `seven_day` are read. `spend_limit` and the per-model weekly windows the
 raw endpoint exposes are ignored (§8).
 

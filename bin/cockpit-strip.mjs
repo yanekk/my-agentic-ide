@@ -28,8 +28,8 @@ import { execFileSync } from "node:child_process";
 // to draw (T05). The model returns semantic roles, never ANSI, so the colour is
 // applied here in the display layer -- and the clock (Date.now) is read here too,
 // then handed to the model as an argument (DESIGN 3.1, 3.4).
-import { readCache, bedrockConfigured } from "./cockpit-usage-store.mjs";
-import { renderUsage } from "./cockpit-usage-model.mjs";
+import { readCache, bedrockConfigured, readApertureCache } from "./cockpit-usage-store.mjs";
+import { renderUsage, renderAperture } from "./cockpit-usage-model.mjs";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
@@ -211,7 +211,8 @@ function formatUsage(u, { short = false } = {}) {
   // joined with " / " (5h / 1d / 7d) and carry no leading glyph -- the keys name
   // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
-    const text = short ? `${w.key} ${w.pct}%` : `${w.key} ${w.pct}% ↺${w.reset}`;
+    // Aperture's window has no reset (its budget refills continuously): no ↺.
+    const text = short || !w.reset ? `${w.key} ${w.pct}%` : `${w.key} ${w.pct}% ↺${w.reset}`;
     return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
   };
   const body = u.windows.map(win).join(" / ");
@@ -326,8 +327,12 @@ function renderFooter() {
   // corrupt cache, or a company Bedrock session that never wrote one): the footer
   // is byte-for-byte today's, no segment and no trimming (DESIGN 2.n, a "Done when"
   // the suite asserts). The clock is read HERE and handed to the pure model.
-  // A machine configured for Bedrock shows no usage at all (bedrockConfigured).
-  const usage = bedrockConfigured() ? null : renderUsage(readCache(), Date.now());
+  // A machine configured for Bedrock shows the company gateway's Aperture budget
+  // (the daemon's aperture-cache.json) instead of Claude's personal rate limits,
+  // which describe an account this work is not spending (bedrockConfigured).
+  const usage = bedrockConfigured()
+    ? renderAperture(readApertureCache(), Date.now())
+    : renderUsage(readCache(), Date.now());
   const usageSeg = usage ? formatUsage(usage) : "";
   const usageShort = usage ? formatUsage(usage, { short: true }) : "";
 
@@ -552,7 +557,7 @@ enableMouse(FOOTER ? (x) => onFooterClick(x) : onStripClick);
 // atomically, so a file watch would go deaf after the first rename.
 // Also watch usage-cache.json (written by the tap): a fresh reading repaints the
 // footer at once, rather than waiting up to 2s for the belt-and-braces interval.
-try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json") render(); }); } catch {}
+try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json" || name === "aperture-cache.json") render(); }); } catch {}
 process.stdout.on("resize", () => { lastFrame = null; render(); schedulePin(); });
 setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
 schedulePin();                                        // the pane may open already oversized

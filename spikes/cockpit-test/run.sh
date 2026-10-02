@@ -3255,6 +3255,20 @@ printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}' > "$T/claude-settings.json"
 footer uncommitted
 refute "Bedrock in settings.json hides the usage"  "5h 45%" "$PLAIN"
 check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
+# ...and draws the Aperture budget from aperture-cache.json in its place: one
+# percentage, no reset mark, the same role colours and the same stale dimming.
+printf '{"writtenAt":%s,"usedPct":36}' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "Bedrock draws the Aperture budget"         "aperture 36%" "$PLAIN"
+refute "...with no reset mark"                     "aperture 36% ↺" "$PLAIN"
+check  "...green under 70%"                        "$(printf '\033[32maperture 36%%')" "$RAW"
+printf '{"writtenAt":%s,"usedPct":92}' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "...red at 90% or more"                     "$(printf '\033[31maperture 92%%')" "$RAW"
+printf '{"writtenAt":%s,"usedPct":36}' "$STALE_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "a stale Aperture reading is dimmed and stamped" "$(printf '\033[2maperture 36%% · as of ')" "$RAW"
+rm -f "$SD/aperture-cache.json"
 printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}' > "$T/claude-settings.json"
 footer uncommitted
 check  "CLAUDE_CODE_USE_BEDROCK=0 still shows it"  "5h 45% ↺" "$PLAIN"

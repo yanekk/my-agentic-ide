@@ -210,6 +210,7 @@ bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): get
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
 bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what the footer's usage segment draws)
 bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer temp so concurrent sessions don't tear it)
+bin/cockpit-aperture-client.mjs  the company gateway's GetMyQuotas (keyless, Tailscale identity) and the daemon's one-minute refresh of aperture-cache.json
 bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
 bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a PIR worker that finished; still dings when one parks for the person; --install/--uninstall register it (superseding a plain afplay Stop hook)
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
@@ -219,7 +220,7 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (793 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (798 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
@@ -275,7 +276,7 @@ directly by the hook, never exported as a variable), the four BitBucket settings
 `bitbucket-key`/`bitbucket-workspace`/`bitbucket-repos`/`bitbucket-team` (one `0600` file each,
 written by `config` like the Anthropic key — `bitbucket-key` masked on read), `bitbucket-cache.json`
 (the fetched PRs per repo plus the cached `meUuid`, written by the daemon and watched by the pane)
-and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
+and `aperture-cache.json` (the company Aperture budget as `usedPct`, written by the daemon every minute only when `~/.claude/settings.json` routes Claude through Bedrock, drawn by the footer in place of Claude's own usage) and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
 click verb, read by the pane) — both `0600` (the cache holds PR titles) and **lockless**, one writer
 each so an atomic temp-then-rename covers the read/write race, all three agenda files `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to
