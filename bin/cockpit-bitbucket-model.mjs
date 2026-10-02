@@ -461,23 +461,27 @@ function greetingLines() {
   ];
 }
 
-// The tab strip (DESIGN 2.2). Active tab bold, the other dim; each carries its
-// total count so "what needs me" is answered at a glance. Returns the line and the
-// click zones (x-only; the caller stamps y once it knows the line's position).
+// The tab strip (DESIGN 2.2). Drawn like the footer's diff-mode and program
+// switches, so every clickable switch in the cockpit reads the same: the active tab
+// in reverse video padded by a space each side, the other dim, a dim ` | ` between.
+// Each carries its total count so "what needs me" is answered at a glance. Returns
+// the line and the click zones (x-only; the caller stamps y once it knows the
+// line's position); a zone covers the padding too, as the footer's do.
 function buildTabs(tab, counts) {
   const items = [
     { verb: "bb-tab:toReview", label: `To review · ${counts.toReview}`, active: tab === "toReview" },
     { verb: "bb-tab:mine", label: `Mine · ${counts.mine}`, active: tab === "mine" },
   ];
-  const SEP = "   ";
+  const SEP = " | ";
   let line = "";
   let col = 1;               // 1-indexed pane-local column of the next glyph
   const zones = [];
   items.forEach((it, i) => {
-    if (i) { line += SEP; col += SEP.length; }
+    if (i) { line += dim(SEP); col += SEP.length; }
     const x0 = col;
-    line += it.active ? bold(it.label) : dim(it.label);
-    col += visibleLen(it.label);
+    const text = it.active ? ` ${it.label} ` : it.label;
+    line += it.active ? reverse(text) : dim(text);
+    col += visibleLen(text);
     zones.push({ verb: it.verb, x0, x1: col - 1 });
   });
   return { line, zones };

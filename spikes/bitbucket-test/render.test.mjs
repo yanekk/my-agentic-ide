@@ -317,9 +317,9 @@ function main() {
     const tr = zoneFor(out.hitZones, "bb-tab:toReview");
     const mn = zoneFor(out.hitZones, "bb-tab:mine");
     ok("toReview tab zone sits on its label",
-      !!tr && visibleAt(out.lines[tr.y - 1], tr.x0, tr.x1) === "To review · 2");
+      !!tr && visibleAt(out.lines[tr.y - 1], tr.x0, tr.x1).trim() === "To review · 2");
     ok("mine tab zone sits on its label",
-      !!mn && visibleAt(out.lines[mn.y - 1], mn.x0, mn.x1) === "Mine · 0");
+      !!mn && visibleAt(out.lines[mn.y - 1], mn.x0, mn.x1).trim() === "Mine · 0");
     // Per PR: the primary button sits on [Review]; the open zone spans line one from
     // column 1 to just before the button, on the SAME line.
     for (const id of [10, 11]) {
