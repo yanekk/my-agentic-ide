@@ -131,7 +131,7 @@ export function bedrockGatewayOrigin(file = settingsPath()) {
 
 // aperture-cache.json -- { writtenAt, usedPct, balance, capacity, readings:
 // [{ t, balance }] }, nanodollars, 0600 like the usage cache (it is account spend).
-// `readings` is the last ~33 minutes of balances the forecast is made from, kept
+// `readings` is the last ~18 minutes of balances the forecast is made from, kept
 // on disk so a daemon restart does not throw the history away. ONE writer, the
 // daemon, so a fixed temp is safe here, as for bitbucket-cache.json; the read
 // tolerates anything, as readCache does, dropping malformed readings.

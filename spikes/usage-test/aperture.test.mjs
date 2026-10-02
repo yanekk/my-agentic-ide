@@ -56,8 +56,8 @@ section("normalizeQuotas");
 section("renderAperture");
 {
   const r = (usedPct, writtenAt = NOW) => renderAperture({ writtenAt, usedPct }, NOW);
-  eq("one window, no reset, fresh -- no history yet reads empty …", r(36),
-    { stale: false, asOf: null, windows: [{ key: "aperture", pct: 36, role: "ok", reset: null, eta: "empty …" }] });
+  eq("one window, no reset, fresh -- no history yet draws no forecast", r(36),
+    { stale: false, asOf: null, windows: [{ key: "aperture", pct: 36, role: "ok", reset: null, eta: null }] });
   eq("70% is warn, as the Claude windows", r(70).windows[0].role, "warn");
   eq("90% is crit", r(90).windows[0].role, "crit");
   eq("69% is ok", r(69).windows[0].role, "ok");
@@ -80,7 +80,7 @@ section("appendReading");
   eq("...and the cache carries the newest figures", [c.writtenAt, c.balance], [NOW + MIN, 149]);
   let long = null;
   for (let i = 0; i <= 45; i++) long = appendReading(long, rd(NOW + i * MIN, 150 - i));
-  eq("history older than window + gap is trimmed", long.readings[0].t, NOW + 12 * MIN);
+  eq("history older than window + gap is trimmed", long.readings[0].t, NOW + 27 * MIN);
   eq("a capacity change (new tier) restarts the history",
     appendReading(c, rd(NOW + 2 * MIN, 400, 500)).readings, [{ t: NOW + 2 * MIN, balance: 400 }]);
 }
@@ -106,11 +106,11 @@ section("forecastAperture");
     forecastAperture(series(16, (ago) => 160e9 - ago * 0.5e9)), { kind: "full", atMs: NOW + 80 * MIN });
   eq("a full tank is full now", forecastAperture(series(16, () => 200e9)), { kind: "full", atMs: null });
   eq("a dead level has no direction", forecastAperture(series(16, () => 100e9)), null);
-  // Only the last 30 minutes count: a steep fall 35+ min ago, climbing since.
-  const recent = series(40, (ago) => (ago > 30 ? 50e9 + ago * 10e9 : 100e9 - ago * 1e9));
+  // Only the last 15 minutes count: a steep fall 20+ min ago, climbing since.
+  const recent = series(25, (ago) => (ago > 15 ? 50e9 + ago * 10e9 : 100e9 - ago * 1e9));
   eq("only the last FORECAST_WINDOW_MS counts", forecastAperture(recent),
     { kind: "full", atMs: NOW + 100 * MIN });
-  eq("...the window is 30 minutes", FORECAST_WINDOW_MS, 30 * MIN);
+  eq("...the window is 15 minutes", FORECAST_WINDOW_MS, 15 * MIN);
   // A 10-minute gap (laptop asleep) 4 minutes ago: only the 4 minutes after it are
   // contiguous, which is under the 5-minute minimum.
   const gap = { capacity: 200e9, readings: [
@@ -129,10 +129,15 @@ section("renderAperture: the forecast text");
   });
   // NOW is 05:43:30 UTC; empty in 100 min -> 07:23 today.
   eq("draining: empty ~HH:MM", renderAperture(cache((ago) => 100e9 + ago * 1e9), NOW).windows[0].eta, "empty ~07:23");
-  eq("refilling: full ~HH:MM", renderAperture(cache((ago) => 160e9 - ago * 0.5e9), NOW).windows[0].eta, "full ~07:03");
-  eq("full: full now", renderAperture(cache(() => 200e9), NOW).windows[0].eta, "full now");
-  // Down $0.01/min with $100 left -> ~6.9 days away, shown with its weekday.
-  eq("a far-off time carries its weekday", renderAperture(cache((ago) => 100e9 + ago * 0.01e9), NOW).windows[0].eta, "empty ~Fri 04:23");
+  eq("refilling: nothing shown", renderAperture(cache((ago) => 160e9 - ago * 0.5e9), NOW).windows[0].eta, null);
+  eq("full: nothing shown", renderAperture(cache(() => 200e9), NOW).windows[0].eta, null);
+  eq("warming up: nothing shown", renderAperture({ ...cache(() => 100e9), readings: [{ t: NOW, balance: 100e9 }] }, NOW).windows[0].eta, null);
+  // Down $0.01/min with $100 left -> ~6.9 days away: not today, so hidden.
+  eq("an empty on a later day is hidden", renderAperture(cache((ago) => 100e9 + ago * 0.01e9), NOW).windows[0].eta, null);
+  // Down $1/min with $1100 left -> 00:02 tomorrow: just past midnight, hidden.
+  eq("an empty just past midnight is hidden", renderAperture(cache((ago) => 1098.5e9 + ago * 1e9, 2000e9), NOW).windows[0].eta, null);
+  // Down $1/min with $1000 left -> 22:23 today: shown.
+  eq("a late-evening empty today is shown", renderAperture(cache((ago) => 1000e9 + ago * 1e9, 2000e9), NOW).windows[0].eta, "empty ~22:23");
   const stale = { ...cache((ago) => 100e9 + ago * 1e9), writtenAt: NOW - STALE_MS - 1 };
   eq("stale: the forecast is dropped", renderAperture(stale, NOW).windows[0].eta, null);
 }

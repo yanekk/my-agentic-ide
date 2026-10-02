@@ -176,9 +176,10 @@ export function renderUsage(cache, nowMs) {
 // history there is no forecast; a step between readings longer than
 // READING_GAP_MS (a sleeping laptop, an offline spell) starts the history afresh,
 // so a gap never reads as a sudden refill.
-// 30 minutes, not 15: measured 2026-10-02, a 15-minute window swung the forecast
-// from Fri 13:45 to Sat 18:11 as one burst entered and left it.
-export const FORECAST_WINDOW_MS = 30 * 60 * 1000;
+// 15 minutes. 30 was tried (2026-10-02) to stop one burst swinging a far-off
+// forecast from Fri to Sat; it is 15 again because only a same-day empty is shown
+// now (renderAperture), and the short window is what makes that react to a burst.
+export const FORECAST_WINDOW_MS = 15 * 60 * 1000;
 // The minimum is "about five minutes" of one-minute polls, with slack: measured
 // 2026-10-02, six polls spanned 299927ms, so a strict 5:00 waited a whole extra
 // poll on the timer's own drift.
@@ -243,17 +244,19 @@ export function forecastAperture(cache) {
 
 // The cache and now -> the same shape renderUsage returns, one window whose
 // `reset` slot carries the forecast text instead, so the strip formats and colours
-// it exactly as it does Claude's. Stale, the forecast is dropped: it would project
-// a pace nobody has measured for 15 minutes.
+// it exactly as it does Claude's. Only an `empty ~HH:MM` that falls TODAY (local
+// date) is shown (decided 2026-10-02): a refill time, a far-off empty and the
+// warm-up all draw nothing, so the mark appears only when it is a warning. Stale,
+// the forecast is dropped: it would project a pace nobody has measured for 15 minutes.
 export function renderAperture(cache, nowMs) {
   if (!cache || typeof cache !== "object" || typeof cache.usedPct !== "number") return null;
   const stale = nowMs - cache.writtenAt > STALE_MS;
   let eta = null;
   if (!stale) {
     const f = forecastAperture(cache);
-    eta = !f ? "empty …"
-      : f.atMs === null ? "full now"
-      : `${f.kind} ~${formatReset(f.atMs / 1000, nowMs)}`;
+    if (f && f.kind === "empty" && new Date(f.atMs).toDateString() === new Date(nowMs).toDateString()) {
+      eta = `empty ~${hhmm(f.atMs)}`;
+    }
   }
   return {
     stale,

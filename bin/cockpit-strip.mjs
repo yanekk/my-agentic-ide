@@ -212,7 +212,7 @@ function formatUsage(u, { short = false } = {}) {
   // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
     // Aperture's window has no reset (its budget refills continuously), so no ↺;
-    // it carries its forecast (`empty ~15:40` / `full ~16:20`) as `eta` instead.
+    // it carries its forecast (`empty ~15:40`, only when that is today) as `eta` instead.
     const text = short ? `${w.key} ${w.pct}%`
       : w.reset ? `${w.key} ${w.pct}% ↺${w.reset}`
       : w.eta ? `${w.key} ${w.pct}% · ${w.eta}`
