@@ -115,6 +115,9 @@ section() {
 }
 
 T="$(mktemp -d)"
+# Every footer reads ~/.claude/settings.json for the Bedrock gate; point them all at
+# a scratch file (absent unless a check writes it) so the real one cannot hide usage.
+export COCKPIT_CLAUDE_SETTINGS="$T/claude-settings.json"
 # ONE EXIT trap, set here and never replaced: bash keeps only the last one set.
 # It stops every daemon/stub pid the sections below may leave set, then sweeps by
 # $T for any cockpitd a section launched without a pid variable here
@@ -3244,6 +3247,18 @@ footer uncommitted
 check  "a stale reading dims the whole segment"    "$(printf '\033[2m5h')" "$RAW"
 check  "...and stamps the write time (as of)"      "· as of " "$PLAIN"
 refute "...role colour suppressed (crit not red)"  "$(printf '\033[31m')" "$RAW"
+
+# CLAUDE_CODE_USE_BEDROCK on in ~/.claude/settings.json hides the segment even
+# with a fresh cache; "0" counts as off, as the tap reads it.
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":61,\"resetsAt\":$R7}}"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}' > "$T/claude-settings.json"
+footer uncommitted
+refute "Bedrock in settings.json hides the usage"  "5h 45%" "$PLAIN"
+check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}' > "$T/claude-settings.json"
+footer uncommitted
+check  "CLAUDE_CODE_USE_BEDROCK=0 still shows it"  "5h 45% ↺" "$PLAIN"
+rm -f "$T/claude-settings.json"
 
 # An absent cache: no usage segment, and the rest of the footer is today's -- the
 # full legend (incl. the dim secondary hints) is kept, proving nothing was trimmed.

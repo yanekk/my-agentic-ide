@@ -125,6 +125,13 @@ inspects the object. Belt and braces, because "never on the company account" is 
 requirement and a future Claude gateway could in principle attach a `spend_limit` we would not
 want to surface.
 
+The **footer** applies the same gate to the machine (decided 2026-10-02): when
+`~/.claude/settings.json` sets `env.CLAUDE_CODE_USE_BEDROCK` on, it draws no usage at all, whatever
+the cache holds. The cache keeps the last personal reading after a sign-out, and on a machine whose
+sessions run on Bedrock that reading describes an account the work is not spending
+(`bedrockConfigured` in the store, re-read every repaint; `COCKPIT_CLAUDE_SETTINGS` overrides the path
+for tests).
+
 Only `five_hour` and `seven_day` are read. `spend_limit` and the per-model weekly windows the
 raw endpoint exposes are ignored (§8).
 

@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 // to draw (T05). The model returns semantic roles, never ANSI, so the colour is
 // applied here in the display layer -- and the clock (Date.now) is read here too,
 // then handed to the model as an argument (DESIGN 3.1, 3.4).
-import { readCache } from "./cockpit-usage-store.mjs";
+import { readCache, bedrockConfigured } from "./cockpit-usage-store.mjs";
 import { renderUsage } from "./cockpit-usage-model.mjs";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
@@ -326,7 +326,8 @@ function renderFooter() {
   // corrupt cache, or a company Bedrock session that never wrote one): the footer
   // is byte-for-byte today's, no segment and no trimming (DESIGN 2.n, a "Done when"
   // the suite asserts). The clock is read HERE and handed to the pure model.
-  const usage = renderUsage(readCache(), Date.now());
+  // A machine configured for Bedrock shows no usage at all (bedrockConfigured).
+  const usage = bedrockConfigured() ? null : renderUsage(readCache(), Date.now());
   const usageSeg = usage ? formatUsage(usage) : "";
   const usageShort = usage ? formatUsage(usage, { short: true }) : "";
 

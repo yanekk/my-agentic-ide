@@ -93,3 +93,25 @@ export function writeCache(cache, dir = cockpitDir()) {
   fs.chmodSync(tmp, MODE);
   fs.renameSync(tmp, file);
 }
+
+// The Claude settings file the footer consults for the Bedrock gate below.
+// COCKPIT_CLAUDE_SETTINGS overrides it so a test never reads the real one.
+function settingsPath() {
+  return process.env.COCKPIT_CLAUDE_SETTINGS || path.join(os.homedir(), ".claude", "settings.json");
+}
+
+/**
+ * True when ~/.claude/settings.json sets env.CLAUDE_CODE_USE_BEDROCK on. The footer
+ * then draws no usage at all: the cache only ever holds a PERSONAL subscription's
+ * reading, and on a machine whose sessions run on Bedrock that reading is someone
+ * else's account (or a signed-out one), not the limits this work is spending.
+ * "On" is the tap's own reading of the flag -- present, non-empty, not 0/false.
+ * Absent, unreadable or unparseable settings read as off. Never throws.
+ */
+export function bedrockConfigured(file = settingsPath()) {
+  try {
+    const env = JSON.parse(fs.readFileSync(file, "utf8"))?.env;
+    const t = String(env?.CLAUDE_CODE_USE_BEDROCK ?? "").trim().toLowerCase();
+    return t !== "" && t !== "0" && t !== "false";
+  } catch { return false; }
+}
