@@ -140,7 +140,7 @@ refills continuously at `$100/day` per bucket (measured +$0.0700 in 60.5s; the e
 both buckets refilling), so there is no reset instant. In its place the window carries a **forecast**
 (decided 2026-10-02), always shown: `empty ~HH:MM` while the balance falls, `full ~HH:MM` while it climbs,
 `full now` at capacity, `empty …` with under 5 minutes of history. It is the NET change between the
-newest reading and the oldest within **15 minutes**, so the refill rate is never needed; a step over 3
+newest reading and the oldest within **30 minutes** (15 tried first, 2026-10-02: one burst swung it from Fri 13:45 to Sat 18:11), so the refill rate is never needed; a step over 3
 minutes between readings restarts the history, a capacity change (new tier) drops it, and the history
 is kept in the cache so a restart keeps it. Stale, the forecast is dropped. The figure is the **effective** balance, overdraft buckets
 included, since that is what can still be spent; the most-used bucket wins if there are several.

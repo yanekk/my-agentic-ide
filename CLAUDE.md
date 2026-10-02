@@ -276,7 +276,7 @@ directly by the hook, never exported as a variable), the four BitBucket settings
 `bitbucket-key`/`bitbucket-workspace`/`bitbucket-repos`/`bitbucket-team` (one `0600` file each,
 written by `config` like the Anthropic key — `bitbucket-key` masked on read), `bitbucket-cache.json`
 (the fetched PRs per repo plus the cached `meUuid`, written by the daemon and watched by the pane)
-and `aperture-cache.json` (the company Aperture budget as `usedPct` plus the last ~18 minutes of balances its `empty ~HH:MM`/`full ~HH:MM` forecast is made from, written by the daemon every minute only when `~/.claude/settings.json` routes Claude through Bedrock, drawn by the footer in place of Claude's own usage) and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
+and `aperture-cache.json` (the company Aperture budget as `usedPct` plus the last ~33 minutes of balances its `empty ~HH:MM`/`full ~HH:MM` forecast is made from, written by the daemon every minute only when `~/.claude/settings.json` routes Claude through Bedrock, drawn by the footer in place of Claude's own usage) and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
 click verb, read by the pane) — both `0600` (the cache holds PR titles) and **lockless**, one writer
 each so an atomic temp-then-rename covers the read/write race, all three agenda files `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to

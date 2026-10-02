@@ -79,7 +79,7 @@ section("appendReading");
   eq("the next is appended", c.readings.length, 2);
   eq("...and the cache carries the newest figures", [c.writtenAt, c.balance], [NOW + MIN, 149]);
   let long = null;
-  for (let i = 0; i <= 30; i++) long = appendReading(long, rd(NOW + i * MIN, 150 - i));
+  for (let i = 0; i <= 45; i++) long = appendReading(long, rd(NOW + i * MIN, 150 - i));
   eq("history older than window + gap is trimmed", long.readings[0].t, NOW + 12 * MIN);
   eq("a capacity change (new tier) restarts the history",
     appendReading(c, rd(NOW + 2 * MIN, 400, 500)).readings, [{ t: NOW + 2 * MIN, balance: 400 }]);
@@ -106,11 +106,11 @@ section("forecastAperture");
     forecastAperture(series(16, (ago) => 160e9 - ago * 0.5e9)), { kind: "full", atMs: NOW + 80 * MIN });
   eq("a full tank is full now", forecastAperture(series(16, () => 200e9)), { kind: "full", atMs: null });
   eq("a dead level has no direction", forecastAperture(series(16, () => 100e9)), null);
-  // Only the last 15 minutes count: a steep fall 20 min ago, flat-ish since, climbing.
-  const recent = series(25, (ago) => (ago > 15 ? 50e9 + ago * 10e9 : 100e9 - ago * 1e9));
+  // Only the last 30 minutes count: a steep fall 35+ min ago, climbing since.
+  const recent = series(40, (ago) => (ago > 30 ? 50e9 + ago * 10e9 : 100e9 - ago * 1e9));
   eq("only the last FORECAST_WINDOW_MS counts", forecastAperture(recent),
     { kind: "full", atMs: NOW + 100 * MIN });
-  eq("...the window is 15 minutes", FORECAST_WINDOW_MS, 15 * MIN);
+  eq("...the window is 30 minutes", FORECAST_WINDOW_MS, 30 * MIN);
   // A 10-minute gap (laptop asleep) 4 minutes ago: only the 4 minutes after it are
   // contiguous, which is under the 5-minute minimum.
   const gap = { capacity: 200e9, readings: [

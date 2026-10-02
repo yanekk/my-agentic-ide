@@ -176,7 +176,9 @@ export function renderUsage(cache, nowMs) {
 // history there is no forecast; a step between readings longer than
 // READING_GAP_MS (a sleeping laptop, an offline spell) starts the history afresh,
 // so a gap never reads as a sudden refill.
-export const FORECAST_WINDOW_MS = 15 * 60 * 1000;
+// 30 minutes, not 15: measured 2026-10-02, a 15-minute window swung the forecast
+// from Fri 13:45 to Sat 18:11 as one burst entered and left it.
+export const FORECAST_WINDOW_MS = 30 * 60 * 1000;
 // The minimum is "about five minutes" of one-minute polls, with slack: measured
 // 2026-10-02, six polls spanned 299927ms, so a strict 5:00 waited a whole extra
 // poll on the timer's own drift.
