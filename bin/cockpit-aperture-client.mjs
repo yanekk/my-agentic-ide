@@ -8,8 +8,8 @@
 // Never throws: { json } on success, { error: { kind: "transient" } } otherwise --
 // the daemon keeps the last reading and the footer marks it stale after 15 min.
 
-import { normalizeQuotas } from "./cockpit-usage-model.mjs";
-import { bedrockConfigured, bedrockGatewayOrigin, writeApertureCache } from "./cockpit-usage-store.mjs";
+import { appendReading, normalizeQuotas } from "./cockpit-usage-model.mjs";
+import { bedrockConfigured, bedrockGatewayOrigin, readApertureCache, writeApertureCache } from "./cockpit-usage-store.mjs";
 
 const PATH = "/aperture.chat.v1.ChatService/GetMyQuotas";
 // A hung gateway must not wedge the daemon's one-minute tick.
@@ -34,7 +34,8 @@ export async function getMyQuotas({ origin, timeoutMs = HTTP_TIMEOUT_MS } = {}) 
  * One refresh pass, the daemon's whole job here, kept out of cockpitd so a test
  * can drive it against a loopback stub: off Bedrock (settings.json) or with no
  * gateway origin it does nothing at all; otherwise it fetches, normalises and
- * writes aperture-cache.json. A failed or undrawable fetch writes nothing, so the
+ * writes aperture-cache.json, the reading appended to the history the forecast
+ * reads (appendReading). A failed or undrawable fetch writes nothing, so the
  * last reading stays. Returns the outcome for the log: "off" | "ok" | an error kind.
  *
  * `origin` overrides the gateway (tests); `settingsFile`/`dir` default as the store
@@ -46,8 +47,8 @@ export async function refreshApertureCache({ origin, settingsFile, dir, now = ()
   if (!target) return "off";
   const res = await getMyQuotas({ origin: target, timeoutMs });
   if (res.error) return res.error.kind;
-  const cache = normalizeQuotas(res.json, now());
-  if (!cache) return "undrawable";
-  writeApertureCache(cache, dir);
+  const reading = normalizeQuotas(res.json, now());
+  if (!reading) return "undrawable";
+  writeApertureCache(appendReading(readApertureCache(dir), reading), dir);
   return "ok";
 }

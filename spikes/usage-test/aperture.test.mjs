@@ -9,7 +9,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { section, ok, eq, done } from "./harness.mjs";
-import { normalizeQuotas, renderAperture, STALE_MS } from "../../bin/cockpit-usage-model.mjs";
+import { normalizeQuotas, renderAperture, appendReading, forecastAperture, STALE_MS, FORECAST_WINDOW_MS } from "../../bin/cockpit-usage-model.mjs";
 import { readApertureCache, writeApertureCache, bedrockGatewayOrigin } from "../../bin/cockpit-usage-store.mjs";
 import { getMyQuotas, refreshApertureCache } from "../../bin/cockpit-aperture-client.mjs";
 
@@ -35,10 +35,10 @@ const LIVE = {
 section("normalizeQuotas");
 {
   eq("the live shape uses the effective (overdraft-inclusive) figures",
-    normalizeQuotas(LIVE, NOW), { writtenAt: NOW, usedPct: 36 });
+    normalizeQuotas(LIVE, NOW), { writtenAt: NOW, balance: 128436628079, capacity: 200000000000, usedPct: 36 });
   eq("a bucket without effective figures falls back to its own",
     normalizeQuotas({ buckets: [{ currentNanodollars: "25000000000", capacityNanodollars: "100000000000" }] }, NOW),
-    { writtenAt: NOW, usedPct: 75 });
+    { writtenAt: NOW, balance: 25000000000, capacity: 100000000000, usedPct: 75 });
   eq("several buckets: the most-used one is shown",
     normalizeQuotas({ buckets: [
       { currentNanodollars: "90", capacityNanodollars: "100" },
@@ -56,8 +56,8 @@ section("normalizeQuotas");
 section("renderAperture");
 {
   const r = (usedPct, writtenAt = NOW) => renderAperture({ writtenAt, usedPct }, NOW);
-  eq("one window, no reset, fresh", r(36),
-    { stale: false, asOf: null, windows: [{ key: "aperture", pct: 36, role: "ok", reset: null }] });
+  eq("one window, no reset, fresh -- no history yet reads empty …", r(36),
+    { stale: false, asOf: null, windows: [{ key: "aperture", pct: 36, role: "ok", reset: null, eta: "empty …" }] });
   eq("70% is warn, as the Claude windows", r(70).windows[0].role, "warn");
   eq("90% is crit", r(90).windows[0].role, "crit");
   eq("69% is ok", r(69).windows[0].role, "ok");
@@ -69,12 +69,83 @@ section("renderAperture");
   eq("a cache without a percentage is null", renderAperture({ writtenAt: NOW }, NOW), null);
 }
 
+section("appendReading");
+{
+  const MIN = 60_000;
+  const rd = (t, balance, capacity = 200) => ({ writtenAt: t, usedPct: 0, balance, capacity });
+  let c = appendReading(null, rd(NOW, 150));
+  eq("the first reading starts the history", c.readings, [{ t: NOW, balance: 150 }]);
+  c = appendReading(c, rd(NOW + MIN, 149));
+  eq("the next is appended", c.readings.length, 2);
+  eq("...and the cache carries the newest figures", [c.writtenAt, c.balance], [NOW + MIN, 149]);
+  let long = null;
+  for (let i = 0; i <= 30; i++) long = appendReading(long, rd(NOW + i * MIN, 150 - i));
+  eq("history older than window + gap is trimmed", long.readings[0].t, NOW + 12 * MIN);
+  eq("a capacity change (new tier) restarts the history",
+    appendReading(c, rd(NOW + 2 * MIN, 400, 500)).readings, [{ t: NOW + 2 * MIN, balance: 400 }]);
+}
+
+section("forecastAperture");
+{
+  const MIN = 60_000;
+  // A minute series ending at NOW: balance(i) for i = 0..n-1 minutes ago.
+  const series = (n, bal, capacity = 200e9) => ({
+    capacity,
+    readings: Array.from({ length: n }, (_, k) => ({ t: NOW - (n - 1 - k) * MIN, balance: bal(n - 1 - k) })),
+  });
+  eq("no readings: no forecast", forecastAperture({ readings: [] }), null);
+  eq("under 5 minutes of history: no forecast", forecastAperture(series(5, (ago) => 100e9 + ago * 1e9)), null);
+  // Down $1/min net with $100 left -> empty in 100 minutes.
+  eq("a falling balance projects empty",
+    forecastAperture(series(16, (ago) => 100e9 + ago * 1e9)), { kind: "empty", atMs: NOW + 100 * MIN });
+  // Up $0.50/min with $40 to go -> full in 80 minutes.
+  eq("a climbing balance projects full",
+    forecastAperture(series(16, (ago) => 160e9 - ago * 0.5e9)), { kind: "full", atMs: NOW + 80 * MIN });
+  eq("a full tank is full now", forecastAperture(series(16, () => 200e9)), { kind: "full", atMs: null });
+  eq("a dead level has no direction", forecastAperture(series(16, () => 100e9)), null);
+  // Only the last 15 minutes count: a steep fall 20 min ago, flat-ish since, climbing.
+  const recent = series(25, (ago) => (ago > 15 ? 50e9 + ago * 10e9 : 100e9 - ago * 1e9));
+  eq("only the last FORECAST_WINDOW_MS counts", forecastAperture(recent),
+    { kind: "full", atMs: NOW + 100 * MIN });
+  eq("...the window is 15 minutes", FORECAST_WINDOW_MS, 15 * MIN);
+  // A 10-minute gap (laptop asleep) 4 minutes ago: only the 4 minutes after it are
+  // contiguous, which is under the 5-minute minimum.
+  const gap = { capacity: 200e9, readings: [
+    ...Array.from({ length: 5 }, (_, k) => ({ t: NOW - (18 - k) * MIN, balance: 50e9 })),
+    ...Array.from({ length: 5 }, (_, k) => ({ t: NOW - (4 - k) * MIN, balance: 120e9 - k * 1e9 })),
+  ] };
+  eq("a gap restarts the history instead of reading as a refill", forecastAperture(gap), null);
+}
+
+section("renderAperture: the forecast text");
+{
+  const MIN = 60_000;
+  const cache = (bal, capacity = 200e9) => ({
+    writtenAt: NOW, usedPct: 50, balance: bal(0), capacity,
+    readings: Array.from({ length: 16 }, (_, k) => ({ t: NOW - (15 - k) * MIN, balance: bal(15 - k) })),
+  });
+  // NOW is 05:43:30 UTC; empty in 100 min -> 07:23 today.
+  eq("draining: empty ~HH:MM", renderAperture(cache((ago) => 100e9 + ago * 1e9), NOW).windows[0].eta, "empty ~07:23");
+  eq("refilling: full ~HH:MM", renderAperture(cache((ago) => 160e9 - ago * 0.5e9), NOW).windows[0].eta, "full ~07:03");
+  eq("full: full now", renderAperture(cache(() => 200e9), NOW).windows[0].eta, "full now");
+  // Down $0.01/min with $100 left -> ~6.9 days away, shown with its weekday.
+  eq("a far-off time carries its weekday", renderAperture(cache((ago) => 100e9 + ago * 0.01e9), NOW).windows[0].eta, "empty ~Fri 04:23");
+  const stale = { ...cache((ago) => 100e9 + ago * 1e9), writtenAt: NOW - STALE_MS - 1 };
+  eq("stale: the forecast is dropped", renderAperture(stale, NOW).windows[0].eta, null);
+}
+
 section("the aperture cache and the gateway origin");
 {
   const dir = scratch();
   eq("absent cache reads null", readApertureCache(dir), null);
   writeApertureCache({ writtenAt: NOW, usedPct: 36 }, dir);
-  eq("write then read round-trips", readApertureCache(dir), { writtenAt: NOW, usedPct: 36 });
+  eq("a bare cache reads back with empty history", readApertureCache(dir),
+    { writtenAt: NOW, usedPct: 36, balance: null, capacity: null, readings: [] });
+  const full = { writtenAt: NOW, usedPct: 36, balance: 128, capacity: 200, readings: [{ t: NOW - 60000, balance: 130 }, { t: NOW, balance: 128 }] };
+  writeApertureCache(full, dir);
+  eq("write then read round-trips the readings", readApertureCache(dir), full);
+  fs.writeFileSync(path.join(dir, "aperture-cache.json"), JSON.stringify({ ...full, readings: [{ t: "x" }, null, { t: NOW, balance: 5 }] }));
+  eq("malformed readings are dropped", readApertureCache(dir).readings, [{ t: NOW, balance: 5 }]);
   eq("...at 0600", fs.statSync(path.join(dir, "aperture-cache.json")).mode & 0o777, 0o600);
   eq("...leaving no temp", fs.readdirSync(dir).filter((f) => f.endsWith(".tmp")), []);
   fs.writeFileSync(path.join(dir, "aperture-cache.json"), "{ broken");
@@ -137,11 +208,12 @@ section("refreshApertureCache");
 
   put({ CLAUDE_CODE_USE_BEDROCK: "1" });
   eq("on Bedrock: one fetch, cache written", [await pass(), hits.length], ["ok", 1]);
-  eq("...holding the used percentage", readApertureCache(dir), { writtenAt: NOW, usedPct: 36 });
+  eq("...holding the used percentage and the first reading",
+    [readApertureCache(dir).usedPct, readApertureCache(dir).readings], [36, [{ t: NOW, balance: 128436628079 }]]);
 
   mode = "500";
   eq("a failed fetch reports its kind", await refreshApertureCache({ origin: ORIGIN, settingsFile, dir, now: () => NOW + 60_000 }), "transient");
-  eq("...and keeps the last reading", readApertureCache(dir), { writtenAt: NOW, usedPct: 36 });
+  eq("...and keeps the last reading", [readApertureCache(dir).writtenAt, readApertureCache(dir).readings.length], [NOW, 1]);
   mode = "empty";
   eq("an undrawable answer writes nothing", [await pass(), readApertureCache(dir).usedPct], ["undrawable", 36]);
 

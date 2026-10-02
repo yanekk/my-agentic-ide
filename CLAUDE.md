@@ -220,7 +220,7 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (798 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (800 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
@@ -276,7 +276,7 @@ directly by the hook, never exported as a variable), the four BitBucket settings
 `bitbucket-key`/`bitbucket-workspace`/`bitbucket-repos`/`bitbucket-team` (one `0600` file each,
 written by `config` like the Anthropic key — `bitbucket-key` masked on read), `bitbucket-cache.json`
 (the fetched PRs per repo plus the cached `meUuid`, written by the daemon and watched by the pane)
-and `aperture-cache.json` (the company Aperture budget as `usedPct`, written by the daemon every minute only when `~/.claude/settings.json` routes Claude through Bedrock, drawn by the footer in place of Claude's own usage) and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
+and `aperture-cache.json` (the company Aperture budget as `usedPct` plus the last ~18 minutes of balances its `empty ~HH:MM`/`full ~HH:MM` forecast is made from, written by the daemon every minute only when `~/.claude/settings.json` routes Claude through Bedrock, drawn by the footer in place of Claude's own usage) and `bitbucket-view.json` (the session's active tab and per-tab page, written by the daemon on a
 click verb, read by the pane) — both `0600` (the cache holds PR titles) and **lockless**, one writer
 each so an atomic temp-then-rename covers the read/write race, all three agenda files `0600` — the cache included, it holds your meeting titles — under
 one shared `agenda.lock`, `bin/note`, `bin/agenda` and `bin/config` (symlinks to

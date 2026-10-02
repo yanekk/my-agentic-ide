@@ -157,45 +157,102 @@ export function renderUsage(cache, nowMs) {
 // On a machine whose sessions run on Bedrock through the company's Tailscale
 // Aperture gateway the footer shows that gateway's budget instead of Claude's
 // rate limits. Aperture answers GetMyQuotas with buckets in NANODOLLARS that refill
-// CONTINUOUSLY at `rate` ("$100/day" measured 2026-10-02 as +$0.0700 in 60.5s,
-// i.e. ~0.07% of the bucket a minute) -- a leaky bucket, not a counter that resets,
-// so there is no reset instant to draw and only the percentage is shown. The
-// daemon polls every minute, which already tracks the refill to well under 1%,
-// so nothing here extrapolates it between polls.
+// CONTINUOUSLY at `rate` ("$100/day" per bucket; measured 2026-10-02 as +$0.0700
+// in 60.5s) -- a leaky bucket, not a counter that resets, so there is no reset
+// instant. What the footer adds instead is a FORECAST: `empty ~HH:MM` while the
+// balance falls, `full ~HH:MM` while it climbs back.
 //
 // The EFFECTIVE balance/capacity is used when present: it adds the overdraft
-// buckets (e.g. "Power User Bucket") that Aperture draws from once the default one
-// is empty, so it is what can actually still be spent. A bucket without them falls
-// back to its own current/capacity. With several top-level buckets the most-used
-// one is shown, because it is the one that runs out first.
+// buckets Aperture draws from once the default one is empty (their names and
+// sizes come from the response, never from here), so it is what can actually
+// still be spent. A bucket without them falls back to its own current/capacity.
+// With several top-level buckets the most-used one is shown, because it is the
+// one that runs out first.
 
-// One bucket -> used percentage, or null when its numbers are missing or useless.
-function bucketUsedPct(b) {
+// The forecast compares the newest reading with the oldest one at most
+// FORECAST_WINDOW_MS older. The NET change already has the refill in it, so the
+// refill rate is never needed (the effective tank measured +$0.14/min, twice the
+// "$100/day" label, because both buckets refill). Below FORECAST_MIN_SPAN_MS of
+// history there is no forecast; a step between readings longer than
+// READING_GAP_MS (a sleeping laptop, an offline spell) starts the history afresh,
+// so a gap never reads as a sudden refill.
+export const FORECAST_WINDOW_MS = 15 * 60 * 1000;
+export const FORECAST_MIN_SPAN_MS = 5 * 60 * 1000;
+export const READING_GAP_MS = 3 * 60 * 1000;
+
+// One bucket -> { balance, capacity, usedPct }, or null when its numbers are
+// missing or useless.
+function bucketFigures(b) {
   if (!b || typeof b !== "object") return null;
   const eff = b.effectiveCapacityNanodollars != null;
-  const bal = Number(eff ? b.effectiveBalanceNanodollars : b.currentNanodollars);
-  const cap = Number(eff ? b.effectiveCapacityNanodollars : b.capacityNanodollars);
-  if (!Number.isFinite(bal) || !Number.isFinite(cap) || cap <= 0) return null;
-  return Math.max(0, Math.round((1 - bal / cap) * 100));
+  const balance = Number(eff ? b.effectiveBalanceNanodollars : b.currentNanodollars);
+  const capacity = Number(eff ? b.effectiveCapacityNanodollars : b.capacityNanodollars);
+  if (!Number.isFinite(balance) || !Number.isFinite(capacity) || capacity <= 0) return null;
+  return { balance, capacity, usedPct: Math.max(0, Math.round((1 - balance / capacity) * 100)) };
 }
 
-// GetMyQuotas' JSON -> the cache record { writtenAt, usedPct }, or null when no
-// bucket is drawable (the caller then leaves the last reading alone).
+// GetMyQuotas' JSON -> { writtenAt, usedPct, balance, capacity } for the most-used
+// bucket, or null when no bucket is drawable (the caller then leaves the last
+// reading alone).
 export function normalizeQuotas(json, nowMs) {
-  const pcts = (json && Array.isArray(json.buckets) ? json.buckets : [])
-    .map(bucketUsedPct).filter((p) => p !== null);
-  if (pcts.length === 0) return null;
-  return { writtenAt: nowMs, usedPct: Math.max(...pcts) };
+  const figs = (json && Array.isArray(json.buckets) ? json.buckets : [])
+    .map(bucketFigures).filter(Boolean);
+  if (figs.length === 0) return null;
+  const worst = figs.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+  return { writtenAt: nowMs, ...worst };
 }
 
-// The cache and now -> the same shape renderUsage returns, one window with no
-// reset, so the strip formats and colours it exactly as it does Claude's.
+// The previous cache plus a fresh normalised reading -> the cache to write, with
+// the reading appended to `readings` ({ t, balance }) and the history trimmed to
+// what a forecast can use. A capacity change (a new tier, an overdraft added or
+// removed) drops the history: the balance jumps with it, and that jump is not
+// spending.
+export function appendReading(prev, reading) {
+  const keepFrom = reading.writtenAt - FORECAST_WINDOW_MS - READING_GAP_MS;
+  const old = prev && prev.capacity === reading.capacity && Array.isArray(prev.readings) ? prev.readings : [];
+  const readings = old
+    .filter((r) => r && r.t >= keepFrom && r.t < reading.writtenAt)
+    .concat({ t: reading.writtenAt, balance: reading.balance });
+  return { ...reading, readings };
+}
+
+// The forecast, or null when there is too little history: { kind: "empty"|"full",
+// atMs } or { kind: "full", atMs: null } when the tank is already full. Built from
+// the newest contiguous run of readings, newest vs the oldest within the window.
+export function forecastAperture(cache) {
+  const rs = Array.isArray(cache?.readings) ? cache.readings : [];
+  if (rs.length === 0) return null;
+  const last = rs[rs.length - 1];
+  if (cache.capacity > 0 && last.balance >= cache.capacity) return { kind: "full", atMs: null };
+  let first = rs.length - 1;
+  while (first > 0 && rs[first].t - rs[first - 1].t <= READING_GAP_MS
+         && last.t - rs[first - 1].t <= FORECAST_WINDOW_MS) first--;
+  const base = rs[first];
+  const span = last.t - base.t;
+  if (span < FORECAST_MIN_SPAN_MS) return null;
+  const perMs = (last.balance - base.balance) / span;   // net: refill minus spend
+  if (perMs < 0) return { kind: "empty", atMs: last.t + last.balance / -perMs };
+  if (perMs > 0) return { kind: "full", atMs: last.t + (cache.capacity - last.balance) / perMs };
+  return null;                                            // dead level: no direction
+}
+
+// The cache and now -> the same shape renderUsage returns, one window whose
+// `reset` slot carries the forecast text instead, so the strip formats and colours
+// it exactly as it does Claude's. Stale, the forecast is dropped: it would project
+// a pace nobody has measured for 15 minutes.
 export function renderAperture(cache, nowMs) {
   if (!cache || typeof cache !== "object" || typeof cache.usedPct !== "number") return null;
   const stale = nowMs - cache.writtenAt > STALE_MS;
+  let eta = null;
+  if (!stale) {
+    const f = forecastAperture(cache);
+    eta = !f ? "empty …"
+      : f.atMs === null ? "full now"
+      : `${f.kind} ~${formatReset(f.atMs / 1000, nowMs)}`;
+  }
   return {
     stale,
     asOf: stale ? hhmm(cache.writtenAt) : null,
-    windows: [{ key: "aperture", pct: cache.usedPct, role: roleFor(cache.usedPct), reset: null }],
+    windows: [{ key: "aperture", pct: cache.usedPct, role: roleFor(cache.usedPct), reset: null, eta }],
   };
 }

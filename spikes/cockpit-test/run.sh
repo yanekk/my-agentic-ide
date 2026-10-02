@@ -3262,6 +3262,13 @@ footer uncommitted
 check  "Bedrock draws the Aperture budget"         "aperture 36%" "$PLAIN"
 refute "...with no reset mark"                     "aperture 36% ↺" "$PLAIN"
 check  "...green under 70%"                        "$(printf '\033[32maperture 36%%')" "$RAW"
+check  "...with no history yet, no forecast"       "aperture 36% · empty …" "$PLAIN"
+# Fifteen minutes falling $1/min with $100 left: empty in 100 minutes. The exact
+# time string is the model's own test; here only the shape is asserted.
+node -e 'const n=+process.argv[1],r=[];for(let k=0;k<16;k++)r.push({t:n-(15-k)*60000,balance:(100+(15-k))*1e9});
+  process.stdout.write(JSON.stringify({writtenAt:n,usedPct:50,balance:100e9,capacity:200e9,readings:r}))' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "a falling balance draws empty ~"           "aperture 50% · empty ~" "$PLAIN"
 printf '{"writtenAt":%s,"usedPct":92}' "$NOW_MS" > "$SD/aperture-cache.json"
 footer uncommitted
 check  "...red at 90% or more"                     "$(printf '\033[31maperture 92%%')" "$RAW"

@@ -136,8 +136,13 @@ In its place the footer shows the company gateway's **Aperture** budget (added 2
 `aperture NN%` window, used percentage, same roles and staleness, no reset mark. The daemon POSTs
 the gateway's `GetMyQuotas` (the RPC its `/quotas` page calls, keyless under the Tailscale identity)
 every minute to the origin of `ANTHROPIC_BEDROCK_BASE_URL` and writes `aperture-cache.json`. The bucket
-refills continuously at `$100/day` (measured +$0.0700 in 60.5s), so there is no reset instant and a
-one-minute poll needs no extrapolation. The figure is the **effective** balance, overdraft buckets
+refills continuously at `$100/day` per bucket (measured +$0.0700 in 60.5s; the effective tank +$0.14/min,
+both buckets refilling), so there is no reset instant. In its place the window carries a **forecast**
+(decided 2026-10-02), always shown: `empty ~HH:MM` while the balance falls, `full ~HH:MM` while it climbs,
+`full now` at capacity, `empty …` with under 5 minutes of history. It is the NET change between the
+newest reading and the oldest within **15 minutes**, so the refill rate is never needed; a step over 3
+minutes between readings restarts the history, a capacity change (new tier) drops it, and the history
+is kept in the cache so a restart keeps it. Stale, the forecast is dropped. The figure is the **effective** balance, overdraft buckets
 included, since that is what can still be spent; the most-used bucket wins if there are several.
 
 Only `five_hour` and `seven_day` are read. `spend_limit` and the per-model weekly windows the
