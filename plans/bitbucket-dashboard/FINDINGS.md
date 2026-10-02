@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-02 | 🐞 | cribl (1004 open PRs) failed every pass, startup included: default PR objects were 20MB, 21 pages at 3-4.6s against the 10s timeout, 70s a repo. `fields` whitelist plus pages fetched by number, 5 at once: 7.4s. |
 | 2026-09-05 | ✅ | T09 live spawn hand-verified with the user: clicking Review and clicking Address each start a real agent (not just text filling the box). The spawn primitive works live for both buttons — the payoff gesture. T09 closed ✅. |
 | 2026-09-05 | ✅ | T08 core hand-verified with the user: tab clicks switch the table; a bottom-row Open opened the right PR — real clicks land on the drawn row. Live paging unseen (9 PRs fit one page, no pager). Tab switch now resets to page 1 (DESIGN 2.5, §14d test), confirmed live. |
 | 2026-09-05 | 🐞 | T08 hand-check: wheel-fires-click is REAL — a scroll-up over Open fired a stray Open. WezTerm forwards the wheel under 1000h as button 64, whose low two bits are 0, so it passed the left-click filter. Fixed by excluding bit 64 in both mouse readers (welcome + strip); re-confirmed live 2026-09-05 — no stray click on scroll. |

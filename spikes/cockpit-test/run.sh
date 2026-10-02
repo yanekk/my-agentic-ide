@@ -4045,7 +4045,7 @@ waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
   bqtrue "$S4" 'c.meUuid==="ME-UUID" && !!c.repos.alpha && c.repos.alpha.error===null'
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
-check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
+check "...with the approval fields whitelisted"   "values.participants.approved,values.participants.user.uuid,values.reviewers.uuid" "$BBHITS"
 same  "a repo's raw PRs land in the cache"        "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 same  "...untouched -- the raw title, not a normalised row" "$(bq "$S4" 'c.repos.alpha.prs[0].title')" "SECRET-PR-TITLE"
 same  "...with a fresh fetchedAt"                 "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"

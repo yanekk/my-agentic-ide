@@ -129,16 +129,41 @@ function prsUrl(origin, workspace, repo) {
     `${baseOrigin(origin)}/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests`,
   );
   // Native `state` filter over a `q=state="OPEN"` query -- both work (FINDINGS
-  // 2026-09-03), this one is simpler. The field expansion is what makes one call
-  // enough: `participants` (approvals) and `reviewers` are absent from the default
-  // list response (DESIGN 2.4, 2.9). URLSearchParams encodes the leading `+` as
-  // `%2B`, which is required -- a literal `+` would be read as a space and drop the
-  // expansion.
+  // 2026-09-03), this one is simpler. `participants` (approvals) and `reviewers` are
+  // absent from the default list response (DESIGN 2.4, 2.9), so they must be named.
   u.searchParams.set("state", "OPEN");
-  u.searchParams.set("fields", "+values.participants,+values.reviewers");
-  u.searchParams.set("pagelen", "50");
+  u.searchParams.set("fields", PR_FIELDS);
+  u.searchParams.set("pagelen", String(PR_PAGELEN));
   return u.toString();
 }
+
+// An explicit WHITELIST, not the `+values.participants,+values.reviewers` expansion
+// of the default object it replaced. The default object carries the description
+// three times over (raw, markup, rendered html) plus a dozen links, and measured
+// against cribl's 1004 open PRs (2026-10-02) that was 20MB in 21 pages of 3-4.6s
+// each -- 70s a repo, with every page close enough to the 10s timeout that one slow
+// one failed the whole repo, on startup too. Whitelisted it is 1.4MB at ~1.2s a
+// page. These are exactly the fields normalizePR and bitbucketPrUrl read; a new
+// reader of a raw PR field must add it here or it will read undefined. `size` is
+// what lets the remaining pages be fetched by number, in parallel (listOpenPRs).
+const PR_FIELDS = [
+  "size", "next",
+  "values.id", "values.title", "values.draft", "values.comment_count",
+  "values.created_on", "values.updated_on",
+  "values.author.uuid", "values.author.nickname",
+  "values.participants.approved", "values.participants.user.uuid",
+  "values.reviewers.uuid",
+  "values.links.html.href",
+  "values.source.branch.name",
+  "values.destination.branch.name", "values.destination.repository.name",
+].join(",");
+const PR_PAGELEN = 50;       // the endpoint's maximum
+
+// How many pages after the first are in flight at once. Sequential, cribl's 21
+// pages took 25s even whitelisted; 5 at a time took 7.5s, 20 at a time 3.3s
+// (2026-10-02). 5 keeps the burst gentle on a shared rate limit -- the request
+// COUNT is the same either way, only the wall clock changes.
+const PAGE_CONCURRENCY = 5;
 
 // --- the two calls ---------------------------------------------------------
 
@@ -171,12 +196,46 @@ export async function getUser({ key, origin } = {}) {
  */
 export async function listOpenPRs({ key, workspace, repo, origin } = {}) {
   try {
-    const prs = [];
-    let url = prsUrl(origin, workspace, repo);
-    for (let page = 0; url && page < MAX_PAGES; page++) {
-      const data = await getJson(url, key);
-      if (Array.isArray(data.values)) prs.push(...data.values);
-      url = typeof data.next === "string" ? data.next : "";
+    const first = prsUrl(origin, workspace, repo);
+    const data = await getJson(first, key);
+    const prs = Array.isArray(data.values) ? [...data.values] : [];
+    const size = Number(data.size);
+    const pages = Math.min(MAX_PAGES, Math.ceil(size / PR_PAGELEN));
+
+    if (typeof data.next === "string" && Number.isFinite(size) && pages > 1) {
+      // `size` says how many pages there are, so pages 2..N are asked for by number
+      // and fetched PAGE_CONCURRENCY at a time instead of walking `next` one by one.
+      // Any page failing fails the repo, as before. A PR opened or closed mid-fetch
+      // can shift one across a page boundary -- the duplicate is dropped by id here,
+      // a PR skipped that way reappears on the next minute's pass.
+      const nums = [];
+      for (let p = 2; p <= pages; p++) nums.push(p);
+      const byPage = [];
+      for (let i = 0; i < nums.length; i += PAGE_CONCURRENCY) {
+        const batch = nums.slice(i, i + PAGE_CONCURRENCY);
+        byPage.push(...(await Promise.all(batch.map((p) => {
+          const u = new URL(first);
+          u.searchParams.set("page", String(p));
+          return getJson(u.toString(), key);
+        }))));
+      }
+      const seen = new Set(prs.map((pr) => pr && pr.id));
+      for (const d of byPage) {
+        for (const pr of Array.isArray(d.values) ? d.values : []) {
+          if (seen.has(pr && pr.id)) continue;
+          seen.add(pr && pr.id);
+          prs.push(pr);
+        }
+      }
+      return { prs };
+    }
+
+    // No usable `size` (a server that omits it): walk `next` to completion.
+    let url = typeof data.next === "string" ? data.next : "";
+    for (let page = 1; url && page < MAX_PAGES; page++) {
+      const d = await getJson(url, key);
+      if (Array.isArray(d.values)) prs.push(...d.values);
+      url = typeof d.next === "string" ? d.next : "";
     }
     return { prs };
   } catch (e) {

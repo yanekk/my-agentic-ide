@@ -86,7 +86,7 @@ async function main() {
     await stub.close();
   }
 
-  section("listOpenPRs sends state=OPEN and the participants+reviewers expansion");
+  section("listOpenPRs sends state=OPEN and a whitelist naming every field the model reads");
   {
     const stub = await startStub();
     stub.respond = () => ({ status: 200, body: { values: [{ id: 1 }] } });
@@ -95,9 +95,48 @@ async function main() {
     const u = new URL(stub.requests[0].url, stub.origin);
     ok("the path names the workspace and repo", u.pathname === "/2.0/repositories/acme/web/pullrequests", u.pathname);
     eq("state is OPEN", u.searchParams.get("state"), "OPEN");
-    eq("fields expands participants and reviewers", u.searchParams.get("fields"), "+values.participants,+values.reviewers");
+    const fields = (u.searchParams.get("fields") || "").split(",");
+    ok("fields is a whitelist, not a + expansion", fields.length > 0 && fields.every((f) => !f.startsWith("+")), fields.join(","));
+    for (const f of ["size", "next", "values.id", "values.title", "values.draft", "values.comment_count",
+      "values.created_on", "values.updated_on", "values.author.uuid", "values.author.nickname",
+      "values.participants.approved", "values.participants.user.uuid", "values.reviewers.uuid",
+      "values.links.html.href", "values.source.branch.name", "values.destination.branch.name"]) {
+      ok(`fields names ${f}`, fields.includes(f));
+    }
     eq("pagelen is 50", u.searchParams.get("pagelen"), "50");
 
+    await stub.close();
+  }
+
+  section("with `size`, pages 2..N are fetched by number, all of them, deduped by id");
+  {
+    const stub = await startStub();
+    // size 230 in pages of 50 is 5 pages. Page 3
+    // repeats an id from page 2 (a PR that shifted mid-fetch) -- it must appear once.
+    stub.respond = (req) => {
+      const page = Number(new URL(req.url, stub.origin).searchParams.get("page") || 1);
+      const ids = page === 3 ? [200, 300] : [page * 100];
+      return { status: 200, body: { size: 230, values: ids.map((id) => ({ id })), next: page < 5 ? `${stub.origin}/n` : undefined } };
+    };
+    const r = await listOpenPRs({ key: "e:t", workspace: "acme", repo: "web", origin: stub.origin });
+    eq("one request per page, never the `next` url", stub.requests.length, 5);
+    const asked = stub.requests.map((q) => new URL(q.url, stub.origin).searchParams.get("page")).slice(1).sort();
+    eq("pages 2..5 asked for by number", asked, ["2", "3", "4", "5"]);
+    ok("every later page keeps the whitelist", stub.requests.slice(1).every((q) => /values\.id/.test(decodeURIComponent(q.url))));
+    eq("all PRs, page order, duplicate dropped", r.prs.map((p) => p.id), [100, 200, 300, 400, 500]);
+    await stub.close();
+  }
+
+  section("a failing later page fails the whole repo");
+  {
+    const stub = await startStub();
+    stub.respond = (req) => {
+      const page = Number(new URL(req.url, stub.origin).searchParams.get("page") || 1);
+      if (page === 4) return { status: 500, body: {} };
+      return { status: 200, body: { size: 230, values: [{ id: page }], next: `${stub.origin}/n` } };
+    };
+    const r = await listOpenPRs({ key: "e:t", workspace: "acme", repo: "web", origin: stub.origin });
+    eq("transient, no partial list", r, { error: { kind: "transient" } });
     await stub.close();
   }
 
