@@ -527,7 +527,7 @@ function main() {
   section("the row separator is a dedicated dim `────` line drawn between PRs (DESIGN 2.6, revised)");
   {
     // One PR: no separator at all (between-only), so it still occupies exactly line one
-    // then line two, then blanks -- tabs (1) + header (1) + line one + line two.
+    // then line two, then blanks -- blank + tabs + blank + header + line one + line two.
     const pr = raw({
       id: 70, reviewers: [{ uuid: ME }], authorUuid: "{o}", title: "sep",
       created: iso(NOW - 3 * HOUR), sourceBranch: "feat/x", destBranch: "main",
@@ -538,8 +538,8 @@ function main() {
     const l2 = out.lines[i + 1];
     ok("line two no longer carries an underline (the rule is a dedicated line now)", !l2.includes(`${ESC}4m`));
     ok("line two draws no PR number (it is the second line, not a new row)", !plain(l2).includes("#70"));
-    eq("one PR occupies line one then line two, nothing more", i, 2);   // 0:tabs 1:header 2:l1 3:l2
-    for (let k = 4; k < out.lines.length; k++) eq(`line ${k} is blank padding (no rule after a lone PR)`, plain(out.lines[k]), "");
+    eq("one PR occupies line one then line two, nothing more", i, 4);   // 0:blank 1:tabs 2:blank 3:header 4:l1 5:l2
+    for (let k = 6; k < out.lines.length; k++) eq(`line ${k} is blank padding (no rule after a lone PR)`, plain(out.lines[k]), "");
 
     // Two PRs: a dim full-width `────` sits BETWEEN them, and not after the last.
     const two = [
@@ -562,22 +562,22 @@ function main() {
   {
     const prs = [];
     for (let i = 1; i <= 20; i++) prs.push(raw({ id: i, reviewers: [{ uuid: ME }], authorUuid: "{o}" }));
-    // rows 12 -> avail 10 -> floor((10+1)/3)=3 PRs; overflow adds a pager -> avail-1=9 ->
-    // floor((9+1)/3)=3 PRs/page. 3 PRs = 6 lines + 2 rules = 8, + tabs/header/pager = 11 <= 12.
-    const out = renderDashboard({ width: 90, rows: 12, cache: cacheOf(prs), view: view(), now: NOW, config: cfg() });
+    // rows 14 -> avail 10 (blank/tabs/blank/header take 4) -> floor((10+1)/3)=3 PRs; overflow adds a pager -> avail-1=9 ->
+    // floor((9+1)/3)=3 PRs/page. 3 PRs = 6 lines + 2 rules = 8, + blank/tabs/blank/header/pager = 13 <= 14.
+    const out = renderDashboard({ width: 90, rows: 14, cache: cacheOf(prs), view: view(), now: NOW, config: cfg() });
     const shown = out.lines.filter((l) => /#\d/.test(plain(l))).length;
-    eq("three PRs fit a 12-row pane with a pager and the between-PR rules", shown, 3);
+    eq("three PRs fit a 14-row pane with a pager and the between-PR rules", shown, 3);
     ok("a pager is drawn", out.lines.some((l) => /\d\/\d/.test(plain(l))));
     eq("seven pages of twenty", out.pages, 7);
-    contracts("pagination-20", out, 90, 12);
+    contracts("pagination-20", out, 90, 14);
 
     // Page 2 shows PRs 4..6.
-    const p2 = renderDashboard({ width: 90, rows: 12, cache: cacheOf(prs), view: view({ page: { toReview: 2, mine: 1 } }), now: NOW, config: cfg() });
+    const p2 = renderDashboard({ width: 90, rows: 14, cache: cacheOf(prs), view: view({ page: { toReview: 2, mine: 1 } }), now: NOW, config: cfg() });
     ok("page 2 opens at #4", !!rowWith(p2.lines, "#4"));
     ok("page 2 has dropped #1", !rowWith(p2.lines, "#1"));
 
     // A remembered page far past the shrunk end falls back to page 1.
-    const p99 = renderDashboard({ width: 90, rows: 12, cache: cacheOf(prs), view: view({ page: { toReview: 99, mine: 1 } }), now: NOW, config: cfg() });
+    const p99 = renderDashboard({ width: 90, rows: 14, cache: cacheOf(prs), view: view({ page: { toReview: 99, mine: 1 } }), now: NOW, config: cfg() });
     ok("an out-of-range page falls back to page 1", !!rowWith(p99.lines, "#1"));
   }
 

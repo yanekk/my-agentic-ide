@@ -861,21 +861,25 @@ export function renderDashboard({ width, rows, cache, view, now, config, emphasi
   // one line you can act on is not the first pushed off the bottom.
   const trailer = buildTrailer(cfgRepos, cacheRepos, now, w);
 
+  // The tab line sits between two blank lines, so it reads as the pane's switch
+  // rather than as the table's first row.
   const tabs = buildTabs(tab, { toReview: toReview.length, mine: mine.length });
+  push("");
   push(tabs.line);
   zonesAt(tabs.zones);
+  push("");
 
   if (list.length === 0) {
     // A one-line "checked, all clear" beats an empty table reading as broken (2.n).
     push(dim(tab === "mine" ? "nothing of yours open" : "nothing waiting on you"));
   } else {
-    // Budget: tabs (1) + header (1) reserved above the rows; the pager, only when the
+    // Budget: tabs (1 + a blank either side) + header (1) reserved above the rows; the pager, only when the
     // list overflows one page, costs one more row. Each PR is TWO lines (DESIGN 2) plus a
     // dedicated `────` separator BETWEEN consecutive PRs (DESIGN 2.6, revised 2026-09-06):
     // k PRs cost 2k + (k-1) = 3k - 1 lines, so the largest k with 3k - 1 <= avail is
     // floor((avail + 1) / 3). paginate still takes and returns a PR count.
     const perPageFor = (a) => Math.max(1, Math.floor((a + 1) / 3));
-    const avail = Math.max(0, n - 2 - trailer.length);
+    const avail = Math.max(0, n - 4 - trailer.length);
     let perPage = perPageFor(avail);
     let paged = paginate(list, { page, perPage });
     if (paged.pages > 1) {
