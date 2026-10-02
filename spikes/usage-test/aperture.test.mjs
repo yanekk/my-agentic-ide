@@ -95,6 +95,9 @@ section("forecastAperture");
   });
   eq("no readings: no forecast", forecastAperture({ readings: [] }), null);
   eq("under 5 minutes of history: no forecast", forecastAperture(series(5, (ago) => 100e9 + ago * 1e9)), null);
+  // Six polls a hair under five minutes apart (measured 299927ms) do forecast.
+  const drift = { capacity: 200e9, readings: Array.from({ length: 6 }, (_, k) => ({ t: NOW - (5 - k) * 59985, balance: (100 + (5 - k)) * 1e9 })) };
+  eq("six one-minute polls with timer drift do forecast", forecastAperture(drift)?.kind, "empty");
   // Down $1/min net with $100 left -> empty in 100 minutes.
   eq("a falling balance projects empty",
     forecastAperture(series(16, (ago) => 100e9 + ago * 1e9)), { kind: "empty", atMs: NOW + 100 * MIN });

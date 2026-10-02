@@ -177,7 +177,10 @@ export function renderUsage(cache, nowMs) {
 // READING_GAP_MS (a sleeping laptop, an offline spell) starts the history afresh,
 // so a gap never reads as a sudden refill.
 export const FORECAST_WINDOW_MS = 15 * 60 * 1000;
-export const FORECAST_MIN_SPAN_MS = 5 * 60 * 1000;
+// The minimum is "about five minutes" of one-minute polls, with slack: measured
+// 2026-10-02, six polls spanned 299927ms, so a strict 5:00 waited a whole extra
+// poll on the timer's own drift.
+export const FORECAST_MIN_SPAN_MS = 4.5 * 60 * 1000;
 export const READING_GAP_MS = 3 * 60 * 1000;
 
 // One bucket -> { balance, capacity, usedPct }, or null when its numbers are
