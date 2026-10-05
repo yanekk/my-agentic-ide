@@ -269,6 +269,16 @@ async function main() {
     await stub.close();
   }
 
+  section("a PR repeated on one page (one row per matching reviewer) is kept once");
+  {
+    const stub = await startStub();
+    // Live 2026-10-05: a q on reviewers.uuid returned sdet-tools' 8 PRs as 43 rows.
+    stub.respond = () => ({ status: 200, body: { size: 5, values: [{ id: 151 }, { id: 151 }, { id: 91 }, { id: 151 }, { id: 91 }] } });
+    const r = await listOpenPRs({ key: "e:t", workspace: "w", repo: "r", origin: stub.origin, query: "q" });
+    eq("each PR once, first-seen order", r.prs.map((p) => p.id), [151, 91]);
+    await stub.close();
+  }
+
   section("a 429 is limited, on every call, not transient");
   {
     const stub = await startStub();

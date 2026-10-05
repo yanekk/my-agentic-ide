@@ -227,7 +227,7 @@ spikes/cockpit-test/    integration test, wezterm stubbed (812 checks, ~107s med
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
-spikes/bitbucket-test/  the dashboard's model, client, store, config and render (515)
+spikes/bitbucket-test/  the dashboard's model, client, store, config and render (516)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)

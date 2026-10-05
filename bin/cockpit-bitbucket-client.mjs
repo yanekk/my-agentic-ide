@@ -212,7 +212,21 @@ export async function listOpenPRs({ key, workspace, repo, origin, query } = {}) 
   try {
     const first = prsUrl(origin, workspace, repo, query);
     const data = await getJson(first, key);
-    const prs = Array.isArray(data.values) ? [...data.values] : [];
+    // Every page is deduped by id, the first included. A `q` that matches a list
+    // field (reviewers.uuid) returns one ROW PER MATCHING ENTRY, so the same PR comes
+    // back several times on one page (live 2026-10-05: sdet-tools' 8 open PRs as 43
+    // rows, PR 151 seven times) -- and every copy cost its own comment and diffstat
+    // read. `size` counts the rows too, so the page arithmetic below stays right.
+    const prs = [];
+    const seen = new Set();
+    const add = (d) => {
+      for (const pr of Array.isArray(d.values) ? d.values : []) {
+        if (seen.has(pr && pr.id)) continue;
+        seen.add(pr && pr.id);
+        prs.push(pr);
+      }
+    };
+    add(data);
     const size = Number(data.size);
     const pages = Math.min(MAX_PAGES, Math.ceil(size / PR_PAGELEN));
 
@@ -220,8 +234,8 @@ export async function listOpenPRs({ key, workspace, repo, origin, query } = {}) 
       // `size` says how many pages there are, so pages 2..N are asked for by number
       // and fetched PAGE_CONCURRENCY at a time instead of walking `next` one by one.
       // Any page failing fails the repo, as before. A PR opened or closed mid-fetch
-      // can shift one across a page boundary -- the duplicate is dropped by id here,
-      // a PR skipped that way reappears on the next minute's pass.
+      // can shift one across a page boundary -- the duplicate is dropped by id like
+      // any other, a PR skipped that way reappears on the next minute's pass.
       const nums = [];
       for (let p = 2; p <= pages; p++) nums.push(p);
       const byPage = [];
@@ -233,14 +247,7 @@ export async function listOpenPRs({ key, workspace, repo, origin, query } = {}) 
           return getJson(u.toString(), key);
         }))));
       }
-      const seen = new Set(prs.map((pr) => pr && pr.id));
-      for (const d of byPage) {
-        for (const pr of Array.isArray(d.values) ? d.values : []) {
-          if (seen.has(pr && pr.id)) continue;
-          seen.add(pr && pr.id);
-          prs.push(pr);
-        }
-      }
+      for (const d of byPage) add(d);
       return { prs };
     }
 
@@ -248,7 +255,7 @@ export async function listOpenPRs({ key, workspace, repo, origin, query } = {}) 
     let url = typeof data.next === "string" ? data.next : "";
     for (let page = 1; url && page < MAX_PAGES; page++) {
       const d = await getJson(url, key);
-      if (Array.isArray(d.values)) prs.push(...d.values);
+      add(d);
       url = typeof d.next === "string" ? d.next : "";
     }
     return { prs };
