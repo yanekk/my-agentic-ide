@@ -11,6 +11,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-05 | 🔄 | Every repo read "offline" for hours: all calls were 429 `Rate limit for this resource has been exceeded`, ~4300 requests/hour. Now `q=` server filter (`concernsMeQuery`), details reused when unchanged, 429 is `limited` and pauses 5-30min. |
+| 2026-10-05 | 📌 | BBQL `author.nickname` accepts only `=`/`!=` (`~` is a 400) and `=` is case-insensitive. `display_name` cannot be filtered. Live 429s carry no Retry-After. |
 | 2026-10-02 | 🐞 | cribl (1004 open PRs) failed every pass, startup included: default PR objects were 20MB, 21 pages at 3-4.6s against the 10s timeout, 70s a repo. `fields` whitelist plus pages fetched by number, 5 at once: 7.4s. |
 | 2026-09-05 | ✅ | T09 live spawn hand-verified with the user: clicking Review and clicking Address each start a real agent (not just text filling the box). The spawn primitive works live for both buttons — the payoff gesture. T09 closed ✅. |
 | 2026-09-05 | ✅ | T08 core hand-verified with the user: tab clicks switch the table; a bottom-row Open opened the right PR — real clicks land on the drawn row. Live paging unseen (9 PRs fit one page, no pager). Tab switch now resets to page 1 (DESIGN 2.5, §14d test), confirmed live. |

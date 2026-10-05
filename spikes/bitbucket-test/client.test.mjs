@@ -251,6 +251,36 @@ async function main() {
     }
   }
 
+  section("a query replaces the state filter, and pages keep it");
+  {
+    const stub = await startStub();
+    stub.respond = (req) => {
+      const page = Number(new URL(req.url, stub.origin).searchParams.get("page") || 1);
+      return { status: 200, body: { size: 60, values: [{ id: page }], next: page < 2 ? `${stub.origin}/n` : undefined } };
+    };
+    const query = 'state="OPEN" AND (reviewers.uuid="{me}")';
+    const r = await listOpenPRs({ key: "e:t", workspace: "w", repo: "r", origin: stub.origin, query });
+    const u = new URL(stub.requests[0].url, stub.origin);
+    eq("q carries the query verbatim", u.searchParams.get("q"), query);
+    eq("...and no separate state filter", u.searchParams.get("state"), null);
+    ok("...the whitelist still goes", (u.searchParams.get("fields") || "").includes("values.source.commit.hash"));
+    eq("page 2 keeps the query", new URL(stub.requests[1].url, stub.origin).searchParams.get("q"), query);
+    eq("both pages' PRs", r.prs.map((p) => p.id), [1, 2]);
+    await stub.close();
+  }
+
+  section("a 429 is limited, on every call, not transient");
+  {
+    const stub = await startStub();
+    stub.respond = () => ({ status: 429, body: "Rate limit for this resource has been exceeded" });
+    const o = { key: "e:t", workspace: "w", repo: "r", prId: 1, origin: stub.origin };
+    eq("getUser 429 -> limited", (await getUser(o)).error, { kind: "limited" });
+    eq("listOpenPRs 429 -> limited", (await listOpenPRs(o)).error, { kind: "limited" });
+    eq("listPRComments 429 -> limited", (await listPRComments(o)).error, { kind: "limited" });
+    eq("listPRDiffstat 429 -> limited", (await listPRDiffstat(o)).error, { kind: "limited" });
+    await stub.close();
+  }
+
   section("a 500 classifies as transient");
   {
     const stub = await startStub();

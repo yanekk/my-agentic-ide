@@ -220,14 +220,14 @@ bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview th
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script
-spikes/cockpit-test/    integration test, wezterm stubbed (800 checks, ~107s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (812 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
-spikes/bitbucket-test/  the dashboard's model, client, store, config and render (468)
+spikes/bitbucket-test/  the dashboard's model, client, store, config and render (515)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)

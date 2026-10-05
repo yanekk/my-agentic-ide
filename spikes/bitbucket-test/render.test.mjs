@@ -258,6 +258,42 @@ function main() {
     contracts("offline", out, 90, 10);
   }
 
+  section("a rate-limited cache says rate-limited, not offline, and still draws rows");
+  {
+    const pr = raw({ id: 41, reviewers: [{ uuid: ME }], authorUuid: "{o}" });
+    const out = renderDashboard({
+      width: 90, rows: 10,
+      cache: cacheOf([pr], { fetchedAt: NOW - 5 * 60000, error: { kind: "limited" } }),
+      view: view(), now: NOW, config: cfg(),
+    });
+    const lines = out.lines.map(plain);
+    eq("exactly one rate-limited line", lines.filter((l) => /last updated 5m ago · rate-limited/.test(l)).length, 1);
+    ok("...and no offline wording", !lines.some((l) => /offline/.test(l)));
+    ok("the last good rows are still drawn", !!rowWith(out.lines, "#41"));
+
+    // One repo refused, one offline: still the single aggregate line, named for the 429.
+    const mixed = renderDashboard({
+      width: 90, rows: 10, view: view(), now: NOW, config: cfg({ repos: ["web", "api"] }),
+      cache: { meUuid: ME, repos: {
+        web: { fetchedAt: NOW - 60000, prs: [pr], error: { kind: "limited" } },
+        api: { fetchedAt: NOW - 60000, prs: [], error: { kind: "transient" } },
+      } },
+    });
+    ok("a mix of refused and offline is one rate-limited line",
+      mixed.lines.map(plain).filter((l) => /last updated .*rate-limited/.test(l)).length === 1);
+
+    // Per-repo: one repo refused while another is fine.
+    const one = renderDashboard({
+      width: 90, rows: 12, view: view(), now: NOW, config: cfg({ repos: ["web", "api"] }),
+      cache: { meUuid: ME, repos: {
+        web: { fetchedAt: NOW, prs: [pr], error: null },
+        api: { fetchedAt: NOW - 60000, prs: [], error: { kind: "limited" } },
+      } },
+    });
+    ok("a refused repo names itself as rate-limited",
+      one.lines.some((l) => /api\b.*couldn't fetch · rate-limited/.test(plain(l))));
+  }
+
   section("a per-repo error adds a per-repo line without blanking the others");
   {
     const good = raw({ id: 1, reviewers: [{ uuid: ME }], authorUuid: "{o}", repoName: "web" });

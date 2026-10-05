@@ -3964,6 +3964,7 @@ const server = http.createServer((req, res) => {
   if (m === "net") return req.socket.destroy();          // dropped socket -> transient
   if (m === "auth") return json(res, 401, { type: "error" });
   if (m === "one-bad" && repo === "bad") return json(res, 500, { type: "error" });  // -> transient
+  if (m === "limited") { res.writeHead(429); return res.end("Rate limit for this resource has been exceeded"); }
   if (m === "slow") return setTimeout(() => json(res, 200, PRS), 2000);
   if (m === "two-prs") return json(res, 200, PRS2);
   if (m === "many") return json(res, 200, MANY);
@@ -4013,8 +4014,12 @@ d4env() {
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
   PSBUSY="$A4/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
+  COCKPIT_BITBUCKET_DETAIL_MAX_AGE_MS=0 COCKPIT_BITBUCKET_BACKOFF_MS=5000 \
   "$@"
 }
+# DETAIL_MAX_AGE 0: every pass re-reads each shown PR's comments and diffstat, which
+# the keep-last checks below rely on; D5 runs on the real reuse window. BACKOFF is a
+# real 5s, not scaled by SPEED: the pause check needs a window of known length.
 d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
 D4PID=$!
 waitfor "cockpitd up" "$A4/daemon.log" 10 "D4 to start"
@@ -4046,6 +4051,10 @@ waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
 check "...with the approval fields whitelisted"   "values.participants.approved,values.participants.user.uuid,values.reviewers.uuid" "$BBHITS"
+# Filtered on the server to the PRs that can concern me (concernsMeQuery), so a repo
+# with a thousand open PRs is one page, not twenty. Team is empty here. The stub's
+# decodeURIComponent leaves the query string's `+` for a space as it is.
+check "...filtered on the server to what can concern me" 'q=state="OPEN"+AND+(reviewers.uuid="ME-UUID"+OR+author.uuid="ME-UUID")' "$BBHITS"
 same  "a repo's raw PRs land in the cache"        "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 same  "...untouched -- the raw title, not a normalised row" "$(bq "$S4" 'c.repos.alpha.prs[0].title')" "SECRET-PR-TITLE"
 same  "...with a fresh fetchedAt"                 "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
@@ -4151,6 +4160,24 @@ same "...added"                                                          "$(bq "
 same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
 same "...and the repo itself stays a success"                            "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
+
+# A 429 is about the token, not the repo (2026-10-05): the refused repo and every repo
+# after it are marked limited with their PRs kept, the rest of the pass calls nothing,
+# and no trigger calls anything until the pause (BACKOFF, 5s here) is over.
+: > "$BBHITS"
+echo limited > "$BBMODE"
+waituntil 10 "a refused pass in the cache" \
+  bqtrue "$S4" '!!c.repos.alpha.error && c.repos.alpha.error.kind==="limited"'
+same  "a 429 marks the refused repo limited"          "$(bq "$S4" 'c.repos.bad.error.kind')" "limited"
+same  "...and the repo after it, without asking"      "$(grep -c '/alpha/pullrequests' "$BBHITS")" "0"
+same  "...which keeps its previous PRs"               "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
+check "...and the pause is logged"                    "bitbucket tick: rate-limited on bad, pausing 5s" "$A4/daemon.log"
+: > "$BBHITS"
+sleep 2                              # window: ~2.5 ticks, inside the 5s pause
+same  "no call at all while paused"                   "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
+echo ok > "$BBMODE"
+waituntil 10 "the pause to end and alpha to refresh" bqtrue "$S4" 'c.repos.alpha.error===null'
+same  "after the pause the repos are fetched again"   "$(bq "$S4" 'c.repos.bad.error')" "null"
 
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
@@ -4385,6 +4412,11 @@ echo list > "$A5/fleetstate"
 waituntil 10 "the return's pass in the cache" bqtrue "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START"
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
 same  "...and the cache was rewritten"                   "$(bq "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START")" "true"
+# The list says PR 7 is unchanged and its details are minutes old, so the return's
+# pass reuses its comments and diffstat instead of reading them again.
+check "...reusing an unchanged PR's details"            "bitbucket returned: alpha ok, 1 prs, 0 comment fetches, 0 diffstat fetches, 1 unchanged" "$A5/daemon.log"
+same  "...so no comment read was made"                  "$(grep -c '/pullrequests/7/comments' "$BBHITS")" "0"
+same  "...and the PR still carries them"                "$(bq "$S5" 'c.repos.alpha.prs[0].comments.length')" "1"
 
 daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
@@ -4402,6 +4434,10 @@ same "no line in this suite names the real bitbucket host" \
 # states -- so the default is asserted in the source, not trusted.
 same "the bitbucket tick defaults to 60s" \
      "$(grep -c 'COCKPIT_BITBUCKET_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "the rate-limit pause defaults to 5 minutes" \
+     "$(grep -c 'COCKPIT_BITBUCKET_BACKOFF_MS) || 5 \* 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "unchanged PR details are reused for 15 minutes by default" \
+     "$(grep -c ': 15 \* 60_000;' "$ROOT/bin/cockpitd.mjs")" "1"
 fi
 }  # run_dashboard
 

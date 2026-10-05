@@ -301,6 +301,29 @@ export function concernsMe(pr, { meUuid = "", team = [] } = {}) {
   return inToReview(pr, meUuid, teamSet) || inMine(pr, meUuid);
 }
 
+/**
+ * The same membership as a BitBucket filter (`q=`), so the LIST call returns only
+ * the PRs concernsMe could accept instead of every open PR. Fetching all of cribl's
+ * ~1000 open PRs was 20 pages a minute and, with the other repos, ~4300 requests an
+ * hour against a limit of about 1000 (2026-10-05). The filter may let through MORE
+ * than concernsMe (drafts and PRs I approved still match the reviewer clause), never
+ * fewer: concernsMe still runs on every returned PR, so the server only has to be a
+ * superset. Hence the clauses are the three inclusion paths with none of the
+ * exclusions. The team clause matches the author's nickname with `=`, because
+ * BitBucket rejects `~` on nickname ("nickname expressions only support = and !=").
+ * Returns "" when nothing could concern me (no uuid, no team): the caller then
+ * fetches unfiltered rather than send an empty disjunction.
+ */
+export function concernsMeQuery({ meUuid = "", team = [] } = {}) {
+  const lit = (v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const clauses = [];
+  if (meUuid) clauses.push(`reviewers.uuid=${lit(meUuid)}`, `author.uuid=${lit(meUuid)}`);
+  const nicks = (Array.isArray(team) ? team : []).map((t) => String(t).trim()).filter(Boolean);
+  for (const n of new Set(nicks)) clauses.push(`author.nickname=${lit(n)}`);
+  if (!clauses.length) return "";
+  return `state="OPEN" AND (${clauses.join(" OR ")})`;
+}
+
 // A PR is identified by repo + id, so the same PR reached by two inclusion rules
 // collapses to one row. First occurrence wins; order is preserved for the sort that
 // follows (Array.sort is stable).
@@ -528,8 +551,13 @@ function buildTrailer(cfgRepos, cacheRepos, now, w) {
   if (!errored.length) return [];
 
   const withEntry = cfgRepos.filter((slug) => cacheRepos[slug]).length;
-  const allTransient = errored.every((x) => x.e.error.kind === "transient");
-  if (allTransient && errored.length === withEntry) {
+  // "limited" (BitBucket refused for too many requests) is drawn like offline -- the
+  // last rows stay, one dim line -- but named for what it is, so it is not mistaken
+  // for the wifi.
+  const waitable = (k) => k === "transient" || k === "limited";
+  const reasonOf = (k) => (k === "limited" ? "rate-limited" : "offline");
+  const allWaitable = errored.every((x) => waitable(x.e.error.kind));
+  if (allWaitable && errored.length === withEntry) {
     let stalest = 0;
     let never = false;
     for (const { e } of errored) {
@@ -538,13 +566,14 @@ function buildTrailer(cfgRepos, cacheRepos, now, w) {
       if (age > stalest) stalest = age;
     }
     const when = never ? "never" : ageText(stalest);
-    return [clip(dim(`last updated ${when} · offline`), w)];
+    const limited = errored.some((x) => x.e.error.kind === "limited");
+    return [clip(dim(`last updated ${when} · ${reasonOf(limited ? "limited" : "transient")}`), w)];
   }
 
   return errored.map(({ slug, e }) => {
     const msg = e.error.kind === "auth"
       ? "sign-in expired · config bitbucket-key"
-      : "couldn't fetch · offline";
+      : `couldn't fetch · ${reasonOf(e.error.kind)}`;
     return clip(dim(`${safeText(slug)}  ${msg}`), w);
   });
 }

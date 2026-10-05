@@ -44,7 +44,8 @@ const MAX_PAGES = 50;
 // --- errors ----------------------------------------------------------------
 
 // `kind` is the daemon-facing meaning, decided once here so callers never read a
-// status code themselves: "auth" (act on it) vs "transient" (wait).
+// status code themselves: "auth" (act on it), "limited" (back off) or "transient"
+// (wait).
 class BitBucketError extends Error {
   constructor(kind, status = 0) {
     super(`bitbucket request failed (${kind}${status ? ` ${status}` : ""})`);
@@ -56,10 +57,14 @@ class BitBucketError extends Error {
 
 // 401 and 403 are the only "you must act on it" outcomes: the credential is missing
 // scope, wrong, or expired. Every other status heals itself or is out of the user's
-// hands, so it is drawn as offline rather than shouting a command that would not
-// help.
+// help. 429 is split out of "transient" because retrying it every minute is what
+// keeps it going: BitBucket's limit is a rolling hour, and a daemon that kept
+// knocking spent whatever trickle of allowance came back (2026-10-05, every repo
+// failing for hours). "limited" is the daemon's cue to stop calling for a while.
+// No Retry-After is read: the live API sent none on its 429s.
 function kindFor(status) {
-  return status === 401 || status === 403 ? "auth" : "transient";
+  if (status === 401 || status === 403) return "auth";
+  return status === 429 ? "limited" : "transient";
 }
 
 // --- http ------------------------------------------------------------------
@@ -124,14 +129,20 @@ function userUrl(origin) {
   return `${baseOrigin(origin)}/2.0/user`;
 }
 
-function prsUrl(origin, workspace, repo) {
+function prsUrl(origin, workspace, repo, query) {
   const u = new URL(
     `${baseOrigin(origin)}/2.0/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests`,
   );
   // Native `state` filter over a `q=state="OPEN"` query -- both work (FINDINGS
   // 2026-09-03), this one is simpler. `participants` (approvals) and `reviewers` are
   // absent from the default list response (DESIGN 2.4, 2.9), so they must be named.
-  u.searchParams.set("state", "OPEN");
+  //
+  // With a `query` (the model's concernsMeQuery) the server returns only the PRs that
+  // can concern me, which is what makes cribl one page instead of twenty: the query
+  // carries the OPEN condition itself, and `state` is then left off so there is one
+  // filter, not two that could disagree.
+  if (query) u.searchParams.set("q", query);
+  else u.searchParams.set("state", "OPEN");
   u.searchParams.set("fields", PR_FIELDS);
   u.searchParams.set("pagelen", String(PR_PAGELEN));
   return u.toString();
@@ -144,7 +155,9 @@ function prsUrl(origin, workspace, repo) {
 // each -- 70s a repo, with every page close enough to the 10s timeout that one slow
 // one failed the whole repo, on startup too. Whitelisted it is 1.4MB at ~1.2s a
 // page. These are exactly the fields normalizePR and bitbucketPrUrl read; a new
-// reader of a raw PR field must add it here or it will read undefined. `size` is
+// reader of a raw PR field must add it here or it will read undefined. The source
+// commit is read by the daemon, not the model: with updated_on and comment_count it
+// is how a pass tells a PR whose comments and diffstat are unchanged. `size` is
 // what lets the remaining pages be fetched by number, in parallel (listOpenPRs).
 const PR_FIELDS = [
   "size", "next",
@@ -154,7 +167,7 @@ const PR_FIELDS = [
   "values.participants.approved", "values.participants.user.uuid",
   "values.reviewers.uuid",
   "values.links.html.href",
-  "values.source.branch.name",
+  "values.source.branch.name", "values.source.commit.hash",
   "values.destination.branch.name", "values.destination.repository.name",
 ].join(",");
 const PR_PAGELEN = 50;       // the endpoint's maximum
@@ -190,13 +203,14 @@ export async function getUser({ key, origin } = {}) {
 /**
  * One repository's open PRs, every page, raw (DESIGN 2.9). Follows BitBucket's
  * `next` link to completion; each `values[]` entry is a RawPR handed to the model
- * untouched. The auth header is re-sent on every page.
+ * untouched. The auth header is re-sent on every page. `query` is an optional
+ * BitBucket filter (`q=`) that replaces the plain OPEN-state filter.
  *
  * -> { prs: RawPR[] }  |  { error: { kind } }
  */
-export async function listOpenPRs({ key, workspace, repo, origin } = {}) {
+export async function listOpenPRs({ key, workspace, repo, origin, query } = {}) {
   try {
-    const first = prsUrl(origin, workspace, repo);
+    const first = prsUrl(origin, workspace, repo, query);
     const data = await getJson(first, key);
     const prs = Array.isArray(data.values) ? [...data.values] : [];
     const size = Number(data.size);

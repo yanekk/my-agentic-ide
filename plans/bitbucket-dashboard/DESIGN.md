@@ -284,8 +284,25 @@ and reads comments only for the ones that pass; a non-concerning PR is cached ra
 shown cannot drift (§3.3). This keeps the precise sort (decision A) while the comment budget is a
 handful per repo, not hundreds. The cheaper total-`comment_count` sort (decision B) would have
 needed no comment fetch at all; it was declined again after 739 surfaced, because the selective
-fetch keeps the budget small without giving up resolved-vs-open precision (§2.3). No backoff is
-designed in; if the *shown* set ever grows enough to make even this tight, that is a finding.
+fetch keeps the budget small without giving up resolved-vs-open precision (§2.3).
+
+**Revised 2026-10-05: the budget broke, and three rules replace "no backoff".** Measured, a pass
+was ~72 requests (cribl's 20 list pages, cribl-cloud's 8, two detail GETs per shown PR), about
+4300 an hour against BitBucket's limit of roughly 1000, and every repo read "offline" for hours on
+429s. Decided with the user:
+
+- **The list is filtered on the server** (`q=`, `model.concernsMeQuery`) to the PRs that *can*
+  concern me: I review it, I wrote it, or its author's nickname is on the team list. It is a
+  superset of `concernsMe`, never narrower (drafts and approved PRs still come back), and
+  `concernsMe` still runs on the result. cribl is one page instead of twenty.
+- **A shown PR's comments and diffstat are reused** while its `updated_on`, `comment_count` and
+  source commit are unchanged and they were read under 15 minutes ago. The age bound covers a
+  thread resolved with no new comment, so the unresolved-thread sort is at most 15 minutes stale.
+- **A 429 is its own error kind, `limited`.** The pass stops calling at once, the remaining repos
+  keep their PRs marked `limited`, and every trigger is skipped for 5 minutes, doubling to 30,
+  reset by the first pass that is not refused. The pane says `rate-limited`, not `offline`.
+
+That is ~8 list calls a minute plus the PRs that changed, around 600 an hour.
 
 ### 2.n The unhappy paths
 
