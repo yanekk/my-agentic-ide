@@ -11,6 +11,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-05 | ✅ | Verified by hand with the user after the rebuild: no offline or rate-limited line, no PR missing. Log: 0 refusals, 8 requests a pass once details are reused; shown counts match the pre-filter cache (cribl 6, sdet-tools 7, design 5). |
 | 2026-10-05 | 🔄 | Every repo read "offline" for hours: all calls were 429 `Rate limit for this resource has been exceeded`, ~4300 requests/hour. Now `q=` server filter (`concernsMeQuery`), details reused when unchanged, 429 is `limited` and pauses 5-30min. |
 | 2026-10-05 | 📌 | BBQL `author.nickname` accepts only `=`/`!=` (`~` is a 400) and `=` is case-insensitive. `display_name` cannot be filtered. Live 429s carry no Retry-After. A `q` on `reviewers.uuid` returns one row per matching reviewer (sdet-tools: 8 PRs as 43); `size` counts rows, so every page is deduped. |
 | 2026-10-02 | 🐞 | cribl (1004 open PRs) failed every pass, startup included: default PR objects were 20MB, 21 pages at 3-4.6s against the 10s timeout, 70s a repo. `fields` whitelist plus pages fetched by number, 5 at once: 7.4s. |
