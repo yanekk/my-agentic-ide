@@ -70,7 +70,7 @@ const W = 58, H = 18;
 const PROGS = ["claude", "pir"];
 const NAME = { claude: "Claude Agents", pir: "PIR" };
 const DESC = {
-  A: "Left arrow on an empty prompt replaces the pane with a short list of the two programs, with the other one already highlighted. Enter opens it, Esc goes back. So switching is ← then Enter.",
+  A: "Left arrow on an empty prompt replaces the pane with a short list of the two programs, with the other one already highlighted. Enter or → opens it, Esc goes back. So switching is ← then → (or Enter).",
   B: "Left arrow on an empty prompt opens a small box over the list, in the same style as the branch prompt for custom diffs. ← and → move between the two, Enter opens, Esc closes.",
   C: "No menu. Left arrow on an empty prompt swaps the program straight away, and a one-line banner says what happened for a moment. One key, but nothing to confirm.",
 };
@@ -133,7 +133,7 @@ function pickerA() {
     L.push(blank());
   });
   while (L.length < H - 2) L.push(blank());
-  L.push([seg("   ↑↓ choose · enter open · esc back", "d")]);
+  L.push([seg("   ↑↓ choose · enter or → open · esc back", "d")]);
   L.push(blank());
   return L;
 }
@@ -169,7 +169,7 @@ function render() {
   const foot = [seg(" ⌥t new · ⌥[ ⌥] switch · ⌥w close   ", "d"), lab("claude"), seg("|", "d"), lab("pir")];
   document.getElementById("foot").innerHTML = html(foot);
 
-  const k = picker === "A" ? "<kbd>↑</kbd> <kbd>↓</kbd> choose · <kbd>Enter</kbd> open · <kbd>Esc</kbd> back"
+  const k = picker === "A" ? "<kbd>↑</kbd> <kbd>↓</kbd> choose · <kbd>Enter</kbd> or <kbd>→</kbd> open · <kbd>Esc</kbd> back"
           : picker === "B" ? "<kbd>←</kbd> <kbd>→</kbd> choose · <kbd>Enter</kbd> open · <kbd>Esc</kbd> cancel"
           : prog === "claude" ? "Type into the prompt · <kbd>←</kbd> <kbd>→</kbd> move the cursor · <kbd>Backspace</kbd> · <kbd>←</kbd> on an <b>empty</b> prompt switches"
           : "pir has no prompt box, so <kbd>←</kbd> on its runs list always switches";
@@ -193,7 +193,7 @@ function onKey(e) {
     e.preventDefault();
     const back = picker === "A" ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"];
     if (back.includes(key)) pick = 1 - pick;
-    else if (key === "Enter") { picker = null; switchTo(PROGS[pick]); }
+    else if (key === "Enter" || (picker === "A" && key === "ArrowRight")) { picker = null; switchTo(PROGS[pick]); }
     else if (key === "Escape") { picker = null; say("closed the picker, nothing changed"); }
     render(); return;
   }
