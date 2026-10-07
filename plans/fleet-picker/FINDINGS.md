@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-07 | ✅ | T00 GUI probe, person at the keyboard: plain ← through a Lua callback moved zsh's cursor every time, held ← included, no lag, typed line exact. Log: 45 calls, 0 re-entries, callback max 1.87ms. |
+| 2026-10-07 | 📌 | T00: picker open is ~212ms median with the 200ms cmd poll, ~100ms with an `fs.watch` on the directory. Claude redraws its box 15–40ms after a key. pir's hint is cut at 39 columns; match its prefix only. |
 | 2026-10-07 | 📌 | Fake unverified against real: `spikes/fleet-picker-test/pty-drive.py`'s screen model, notably `\x1b[K` at pending wrap erasing the last column (xterm does). The T02 skip is harmless either way; T04's real-mux drill checks the 39-column `shown now`. |
 | 2026-10-07 | 🐞 | Erase-to-end-of-line after a line filling the pane width wipes its last character: the picker at 39 columns drew `shown no`. T02 skips `\x1b[K` on full-width lines; the pty test fails without it. |
 | 2026-10-07 | 📌 | `~/.wezterm.lua` symlinks to `main`'s `wezterm/cockpit.lua`, so pointing `config.lua` `repo` at a worktree loads its layout and daemon but not its key bindings. T06 repoints the link too. |
