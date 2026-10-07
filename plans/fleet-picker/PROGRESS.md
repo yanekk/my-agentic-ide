@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ⬜ | |
 | T01 | key-binding | T00 | ⬜ | |
-| T02 | picker-screen | — | ⬜ | |
+| T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
