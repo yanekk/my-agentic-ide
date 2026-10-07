@@ -16,13 +16,24 @@ DESIGN §2.1, §2.2, §5.1.
 
 The live window runs `main`'s checkout, so a branch is checked by pointing
 `~/.claude/cockpit/config.lua`'s `repo` at the task worktree and reopening the window, then
-restoring `repo` afterwards (pir-pane FINDINGS 2026-09-27). The worker edits and restores
-`config.lua` and confirms the restore; reopening the window is the person's, since it closes every
-agent terminal.
+restoring `repo` afterwards (pir-pane FINDINGS 2026-09-27). That moves the layout script and the
+daemon only: WezTerm reads `cockpit.lua`, and so the ← binding, through the `~/.wezterm.lua`
+symlink to `main`. So the worker also repoints that link at the worktree's `wezterm/cockpit.lua`
+(an `ask` row: the person approves the exact command), and afterwards restores both and confirms
+with `readlink` and a read of `config.lua`. Reopening the window is the person's, since it closes
+every agent terminal.
+
+```
+ln -sfn <worktree>/wezterm/cockpit.lua /Users/jankrolikowski/.wezterm.lua                  # ask
+ln -sfn /Users/jankrolikowski/git/my-agentic-ide/wezterm/cockpit.lua /Users/jankrolikowski/.wezterm.lua   # restore
+readlink /Users/jankrolikowski/.wezterm.lua
+```
 
 ## Outside actions
 
 - Point `config.lua` `repo` at the task worktree, and restore it — `worker`
+- Point `~/.wezterm.lua` at the task worktree — `ask`
+- Restore `~/.wezterm.lua` and confirm — `worker`
 - Rebuilding the live window and trying the key — `person`
 
 ## Automated checks (the worker runs these)
@@ -34,7 +45,7 @@ bash spikes/fleet-picker-keys-test/run.sh && bash spikes/fleet-picker-test/run.s
 ## Needs a person
 
 ```
-reopen WezTerm (after the worker has pointed config.lua at the worktree)
+reopen WezTerm (after the worker has pointed config.lua and ~/.wezterm.lua at the worktree)
 ```
 
 Expect: at the fleet list with the Claude box empty, ← shows SWITCH PROGRAM with PIR highlighted;
@@ -46,4 +57,4 @@ Tell me: did each of those happen, and did ← anywhere feel slower than before?
 ## Done when
 
 - [ ] The person's answer is in FINDINGS.md with the date (✅ only for what they saw).
-- [ ] `config.lua` is restored and the restore confirmed.
+- [ ] `config.lua` and `~/.wezterm.lua` are restored and the restore confirmed.

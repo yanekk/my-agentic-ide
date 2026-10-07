@@ -64,8 +64,8 @@ Both programs are read from the visible screen of the focused pane (`pane:get_li
   blanks are trimmed. Measured on Claude Code 2.1.291 (FINDINGS 2026-10-07): the placeholder is
   shown exactly when the box is empty, disappears on the first character, returns when the box
   is cleared, survives a typed leading space (Claude drops it), and disappears on a lone line
-  break. It is the same string as `LIST_MARKER` in `cockpitd.mjs`; the fleet-picker-keys suite asserts
-  the two agree.
+  break. It contains `LIST_MARKER` (`describe a task for a new session`) from `cockpitd.mjs`; the
+  fleet-picker-keys suite asserts it does.
 - pir: a line starting `↑↓ move · ↵ open`, the key hint pir draws only on its runs list with a
   bare box (`@` or empty). Measured on the installed pir (FINDINGS 2026-10-07): with text in the
   box it reads `↵ start planning · …`, and the pairing screen (Ctrl+P, where ← means back) does
@@ -165,6 +165,11 @@ is not replayed, since replaying it after later keys is the reordering §1 rules
 - A character typed less than one redraw before ←: the screen still shows the placeholder and
   the picker opens, with the character in the parked program's box. T00 measures Claude's echo
   time so the size of this window is known.
+- Keys pressed after ← but before the picker pane takes focus (the cmd tail's up-to-200ms poll
+  plus the swap) reach the program behind it: a fast ← → leaves the picker up, a fast ← Enter may
+  open the selected agent row, which reconcile follows once the picker closes. Accepted (person,
+  2026-10-07); T00 measures the gap and T03 shortens it with a directory watch if the poll
+  dominates. No key is held back, since that would be a second key interceptor.
 - `terminals.json` missing, unreadable or without `fleet.picker`, or any error in the callback:
   ← is forwarded. The callback is wrapped in `pcall`; a broken check must never break ←.
 - The picker pane is killed by hand while open: the daemon notices on its next tick, clears the
@@ -274,7 +279,7 @@ decide(pane_id, terms, text) -> "open" | "pass"
 |---|---|
 | OS | macOS (Darwin 25.6.0) |
 | Language / runtime | Node.js v26.7.0 (ESM `.mjs`), bash/zsh, WezTerm's embedded Lua |
-| Toolchain | wezterm 20240203-110809-5046fc22; Claude Code 2.1.291; pir installed at `~/.claude/pir-engine` (wrapper `~/.local/bin/pir`) |
+| Toolchain | wezterm 20240203-110809-5046fc22; Claude Code 2.1.292 (the markers were measured on 2.1.291; T00 re-measures); pir installed at `~/.claude/pir-engine` (wrapper `~/.local/bin/pir`) |
 | Deliberately absent | No standalone `lua`/`luajit`; Lua is tested through `wezterm show-keys`. No `package.json`, no npm dependencies. The pir source checkout is not at `~/src/plan-implement-review` on this machine; read pir from `~/.claude/pir-engine`. |
 
 **The test command.** The `test` lines at the top, each from the repo root. The two fleet-picker
@@ -318,6 +323,8 @@ Nothing here costs money, is seen by anyone else, or touches an account.
 |---|---|---|---|
 | The suites | `bash spikes/fleet-picker-keys-test/run.sh`, `bash spikes/fleet-picker-test/run.sh`, `bash spikes/pir-pane-test/run.sh`, `bash spikes/cockpit-test/run.sh` | worker | Stubbed wezterm, scratch state; the keys suite runs `wezterm show-keys` with a scratch `HOME`, which opens no window |
 | Point `~/.claude/cockpit/config.lua` `repo` at the task worktree, and restore it (T06) | edit the one line, then restore it | worker | Reversible in one edit; only takes effect when the person reopens the window |
+| Point `~/.wezterm.lua` at the task worktree's `wezterm/cockpit.lua` (T06) | `ln -sfn <worktree>/wezterm/cockpit.lua /Users/jankrolikowski/.wezterm.lua`, `<worktree>` under `/Users/jankrolikowski/git/my-agentic-ide/.claude/worktrees/` | ask | The person's own file, read by every WezTerm window; the running window may reload its keys at once, harmless because the live daemon never arms the picker |
+| Restore `~/.wezterm.lua` and confirm (T06) | `ln -sfn /Users/jankrolikowski/git/my-agentic-ide/wezterm/cockpit.lua /Users/jankrolikowski/.wezterm.lua`; `readlink /Users/jankrolikowski/.wezterm.lua` | worker | Puts back the installer's link; exact command, no choice in it |
 | T00 headless probe | `bash spikes/fleet-picker-spike/probe.sh` | worker | Private mux; reads real `claude agents` without Enter; pir with scratch `PIR_HOME` |
 | The drill | `bash spikes/pir-pane-drill/drill.sh` | worker | Private mux, scratch state, `pkill` shim |
 | T00 GUI key probe | `bash spikes/fleet-picker-spike/gui.sh` | person | Opens a window and needs a real keyboard |
@@ -330,7 +337,8 @@ Nothing here costs money, is seen by anyone else, or touches an account.
 If the binding misbehaves, delete the `LeftArrow` entry from `wezterm/cockpit.lua` (WezTerm
 reloads its config on save, no rebuild needed) and ← is plain again everywhere. If the picker
 wedges the slot, rebuild the window, which always starts on `claude agents` with no picker.
-Reverting this plan's commits restores today's cockpit.
+Reverting this plan's commits restores today's cockpit. If T06 is interrupted with
+`~/.wezterm.lua` or `config.lua` still pointed at a worktree, restore both (§5.3) before reopening.
 
 ---
 
@@ -345,6 +353,11 @@ Reverting this plan's commits restores today's cockpit.
 - 2026-10-07, person: read pir's screen for its empty box (§2.2) rather than plan a pir change.
 - 2026-10-07, person: the defaults of §2.6 and §2.7 (switch dim while open, BitBucket closes it
   first, keyboard-only, a crash or Ctrl+C acts as Esc, stays open when focus leaves).
+- 2026-10-07, person (plan review): T06 loads the branch's key binding by repointing
+  `~/.wezterm.lua`, yes-first, because the live window reads `cockpit.lua` through that link to
+  `main` and `config.lua`'s `repo` only moves the layout script and daemon. Keys typed before the
+  picker shows go to the program behind it (§2.9), rather than adding a second key interceptor.
+  The §5.3 bins approved as written.
 - The decision in WezTerm, not the daemon (§1 Stance). The daemon's cmd tail polls every 200ms,
   and forwarding ← from there would land it after keys typed in the meantime.
 - A separate picker pane, not a script typed into the slot like the custom prompt: the slot's

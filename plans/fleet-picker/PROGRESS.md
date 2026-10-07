@@ -8,7 +8,7 @@ touching the task you pick up, and append yours there.
 **Sixty words to a Notes cell, counted.** Flat prose. The cell is an index; the account is the
 commit message. Whoever writes a cell also fixes the over-budget cell they walk past.
 
-**Plan reviewed:** not yet — the plan reviewer marks it before the build starts
+**Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-10-07
@@ -35,4 +35,4 @@ done · ⛔ blocked, needs a human.
 ## Blocked on the user
 
 Nothing yet. T00 needs the person at the keyboard for about a minute; T06 needs a rebuild of the
-live window.
+live window and approval to repoint `~/.wezterm.lua`.

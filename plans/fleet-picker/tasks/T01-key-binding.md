@@ -58,7 +58,9 @@ add no binding. Otherwise:
 - [ ] `M.CLAUDE_EMPTY` contains `LIST_MARKER` from `bin/cockpitd.mjs` (grep both files).
 - [ ] purity: `fleet-picker.lua` contains no `io.`, `os.`, `wezterm.`, `require`.
 - [ ] `wezterm --config-file wezterm/cockpit.lua show-keys` with a scratch `HOME` exits 0 and lists a
-      `LeftArrow` binding with no modifier; with the module renamed away it lists none and still exits 0.
+      `LeftArrow` binding with no modifier in the default key table; with the module renamed away it
+      lists none there and still exits 0. Read only the default table: `copy_mode` already has an
+      unmodified `LeftArrow -> CopyMode(MoveLeft)`, so a whole-output grep passes either way.
 
 ## Done when
 

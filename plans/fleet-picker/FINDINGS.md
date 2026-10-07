@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-07 | 📌 | `~/.wezterm.lua` symlinks to `main`'s `wezterm/cockpit.lua`, so pointing `config.lua` `repo` at a worktree loads its layout and daemon but not its key bindings. T06 repoints the link too. |
+| 2026-10-07 | 🐞 | cockpit-test section 11 fails two `--conf` path checks in a fresh copy under `$TMPDIR` (`/var/folders` is a symlink to `/private/var`); passes in a copy under `.claude/worktrees/`. Pre-existing, not investigated. |
 | 2026-10-07 | 🔄 | The person reversed pir-pane's "click only, no key" (2026-09-26): ← opens a picker, the footer click stays (DESIGN §7). |
 | 2026-10-07 | 🐞 | cockpit-test section 5f (diff-mode label clicks) failed four checks in one full run on unchanged `main` 6620d81, then passed with `ONLY=5f`. Flaky, not investigated. |
 | 2026-10-07 | 📌 | Lua runs here only inside WezTerm: `wezterm --config-file x.lua show-keys` evaluates a config in 45ms, `wezterm.json_parse` works, a `dofile` module loads. No `lua` binary. Reading a small file costs about 44µs. |
