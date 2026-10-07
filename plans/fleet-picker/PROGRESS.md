@@ -12,8 +12,8 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** review T02 (picker-screen); implement T00 (keypress-spike) if not
+already under way.
 
 ## Tasks
 
@@ -24,13 +24,13 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ⬜ | |
 | T01 | key-binding | T00 | ⬜ | |
-| T02 | picker-screen | — | ⬜ | |
+| T02 | picker-screen | — | 🔍 | Model, picker process, wrapper; fleet-picker-test 379 checks (model, purity grep, python3 pty rig). Deviations: added `splitKeys` export, so a fast ↓→ in one read is two keys. E2E line "↓ → gives fleet-claude, pir shown" contradicts §2.4 toggle; tested ↓→ gives fleet-pir, → alone fleet-claude. Full-width lines skip `\x1b[K` (FINDINGS). |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 
