@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** T00 implemented, awaiting review.
+**Status:** T00 done.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** review T00.
+**Next `pir-work` will:** implement T01 (key-binding) or T02 (picker-screen); both are unblocked.
 
 ## Tasks
 
@@ -21,7 +21,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | keypress-spike | — | 🔍 | Spike in `spikes/fleet-picker-spike/`; all four gates pass, numbers in RESULTS.md; GUI run verified by the person. Deviations: added `probe.mjs`, `stub-daemon.mjs`, `stub-picker.mjs`, `stand-in.mjs` beside the named files; probe starts a scratch pir backend and runs claude from the main checkout (trust prompt). |
+| T00 | keypress-spike | — | ✅ | Spike in `spikes/fleet-picker-spike/`, all four gates pass, GUI run verified by the person. Review clean, no fix commit: reran probe.sh (numbers reproduce, watch beats poll), PROBE_FAIL exits 1 with teardown; gutting the mux kill was caught; decide self-test caught a mutation; ps found no leftover claude, pir or backend. |
 | T01 | key-binding | T00 | ⬜ | |
 | T02 | picker-screen | — | ⬜ | |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
@@ -29,7 +29,7 @@ done · ⛔ blocked, needs a human.
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T00
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
