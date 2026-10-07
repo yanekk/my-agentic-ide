@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** T00–T03 done; T04 awaiting review.
+**Status:** T00–T04 done.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** review T04 (picker-drill); T05 may be built beside it.
+**Next `pir-work` will:** implement T05 (docs), then T06 (live-check).
 
 ## Tasks
 
@@ -25,11 +25,11 @@ done · ⛔ blocked, needs a human.
 | T01 | key-binding | T00 | ✅ | |
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | |
-| T04 | picker-drill | T02, T03 | 🔍 | Drill steps 11–20 (picker phase), DRILL PASS 364 at both sizes; `DRILL_PICKER_ONLY=1`. Fix: picker ignores reads carrying Ctrl+D (WezTerm closing a pane wrote `\n`+^D, read as Enter); pty test added. Deviation: resize driven by `adjust-pane-size` on the slot, no window on a headless mux. Waits added to four flaky pir-phase checks. |
+| T04 | picker-drill | T02, T03 | ✅ | Reviewed clean, no fix commit. Probed: bare-mux kill-pane under a bash wrapper wrote `0a04` in one read 11/11; removing the Ctrl+D ignore turned the pty test and drill step 18 red; full drill PASS 364 at both sizes; process test 5× green; the drill's bitbucket-cache fake matches the real cache shape. |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T04
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
