@@ -93,6 +93,18 @@ oneVerb("fast ↓→ in one read", drive("burst", "claude", 59, 22, [READY, ["se
   }
 }
 
+// The bytes WezTerm writes into a pane it is closing (`\n` + Ctrl+D, fleet-picker T04 drill)
+// are not an Enter: nothing is appended, and the picker still answers a real key after.
+{
+  const r = drive("pane-closing", "claude", 59, 22, [READY, ["send", "\n\x04"], ["sleep", 0.5], ["snap", "after"],
+    ["send", DOWN], ["send", RIGHT], ...settle]);
+  if (r) {
+    check("pane-closing bytes: still drawn, PIR still highlighted", r.snaps.after[6], "   ▸ PIR");
+    // ↓ first, so a `\n` taken for Enter (fleet-pir) and the picker still answering differ.
+    check("pane-closing bytes: no choice, then ↓ → answers", r.cmd, ["fleet-claude"]);
+  }
+}
+
 // A kill is not an answer: node dies, the wrapper appends the cancel and stays up.
 oneVerb("SIGTERM to node", drive("sigterm", "claude", 59, 22, [READY, ["term-node"], ...settle]), "picker-cancel");
 // A missing shown program is a crash of the picker's own; the wrapper still answers.

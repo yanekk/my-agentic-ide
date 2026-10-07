@@ -10,10 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built.
+**Status:** T00–T03 done; T04 awaiting review.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** review T04 (picker-drill); T05 may be built beside it.
 
 ## Tasks
 
@@ -26,11 +25,11 @@ done · ⛔ blocked, needs a human.
 | T01 | key-binding | T00 | ✅ | |
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | |
-| T04 | picker-drill | T02, T03 | ⬜ | |
+| T04 | picker-drill | T02, T03 | 🔍 | Drill steps 11–20 (picker phase), DRILL PASS 364 at both sizes; `DRILL_PICKER_ONLY=1`. Fix: picker ignores reads carrying Ctrl+D (WezTerm closing a pane wrote `\n`+^D, read as Enter); pty test added. Deviation: resize driven by `adjust-pane-size` on the slot, no window on a headless mux. Waits added to four flaky pir-phase checks. |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T04
 
 ## Blocked on the user
 
