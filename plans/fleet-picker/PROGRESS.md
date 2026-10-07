@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ✅ | |
-| T01 | key-binding | T00 | ⬜ | |
+| T01 | key-binding | T00 | ✅ | |
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
