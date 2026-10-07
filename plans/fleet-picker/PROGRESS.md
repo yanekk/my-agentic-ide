@@ -12,8 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** review T02 (picker-screen); implement T00 (keypress-spike) if not
-already under way.
+**Next `pir-work` will:** implement T00 (keypress-spike) if not already under way.
 
 ## Tasks
 
@@ -24,13 +23,13 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ⬜ | |
 | T01 | key-binding | T00 | ⬜ | |
-| T02 | picker-screen | — | 🔍 | Model, picker process, wrapper; fleet-picker-test 379 checks (model, purity grep, python3 pty rig). Deviations: added `splitKeys` export, so a fast ↓→ in one read is two keys. E2E line "↓ → gives fleet-claude, pir shown" contradicts §2.4 toggle; tested ↓→ gives fleet-pir, → alone fleet-claude. Full-width lines skip `\x1b[K` (FINDINGS). |
+| T02 | picker-screen | — | ✅ | One fix: picker appended no verb when its input ended (daemon waits for ever); now cancels, test locks it. Probed stdin EOF and pty close; mutated the ↑↓ toggle and the full-width `\x1b[K` skip, both red. Deviations held. That `\x1b[K` erase is the pty fake's, unverified on WezTerm. |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T02
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 

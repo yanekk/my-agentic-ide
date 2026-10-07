@@ -10,7 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
-| 2026-10-07 | 🐞 | Erase-to-end-of-line right after a line filling the pane width wipes its last character (cursor still on the last column): the picker at 39 columns drew `shown no`. T02 skips `\x1b[K` on full-width lines; the pty test fails without it. |
+| 2026-10-07 | 📌 | Fake unverified against real: `spikes/fleet-picker-test/pty-drive.py`'s screen model, notably `\x1b[K` at pending wrap erasing the last column (xterm does). The T02 skip is harmless either way; T04's real-mux drill checks the 39-column `shown now`. |
+| 2026-10-07 | 🐞 | Erase-to-end-of-line after a line filling the pane width wipes its last character: the picker at 39 columns drew `shown no`. T02 skips `\x1b[K` on full-width lines; the pty test fails without it. |
 | 2026-10-07 | 📌 | `~/.wezterm.lua` symlinks to `main`'s `wezterm/cockpit.lua`, so pointing `config.lua` `repo` at a worktree loads its layout and daemon but not its key bindings. T06 repoints the link too. |
 | 2026-10-07 | 🐞 | cockpit-test section 11 fails two `--conf` path checks in a fresh copy under `$TMPDIR` (`/var/folders` is a symlink to `/private/var`); passes in a copy under `.claude/worktrees/`. Pre-existing, not investigated. |
 | 2026-10-07 | 🔄 | The person reversed pir-pane's "click only, no key" (2026-09-26): ← opens a picker, the footer click stays (DESIGN §7). |
