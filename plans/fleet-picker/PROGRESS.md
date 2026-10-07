@@ -25,12 +25,12 @@ done · ⛔ blocked, needs a human.
 | T00 | keypress-spike | — | ✅ | |
 | T01 | key-binding | T00 | ⬜ | |
 | T02 | picker-screen | — | ✅ | |
-| T03 | daemon-picker | T00, T02 | ⬜ | |
+| T03 | daemon-picker | T00, T02 | 🔍 | openPicker/closePicker, armed block, shared `splitIntoFleetSlot`, cmd directory watch; sections 17a–17i plus 15m checks. Deviations: `fleet-*` always enters switchFleet, which closes an open picker under the lock; three 15c/15d fleet-block checks drop their closing brace; ⌥t-off-picker tested with the terminal slot empty. Whole suite left to pir. |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 
