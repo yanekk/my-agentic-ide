@@ -12,8 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** implement T03 (daemon-picker); T00, T01, T02 are done.
 
 ## Tasks
 
@@ -23,14 +22,14 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ✅ | |
-| T01 | key-binding | T00 | 🔍 | `wezterm/fleet-picker.lua` decide, ← binding in `cockpit.lua`, keys suite 56 checks. Deviations: added `binding.lua`, driving the real callback with a fake window and pane so every error path is tested forwarding ←; also checks a module that raises adds no binding. Reads `get_lines_as_text()` with no argument (the viewport). |
+| T01 | key-binding | T00 | ✅ | Clean, no fix commit. Probed json_parse of null and integer pane ids, decide on T00's real 59- and 39-column lines; mutations of the pane check, the whole-line match and forward-after-open all went red. Deviations held: binding.lua, raising module adds no binding, `get_lines_as_text()` viewport (T00 GUI log). |
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
