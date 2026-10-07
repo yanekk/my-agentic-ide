@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** T00 done.
+**Status:** T00 and T02 done.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T01 (key-binding) or T02 (picker-screen); both are unblocked.
+**Next `pir-work` will:** implement T01 (key-binding) or T03 (daemon-picker); both are unblocked.
 
 ## Tasks
 
@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ✅ | Spike in `spikes/fleet-picker-spike/`, all four gates pass, GUI run verified by the person. Review clean, no fix commit: reran probe.sh (numbers reproduce, watch beats poll), PROBE_FAIL exits 1 with teardown; gutting the mux kill was caught; decide self-test caught a mutation; ps found no leftover claude, pir or backend. |
 | T01 | key-binding | T00 | ⬜ | |
-| T02 | picker-screen | — | ⬜ | |
+| T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ⬜ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
