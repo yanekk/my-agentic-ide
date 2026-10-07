@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-07 | 📌 | T05 review: CLAUDE.md still says `spikes/cockpit-test/` has 812 checks; T03 added sections 17a–17i and 15m checks, so the count is stale. Not fixed; needs a full-suite run to recount. |
 | 2026-10-07 | 📌 | T03 review: a `picker-cancel` or `fleet-*` refused as "the panes are busy" (lock held over 2s) leaves the exited picker in the slot, switch dim, ← disarmed; only a BitBucket click or rebuild clears it. Unreproduced. |
 | 2026-10-07 | ✅ | T00 GUI probe, person at the keyboard: plain ← through a Lua callback moved zsh's cursor every time, held ← included, no lag, typed line exact. Log: 45 calls, 0 re-entries, callback max 1.87ms. |
 | 2026-10-07 | 📌 | T00: picker open is ~212ms median with the 200ms cmd poll, ~100ms with an `fs.watch` on the directory. Claude redraws its box 15–40ms after a key. pir's hint is cut at 39 columns; match its prefix only. |

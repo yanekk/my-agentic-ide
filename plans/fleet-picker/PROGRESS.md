@@ -10,10 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built.
+**Status:** T00–T03, T05 done; T04 and T06 remain.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** implement T04 (picker-drill), then T06 (live-check).
 
 ## Tasks
 
@@ -27,10 +26,10 @@ done · ⛔ blocked, needs a human.
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
-| T05 | docs | T01, T03 | 🔍 | CLAUDE.md: ← picker sentences in the pir paragraph, file list (four bin/wezterm files, both suites, plus `spikes/fleet-picker-spike/`), `terminals.json` `pickerOpen`/`picker`, `panes.json` `picker`. docs/cockpit.md: new picker section. pir-pane DESIGN §2.1, §8 blockquotes. Docs only; ran both picker suites and pir-pane-test. Deviation: spike folder listed too, not named in the doc. |
+| T05 | docs | T01, T03 | ✅ | Review clean, no fix commit. Checked every path, marker string, test count (56, 381), `fleet.picker`/`pickerOpen` semantics, pcall/no-binding fallback, bb-review close, cmd directory watch and section 17 against code and runs. Docs only, no mutation possible. Spike-folder deviation held. Stale 812-check count logged. |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T05
+**Review queue:** empty
 
 ## Blocked on the user
 
