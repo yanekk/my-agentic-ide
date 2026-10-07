@@ -63,6 +63,12 @@ function finish(done) {
 function onData(chunk) {
   if (finished) return;
   const s = chunk.toString("utf8");
+  // WezTerm closing a pane whose program is still running writes `\n` + Ctrl+D into it on
+  // the way out (measured on a headless mux, fleet-picker T04). The daemon does exactly that
+  // when a BitBucket click closes an open picker, and read as keys the `\n` was an Enter:
+  // the picker handed back `fleet-pir` just after the spawn. A read carrying Ctrl+D is
+  // never a choice; SIGHUP follows and the wrapper appends the (then ignored) cancel.
+  if (s.includes("\x04")) return;
   // A lone ESC is only Esc when it is the whole read (§2.4); otherwise split the read into
   // its keys so a fast ↓→ is two keys, not one ignored blob.
   const keys = s === "\x1b" ? [s] : splitKeys(s);

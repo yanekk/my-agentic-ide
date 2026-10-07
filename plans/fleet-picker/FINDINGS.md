@@ -10,6 +10,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-07 | 📌 | T04 drill, worker-driven: picker on a real mux at 120×40 and 80×24, steps 11–20 of `spikes/pir-pane-drill/drill.sh`: keys, both programs, cancels, resize, ⌥t beside it, BitBucket click, attached refusal, five rounds. DRILL PASS (364). |
+| 2026-10-07 | 🐞 | WezTerm writes `\n` + Ctrl+D into a pane it closes while its program runs. A BitBucket click killing the live picker made it answer `fleet-pir`. The picker now ignores reads carrying Ctrl+D; a stale `picker-cancel` follows, logged ignored. |
 | 2026-10-07 | 📌 | T05 review: CLAUDE.md still says `spikes/cockpit-test/` has 812 checks; T03 added sections 17a–17i and 15m checks, so the count is stale. Not fixed; needs a full-suite run to recount. |
 | 2026-10-07 | 📌 | T03 review: a `picker-cancel` or `fleet-*` refused as "the panes are busy" (lock held over 2s) leaves the exited picker in the slot, switch dim, ← disarmed; only a BitBucket click or rebuild clears it. Unreproduced. |
 | 2026-10-07 | ✅ | T00 GUI probe, person at the keyboard: plain ← through a Lua callback moved zsh's cursor every time, held ← included, no lag, typed line exact. Log: 45 calls, 0 re-entries, callback max 1.87ms. |
