@@ -22,7 +22,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | keypress-spike | — | ✅ | |
-| T01 | key-binding | T00 | ⬜ | |
+| T01 | key-binding | T00 | ✅ | |
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | Review clean, no fix commit. Ran ONLY=17i,15m (647) and pir-pane-test; mutations caught: bb-review picker guard (17h), switch dim while open (17c). Probed fs.watch on macOS: names `cmd`, ~24ms. Verb contract with the real picker matched. Lock-timeout dropping a picker answer logged, unreproduced. Strip click gate read-only. |
 | T04 | picker-drill | T02, T03 | ⬜ | |

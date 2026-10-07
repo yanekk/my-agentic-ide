@@ -88,7 +88,49 @@ local function cockpit_cmd(verb)
   end)
 end
 
-return {
+-- Plain ← opens the fleet slot's program picker, but only at the fleet list with the shown
+-- program's box empty (plans/fleet-picker DESIGN §2.1–§2.2). The judgement is made HERE, at
+-- the press, rather than in the daemon: a ← forwarded from the daemon's 200ms cmd tail could
+-- land after keys typed in the meantime and reorder an edit (DESIGN §1). The daemon arms it
+-- through terminals.json's `fleet.picker` (conditions that change slowly); the box is read off
+-- the screen now, because it changes on every keystroke.
+--
+-- The module sits next to the layout script's checkout, not next to this file, for the same
+-- symlink reason as above. If it cannot be loaded no binding is added at all, so ← stays
+-- WezTerm's own. Everything that can fail inside the callback is under pcall and falls back to
+-- forwarding ←: a broken check must never break the key. SendKey rather than SendString so
+-- WezTerm encodes ← per the pane's cursor-key mode (see Cmd+RightArrow below); T00 measured
+-- that it reaches the pane once and does not re-enter this binding.
+local TERMINALS_FILE = HOME .. "/.claude/cockpit/terminals.json"
+local PICKER = nil
+if COCKPIT then
+  local root = COCKPIT:match("^(.*)/bin/[^/]*$")
+  if root then
+    local ok, mod = pcall(dofile, root .. "/wezterm/fleet-picker.lua")
+    if ok and type(mod) == "table" and type(mod.decide) == "function" then PICKER = mod end
+  end
+end
+
+local function left_arrow(window, pane)
+  local ok, verdict = pcall(function()
+    local f = io.open(TERMINALS_FILE, "r")
+    if not f then return "pass" end
+    local raw = f:read("*a")
+    f:close()
+    return PICKER.decide(pane:pane_id(), wezterm.json_parse(raw), pane:get_lines_as_text())
+  end)
+  if ok and verdict == "open" then
+    local appended = pcall(function()
+      local f = assert(io.open(CMD_FILE, "a"))
+      f:write("picker\n")
+      f:close()
+    end)
+    if appended then return end
+  end
+  window:perform_action(act.SendKey { key = "LeftArrow" }, pane)
+end
+
+local config = {
   -- VSCode's default monospace stack on macOS is Menlo, then Monaco. WezTerm
   -- otherwise uses its own bundled JetBrains Mono, which is why it looked
   -- unfamiliar. Both of these are already on the system -- nothing to install.
@@ -262,3 +304,9 @@ return {
     { key = "Enter", mods = "CMD", action = act.SendString("\n") },
   },
 }
+
+if PICKER then
+  table.insert(config.keys, { key = "LeftArrow", mods = "NONE", action = wezterm.action_callback(left_arrow) })
+end
+
+return config
