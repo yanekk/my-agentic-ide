@@ -42,6 +42,10 @@ record of what reading a screen for state costs.
 
 ### 2.1 The switch
 
+> **2026-10-07:** the "no key binding" decision here is reversed. Plain ← at the fleet list
+> now opens a program picker in the slot; the click stays. See
+> `plans/fleet-picker/DESIGN.md` §7. This section is otherwise unchanged.
+
 The footer carries a segment `Claude Agents | PIR`, the shown program in reverse video, the
 same style as the diff-mode labels. Clicking a label appends `fleet-claude` or `fleet-pir` to
 `~/.claude/cockpit/cmd`; the daemon owns the swap. There is no key binding: the person chose
@@ -407,6 +411,10 @@ file. Reverting this plan's commits restores today's cockpit exactly.
 ---
 
 ## 8. Explicitly out of scope
+
+> **2026-10-07:** "a keyboard shortcut for the switch" below is reversed. Plain ← at the
+> fleet list now opens a program picker in the slot; the click stays. See
+> `plans/fleet-picker/DESIGN.md` §7. The rest of this list stands.
 
 - Typing reviews into a pir worker (§2.7). Needs proof that pir's input keeps a multi-line draft
   unsent; a later plan.
