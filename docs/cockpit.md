@@ -1128,7 +1128,8 @@ works.
 
 The footer draws `Claude Agents | PIR`, the shown program in reverse video like the
 diff-mode labels. A click appends `fleet-claude` or `fleet-pir` to `cmd` and the daemon
-does the rest (`switchFleet`). There is no key: `⌥[`/`⌥]` keep their routing untouched.
+does the rest (`switchFleet`). `⌥[`/`⌥]` keep their routing untouched; the keyboard
+route is plain ←, which opens a picker (below).
 The segment is omitted when `pir` is not on the daemon's `PATH` (`fleet.available`), and
 drawn dim when the shown program is not on its list screen (`fleet.switchable`): the
 fleet list for claude (`LIST_MARKER`), a reported `view: "list"` for pir. The daemon
@@ -1155,6 +1156,54 @@ Measured on a private headless mux (plan T00, `plans/pir-pane/FINDINGS.md`): pir
 59x22 in a 120x40 window and 39x12 at 80x24, the shell, strip and diff untouched, the
 same over three round trips; both programs came back with identical screens. Every
 rebuild starts on `claude agents`; the shown program is session-only.
+
+### The picker, and why ← is decided in WezTerm
+
+Plain ← in the fleet slot opens a small picker there, `Claude Agents` and `PIR` with the
+shown one marked `shown now`: ↑↓ move, Enter or → opens, Esc or Ctrl+C backs out, ← does
+nothing. The footer click is unchanged. The design is `plans/fleet-picker/DESIGN.md`; the
+"click only, no key" decision of pir-pane was reversed by the person on 2026-10-07.
+
+← opens it only when all of these hold at the press: the focused pane is the one in the
+slot, nothing is attached, pir is installed, the program is at its list with switching
+allowed, and its box is empty. The first four change slowly, so the daemon publishes them
+as one armed block in `terminals.json`, `fleet.picker = { pane, program }`, `null`
+whenever any of them fails (and always while a picker is open). The fifth changes on
+every keystroke, so it is read off the screen at the press (`pane:get_lines_as_text`):
+for `claude agents` a line that is exactly `❯ describe a task for a new session` (which
+contains `LIST_MARKER`), for pir a line starting `↑↓ move · ↵ open`, the hint it draws
+only on its runs list with a bare box. These strings are matched exactly and never
+loosened: a miss only means ← stays a no-op on an empty box, while a looser match could
+eat a cursor move.
+
+The decision lives in WezTerm, not in the daemon, because of ordering. A callback bound
+to `LeftArrow` (`wezterm/cockpit.lua`) reads the armed block and the screen, asks the
+pure `wezterm/fleet-picker.lua` `decide`, and either forwards ← at once with `SendKey`
+or appends `picker` to `cmd`. Round-tripping every ← through the daemon's cmd tail would
+let a forwarded ← land after keys typed in the meantime and reorder an edit. Measured
+(plan T00, person at the keyboard): forwarding through the callback added no visible lag,
+held ← included, and `SendKey` reaches the pane once without re-entering the binding;
+the callback took under 2ms. Everything in it is under `pcall` and falls back to
+forwarding, and if the module cannot be loaded no binding is added at all.
+
+On `picker` the daemon checks again under the reconcile lock (not the box: keys typed
+after the ← may have filled it), then spawns `bin/cockpit-fleet-picker.sh` into the slot
+with the same split-into-the-outgoing-pane swap as a program switch and parks the shown
+program, so neither is restarted. `panes.json` records `picker` while it is open. The
+picker hands back exactly one verb, `fleet-claude`, `fleet-pir` or `picker-cancel`; its
+wrapper appends `picker-cancel` if node dies and then never exits, because a pane whose
+program exits closes and collapses the slot. `fleet-*` with a picker open closes it onto
+that program, decided under the lock so a `picker` and a `fleet-*` read together stay in
+order. While open the footer switch is dim, reconcile only checks the picker pane is
+alive, a BitBucket button closes it onto `claude agents` before it types, and terminal
+gestures anchor on the picker through `slotFleetPane()`. The cmd tail also watches its
+directory now: the 200ms poll was ~200 of the ~212ms the picker took to open.
+
+Keys pressed after ← but before the picker takes focus reach the program behind it; that
+was accepted rather than adding a second key interceptor. Tests:
+`spikes/fleet-picker-keys-test/` (the decision, inside `wezterm show-keys`, the only Lua
+here), `spikes/fleet-picker-test/` (the picker model and process under a pty) and
+cockpit-test section 17 (the daemon side).
 
 ### The landmark moved
 

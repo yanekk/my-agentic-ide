@@ -10,9 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** T00–T04 done.
+**Status:** T00–T05 done.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T05 (docs), then T06 (live-check).
+**Next `pir-work` will:** T06 (live-check), with the person.
 
 ## Tasks
 
@@ -26,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ✅ | Reviewed clean, no fix commit. Probed: bare-mux kill-pane under a bash wrapper wrote `0a04` in one read 11/11; removing the Ctrl+D ignore turned the pty test and drill step 18 red; full drill PASS 364 at both sizes; process test 5× green; the drill's bitbucket-cache fake matches the real cache shape. |
-| T05 | docs | T01, T03 | ⬜ | |
+| T05 | docs | T01, T03 | ✅ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
 **Review queue:** *(empty)*
