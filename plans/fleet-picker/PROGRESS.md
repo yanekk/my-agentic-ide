@@ -27,10 +27,10 @@ done · ⛔ blocked, needs a human.
 | T02 | picker-screen | — | ✅ | |
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ⬜ | |
-| T05 | docs | T01, T03 | ⬜ | |
+| T05 | docs | T01, T03 | 🔍 | CLAUDE.md: ← picker sentences in the pir paragraph, file list (four bin/wezterm files, both suites, plus `spikes/fleet-picker-spike/`), `terminals.json` `pickerOpen`/`picker`, `panes.json` `picker`. docs/cockpit.md: new picker section. pir-pane DESIGN §2.1, §8 blockquotes. Docs only; ran both picker suites and pir-pane-test. Deviation: spike folder listed too, not named in the doc. |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T05
 
 ## Blocked on the user
 
