@@ -87,5 +87,8 @@ process.stdout.write(`${ESC}?25l${ESC}2J`);
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
 process.stdin.resume();
 process.stdin.on("data", onData);
+// Input that ends leaves nothing holding the event loop open, so node would exit 0 with no
+// verb and the wrapper, seeing a clean exit, would add none: the daemon would wait for ever.
+process.stdin.on("end", () => finish("cancel"));
 process.stdout.on("resize", draw);
 draw();

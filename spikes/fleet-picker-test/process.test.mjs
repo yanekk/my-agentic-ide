@@ -98,6 +98,21 @@ oneVerb("SIGTERM to node", drive("sigterm", "claude", 59, 22, [READY, ["term-nod
 // A missing shown program is a crash of the picker's own; the wrapper still answers.
 oneVerb("bad argument", drive("bad-arg", "nope", 59, 22, [["sleep", 0.5], ...settle]), "picker-cancel");
 
+// Input that ends is not an answer either. Without a handler the event loop empties and node
+// exits 0 having appended nothing, so the wrapper appends nothing and the daemon waits on a
+// picker that has gone. No pty here: stdin is /dev/null, so the read ends at once.
+{
+  const cmd = path.join(SCRATCH, "cmd-eof");
+  let status = 0;
+  try {
+    execFileSync("node", [path.join(ROOT, "bin/cockpit-fleet-picker.mjs"), cmd, "claude"],
+      { stdio: ["ignore", "ignore", "ignore"], timeout: 5000 });
+  } catch (e) { status = e.status; }
+  const lines = fs.existsSync(cmd) ? fs.readFileSync(cmd, "utf8").split("\n").filter(Boolean) : [];
+  check("stdin at EOF: exactly one verb, picker-cancel", lines, ["picker-cancel"]);
+  check("stdin at EOF: a clean exit, so the wrapper adds none", status, 0);
+}
+
 // --- the frame, drawn through the real tty, at the slot sizes --------------------
 {
   const r = drive("frame-59", "claude", 59, 22, [READY, ["snap", "a"], ["send", DOWN], ["snap", "b"]]);
