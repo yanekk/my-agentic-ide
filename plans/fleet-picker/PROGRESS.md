@@ -12,8 +12,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Status:** Planned. Nothing built.
 **Last updated:** 2026-10-07
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** implement T04 (picker-drill), now that T02 and T03 are ✅; T05 once T01 is ✅.
 
 ## Tasks
 
@@ -25,12 +24,12 @@ done · ⛔ blocked, needs a human.
 | T00 | keypress-spike | — | ✅ | |
 | T01 | key-binding | T00 | ⬜ | |
 | T02 | picker-screen | — | ✅ | |
-| T03 | daemon-picker | T00, T02 | 🔍 | openPicker/closePicker, armed block, shared `splitIntoFleetSlot`, cmd directory watch; sections 17a–17i plus 15m checks. Deviations: `fleet-*` always enters switchFleet, which closes an open picker under the lock; three 15c/15d fleet-block checks drop their closing brace; ⌥t-off-picker tested with the terminal slot empty. Whole suite left to pir. |
+| T03 | daemon-picker | T00, T02 | ✅ | Review clean, no fix commit. Ran ONLY=17i,15m (647) and pir-pane-test; mutations caught: bb-review picker guard (17h), switch dim while open (17c). Probed fs.watch on macOS: names `cmd`, ~24ms. Verb contract with the real picker matched. Lock-timeout dropping a picker answer logged, unreproduced. Strip click gate read-only. |
 | T04 | picker-drill | T02, T03 | ⬜ | |
 | T05 | docs | T01, T03 | ⬜ | |
 | T06 | live-check | T04, T05 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
