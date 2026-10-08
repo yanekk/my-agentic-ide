@@ -11,7 +11,7 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
 **Status:** Planned. Nothing built.
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-08
 **Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
 dependencies and may run beside it.
 
@@ -28,9 +28,9 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ✅ | |
 | T05 | docs | T01, T03 | ✅ | |
-| T06 | live-check | T04, T05 | ⬜ | |
+| T06 | live-check | T04, T05 | 🔍 | Person verified ← live 2026-10-08 (FINDINGS). config.lua and ~/.wezterm.lua restored, confirmed by readlink and a read. Ran keys, picker and pir-pane suites; cockpit-test left to pir's end run (parallel rule), a deviation from the task doc. |
 
-**Review queue:** *(empty)*
+**Review queue:** T06
 
 ## Blocked on the user
 
