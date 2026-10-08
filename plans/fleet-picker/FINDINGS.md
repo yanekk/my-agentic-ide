@@ -10,6 +10,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-08 | ✅ | T06 live check, person at the keyboard in the rebuilt window: ← opened the picker at both empty lists, → and Enter switched, text in a box kept ← as cursor, terminals, revdiff and agents unchanged, no lag. |
 | 2026-10-07 | 📌 | T04 drill, worker-driven: picker on a real mux at 120×40 and 80×24, steps 11–20 of `spikes/pir-pane-drill/drill.sh`: keys, both programs, cancels, resize, ⌥t beside it, BitBucket click, attached refusal, five rounds. DRILL PASS (364). |
 | 2026-10-07 | 🐞 | WezTerm writes `\n` + Ctrl+D into a pane it closes while its program runs. A BitBucket click killing the live picker made it answer `fleet-pir`. The picker now ignores reads carrying Ctrl+D; a stale `picker-cancel` follows, logged ignored. |
 | 2026-10-07 | 📌 | T05 review: CLAUDE.md still says `spikes/cockpit-test/` has 812 checks; T03 added sections 17a–17i and 15m checks, so the count is stale. Not fixed; needs a full-suite run to recount. |
