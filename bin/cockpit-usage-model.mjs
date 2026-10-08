@@ -153,6 +153,77 @@ export function renderUsage(cache, nowMs) {
   };
 }
 
+// --- pir's usage service (plans/pir-usage-reader) ----------------------------
+// pir's workers are SDK sessions with no statusline, so the tap never hears them;
+// pir serves the same rate_limits from a local HTTP service and the daemon polls
+// it. These two functions are the whole of the rule on the pure side: what a
+// discovery file may point at, and whether a heard reading replaces the cache.
+// The shell half (cockpit-usage-pir.mjs) only carries bytes in and out.
+
+// How far ahead of our clock a reading may be dated and still count as "heard now"
+// (DESIGN 2.4). 60 s is the tolerance pir's own service applies.
+export const PIR_FUTURE_TOLERANCE_MS = 60_000;
+
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// text: the contents of ${PIR_HOME ?? HOME}/.pir/api.json. Returns
+// { origin, pid } or null. Only a plain loopback http origin is accepted (DESIGN
+// 2.6): the daemon runs unattended, so a file on disk must not be able to point it
+// at the network -- no other host, no https (nothing to verify on loopback), no
+// credentials, no path/query/hash that would change what is requested. `new URL`
+// reads no clock, so it is fine on this side of the boundary.
+export function parsePirApiFile(text) {
+  if (typeof text !== "string") return null;
+  let data;
+  try { data = JSON.parse(text); } catch { return null; }
+  if (!isPlainObject(data) || data.version !== 1) return null;
+  if (!Number.isInteger(data.pid) || data.pid <= 0) return null;
+  if (typeof data.url !== "string") return null;
+  let u;
+  try { u = new URL(data.url); } catch { return null; }
+  if (u.protocol !== "http:") return null;
+  if (u.hostname !== "127.0.0.1" && u.hostname !== "localhost") return null;
+  // URL drops a port equal to the scheme default, so `:80` reads as no port and is
+  // refused like a missing one; pir's service never binds 80.
+  if (!u.port) return null;
+  // URL normalises an empty path to "/", so both "" and "/" arrive here as "/".
+  if (u.pathname !== "/" || u.search || u.hash || u.username || u.password) return null;
+  return { origin: u.origin, pid: data.pid };
+}
+
+// The newest-wins decision (DESIGN 2.3, 2.4, 3.3). cache: readCache()'s value or
+// null. body: the parsed JSON of a 200, of any type. nowMs: the daemon's clock,
+// read AFTER the response arrived. Returns the poll's state and, only when the
+// reading is valid and newer than the cache, the cache object to write.
+export function decidePirReading(cache, body, nowMs) {
+  const none = (state) => ({ state, write: null });
+  if (!isPlainObject(body) || body.version !== 1) return none("bad-body");
+  const observed = body.observed_at;
+  const limits = body.rate_limits;
+  // Both null is the service's documented "nothing known yet".
+  if (observed === null && limits === null) return none("empty");
+  // Anything else must be a real instant plus a real object; one null and one value
+  // is a malformed answer, not an empty one.
+  if (typeof observed !== "number" || !Number.isFinite(observed) || observed <= 0) return none("bad-body");
+  if (!isPlainObject(limits)) return none("bad-body");
+  // A reading dated in the future would beat every real reading until the clock
+  // caught up and hold off the stale mark (DESIGN 2.4). Within tolerance it is
+  // treated as heard now; beyond it, ignored.
+  if (observed > nowMs + PIR_FUTURE_TOLERANCE_MS) return none("future");
+  const at = Math.min(observed, nowMs);
+  const reading = normalizeRateLimits(limits, at);
+  if (!reading) return none("empty");
+  // Strictly newer wins: an equal time is the same reading polled again and must
+  // not touch the file (the footer would repaint every poll). A cache dated ahead
+  // of the clock is treated as older than anything, or one bad write would block
+  // the feed until the clock passed it. A cache without a usable writtenAt counts
+  // as no cache.
+  const cachedAt = cache && typeof cache === "object" ? cache.writtenAt : undefined;
+  const noCache = typeof cachedAt !== "number" || !Number.isFinite(cachedAt);
+  const write = noCache || cachedAt > nowMs || at > cachedAt ? reading : null;
+  return { state: "ok", write };
+}
+
 // --- the Aperture daily budget (the company gateway) ---
 // On a machine whose sessions run on Bedrock through the company's Tailscale
 // Aperture gateway the footer shows that gateway's budget instead of Claude's

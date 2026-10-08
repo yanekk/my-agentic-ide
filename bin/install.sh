@@ -127,6 +127,22 @@ else
     warn "$(printf '%-8s %s' pir "optional -- not found; the footer's PIR switch stays hidden")"
 fi
 
+# pir's API service feeds the footer's usage bar during pir runs (plans/pir-usage-reader,
+# DESIGN 2.7). The footer is silent about that feed, so this line is where a person
+# learns why the bar went stale. Asked through the cockpit's own reader -- the same
+# GET /v1/usage the daemon polls -- so the two cannot disagree about "running".
+# Optional like pir itself: `--status` exits 1 when the service is off, and the
+# `|| true` keeps that from ever ending or failing the install; never starts it.
+if [ -n "$PIR_PATH" ]; then
+    PIR_API="$(node "$REPO/bin/cockpit-usage-pir.mjs" --status 2>/dev/null || true)"
+    case "$PIR_API" in
+        "running "?*)
+            ok "$(printf '%-8s %s' pir-api "${PIR_API#running }")" ;;
+        *)
+            warn "$(printf '%-8s %s' pir-api "optional -- not running; the usage bar will not refresh during pir runs (pir service on)")" ;;
+    esac
+fi
+
 # --- 2. where the fleet view opens ----------------------------------------
 #
 # Order: what was asked for, then what a previous run recorded, then whichever
