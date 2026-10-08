@@ -28,7 +28,7 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ✅ | |
 | T05 | docs | T01, T03 | ✅ | |
-| T06 | live-check | T04, T05 | ⬜ | |
+| T06 | live-check | T04, T05 | ✅ | |
 
 **Review queue:** *(empty)*
 
