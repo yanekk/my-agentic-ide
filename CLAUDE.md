@@ -380,18 +380,33 @@ something was attached, never *which*.
 
 # How we work together
 
-Work on this project is planned once, read back once, and then executed one task at a time,
-by sessions that alternate between building and reviewing. Three commands drive it:
+Work on this project goes through `pir`. A plan is written once, read back once by a session that
+did not write it, and then built task by task, many tasks at once, each in its own session. Every
+task is reviewed by a fresh session that did not build it: a reviewer holding the implementation in
+its context is not a reviewer. A small change can skip the plan. There are no hand-typed commands
+for planning or building; these drive it:
 
 | Command | What it does |
 |---|---|
-| `/pir-plan` | Brainstorm, settle the requirements, show a throwaway mock to confirm the direction when the thing has a feel to it, get the tech right, check what the code already does before planning to build it again, split the work into tasks, and write it all down under `plans/{slug}/` |
-| `/pir-review-plan {slug}` | Read that plan back with fresh eyes, before a line of it is built — the gaps, the contradictions, and anything the machine does not actually support. Runs once, and `/pir-work` will not start until it has |
-| `/pir-work {slug}` | Do exactly one unit of work on that plan — implement the next task, or review the last one — then stop |
+| `pir plan` | Brainstorm, settle the requirements, show a throwaway mock to confirm the direction when the thing has a feel to it, get the tech right, check what the code already does before planning to build it again, split the work into tasks, and write it all down under `plans/{slug}/`. Then a fresh reviewer reads the plan back before a line of it is built: the gaps, the contradictions, anything the machine does not actually support, and anything already built. You answer both in `pir`'s screen, the plan stays on its own branch off the base branch, and when it is reviewed `pir` asks whether to start the parallel build |
+| `pir start {slug}` | Start (or open) the parallel build of a reviewed plan |
+| `@repo/single {prompt}` in `pir` | A small change with no multi-task plan, typed in `pir`'s dashboard box: `pir` holds a planner that settles the change with you and commits a short brief, `plans/{name}/BRIEF.md`, and a fresh plan reviewer that reads it back; then a builder that makes and commits the change from the brief, runs the repo's tests itself, holds a fresh reviewer that fixes what it finds, and hands the branch to the finisher for your `Go`. Needs `setup` and `test` lines in the repo's `.pir/settings.json` |
+
+**A plan is read back before it is built**, because a mistake in a plan is copied into every task
+built from it, and a task review, which checks work against the plan, cannot see it.
 
 **Read `plans/{slug}/DESIGN.md` before changing behaviour.** Every rule in it was decided
 deliberately and most carry a rationale. If you disagree with one, say so — do not quietly
 implement something else.
+
+**How the parallel workflow behaves is canonical in `/docs`.** For how parallel mode actually
+works — its components, the run lifecycle, task state, the branch/worktree model, the control
+folder, restart and recovery, and the known limitations — read `/docs`, not a plan's `DESIGN.md`.
+`DESIGN.md` files are build-time rationale and history; they record why a decision was made, not
+what the code does today, and a finished plan's `DESIGN.md` is sealed. A new plan that changes how
+parallel mode behaves updates `/docs` rather than re-opening a finished plan's `DESIGN.md`. (The
+per-plan files under `plans/{slug}/` remain the source of truth for that plan's own tasks and
+progress.)
 
 ---
 
@@ -436,6 +451,31 @@ Never invent a rule to get unblocked, and never quietly pick whichever is easier
 An underspecified requirement is not a gap for you to fill in silently — it is the exact
 thing I am here for.
 
+**Adding a task while a parallel run is going is the one thing a worker may change about the
+plan — and only by asking me first.** In parallel mode (and only there), a worker that finds
+the plan is missing a task raises it with me in its own session like any other decision, and
+only once I approve (or the coordinator agent approves on my behalf, below) does it write the new
+task down on its branch; the coordinator then adopts
+it at merge and dispatches it by its dependencies. A worker may **add** a task this way, never
+edit, split, re-order or re-depend one that already exists — editing a task another worker may
+be building right now is the dangerous case, so it is barred at the machine boundary. With my
+yes, the new task may name existing tasks that must wait for it (a `blocks` clause on its own row):
+that adds a wait to them without editing them, and it is how the coordinator learns the order. This is
+the only break in "the plan is mine": the addition still passes through me, or my stand-in, before
+it lands. How the adoption works is in `/docs` (`task-state.md`, `branch-model.md`).
+
+**In a parallel build, the coordinator agent stands in for me.** A build run by `pir` has a
+*coordinator agent* (unless it was started with `--no-coordinator`): a session that sees every
+worker's question and permission request before I do. Within its limits its answer counts as mine.
+It may answer what the plan settles, settle a question the design leaves open, approve going against
+a design rule, and approve a worker adding a task. It never answers an `ask`-bin action or a
+destructive command: those always reach me, and the command enforces it. Anything it will not decide
+it passes on to me, and I answer the worker directly. Every decision beyond routine is listed in the
+run's `plans/{slug}/REPORT.md`. A worker asks exactly as it would ask me, in its own session, and acts
+on the answer whoever gave it; it never asks the agent separately, and it still never invents a rule
+itself. Planning sessions and single runs have no stand-in. How it works is in
+`/docs/coordinator-agent.md`.
+
 ### How to ask me
 
 One decision at a time, laid out like this:
@@ -450,9 +490,15 @@ guessing wrong would waste the work or be unsafe.
 
 ### I am your hands on the real machine
 
-Anything that needs a screen, a camera, a second account, a login, a reboot, a real device,
-a paid API or a browser I will run for you — that is not a gap in the project, it is my job
-in it. Give me the exact command and tell me what to look for. The full rule and the
+Anything that needs a screen, a camera, a second account, a login, a reboot, a real device
+or a browser I will do for you — that is not a gap in the project, it is my job in it. Give
+me the exact command and tell me what to look for.
+
+**A live action is not on that list: I give you the authority, not the keyboard.** A deploy, a
+paid call, a DNS change — you run it, within the bins the plan set and I approved
+(`DESIGN.md §5.3`). If it needs my login, ask me for exactly the login, then carry on yourself.
+If it needs my yes, explain it and let the permission prompt ask me. Do not hand me a command
+to paste that you could run. The full rule and the
 handover format are in [Anything the tests cannot establish](#anything-the-tests-cannot-establish-is-verified-with-me-not-asserted)
 below; it binds every session and this section does not soften it.
 
@@ -467,62 +513,7 @@ you may need me to start it going again. That is cheaper than a task built on a 
 
 ---
 
-## The `pir-work` command
-
-**When I say `pir-work`, invoke the `pir-work` skill.** It reads
-`plans/{slug}/PROGRESS.md`, picks the one task the queue says is next, and dispatches to
-`pir-implement` or `pir-review`:
-
-```
-read plans/{slug}/PROGRESS.md
-  ├─ plan not reviewed ?   → STOP — /pir-review-plan runs first
-  ├─ any task marked 🔍 ?  → REVIEW the lowest-numbered one
-  ├─ else any task 🟡 ?    → FINISH it
-  └─ else                  → IMPLEMENT the next ⬜ whose dependencies are ✅
-```
-
-Then update `PROGRESS.md`, commit, report, **and stop.** One unit of work per `pir-work`.
-
-That is the whole point: the session that reviews a task is never the session that wrote
-it. A reviewer holding the implementation in context is not a reviewer, and the alternation
-is what buys the fresh eyes.
-
-The skills live in `.claude/skills/` and hold the procedures — the dispatch, the review gate
-and the blocked-task rule in `pir-work`, the step-by-step in `pir-implement` and `pir-review`.
-**Do not invoke `pir-implement` or `pir-review` directly**: `pir-work` chooses the task,
-and that choice is what guarantees the alternation. If you want a specific task built or
-reviewed out of order, say so to me first.
-
-The rest of this file holds the rules that bind **every** session — the ones that arrived
-through `pir-work` and the ones that did not.
-
-### A plan gets read back before it gets built
-
-`/pir-review-plan {slug}` runs once, in a session that did not write the plan, between
-`/pir-plan` and the first `/pir-work`. It reads the whole plan for four things: whether the
-documents agree with each other, whether the requirements are actually complete, whether the
-claims about this machine still hold, and **whether any of it is already built** — a task that
-rebuilds something the code already has, instead of extending it, passes every other check
-here and is still the wrong thing to build.
-
-**Why it is a separate session, and separate from everything else here:** a mistake in a plan
-is copied into every task built from it, and the build-review alternation cannot see it —
-`pir-review` checks a task *against* the plan, so a wrong plan passes review task after task.
-This is the only pass that questions the plan itself.
-
-**What it may change on its own, and what it must ask about.** Anything with exactly one right
-answer — a dependency pointing at a task that does not exist, the same file named two ways, a
-version the machine has just contradicted — it fixes and tells me afterwards. Anything that
-changes what gets built — a requirement nobody decided, two rules that contradict, a task that
-should be split — it brings to me, one at a time, and waits. It reads the whole plan before it
-asks me anything, so I see the size of the problem before I answer any part of it.
-
-It marks the plan reviewed in `PROGRESS.md`, and that line is what lets `/pir-work` start. It
-will not run on a plan already being built: rewriting the ground under finished work is worse
-than the gap it would close, and amending a live plan is my decision.
-
-**The account of that review lives in its commit message and nowhere else** — there is no
-review report file. A session that later wonders why a rule says what it says has `git log`.
+## The rules every session follows
 
 ### Scope is strict
 
@@ -533,14 +524,26 @@ task, a stale doc, a better way to do something — goes in the **findings log**
 This keeps commits matched to tasks, keeps the review boundary meaningful, and stops a
 session sprawling into a rewrite. The findings log exists for exactly this.
 
+**The one sanctioned break from strict scope** is a parallel-mode worker adding a task with my
+in-session approval, or the coordinator agent's on my behalf (see `Who decides what`) — it commits the new task's row and doc on its own
+branch, and the coordinator adopts it at merge. That is a deliberate addition to the plan, not
+scope creep, and it binds parallel builds only. Everything else you merely notice still goes in the findings log
+and is left alone; a forbidden edit of an existing task is rejected at merge, never applied.
+
 ### Anything the tests cannot establish is verified with me, not asserted
 
 **The project's test command is the only evidence a session may produce on its own.** It is
-named in `DESIGN.md § Environment`, along with the table of what that command cannot reach.
+the `test` lines of the setup/test block `DESIGN.md` opens with (run the `setup` lines first if
+the tests cannot start for something not installed); `DESIGN.md § Environment` holds the table
+of what that command cannot reach.
 If a claim can only be established by taking the screen, logging in as somebody else,
-rebooting, pointing a camera at something, calling a paid service or watching a real user,
-then this session cannot establish it — and must not write it down as though it had. Say
-what you built, say what it has not been shown to do, and hand me the exact command.
+rebooting, pointing a camera at something, calling a paid service the plan gave you no bin
+for, or watching a real user, then this session cannot establish it — and must not write it
+down as though it had. Say what you built, say what it has not been shown to do, and hand me the exact command.
+A screen the project itself draws is not on that list: a session drives it end to end, in a real
+browser or a real terminal against a free backend, and judges it itself, and I am never asked how it
+looks or feels. What that drill saw is written down as worker-driven, not as verified by hand
+(the end-to-end part of the session's procedure).
 
 **How to hand it over.** Raise it the moment you need it and **wait for the answer** — see
 [I am your hands on the real machine](#i-am-your-hands-on-the-real-machine); it is not
@@ -581,15 +584,18 @@ the tests cannot see. Before an action like that, say in one plain line whether 
 taken back and how: "reversible — the old build redeploys in one command", or "not reversible
 — the old token is dead the moment the new one is written."
 
-**The step past a point of no return is a `what`, and `what` is mine.** Stop and ask before
-it, even in auto mode, even when the plan implied it: a rotated credential, a deleted
-resource, a thing other people can now see, a change to a device I would have to be in the
-room to undo. Naming the way back is what turns "I ran the deploy" into "the next step cannot
-be undone — confirm": the decision reaching me while it is still a decision, not a report
-after it.
+**Which actions stop for me is decided once, in the plan, and I approve it at plan review.**
+`DESIGN.md §5.3` puts every live action in a bin: `worker` (you run it, tell me after in one
+line), `ask` (you explain it, run it, and the permission prompt is my yes), `person` (only a
+login, a device or a judgement). Anything that cannot be undone, may cost more than its task
+expects, other people can see or receive, or changes the infrastructure itself is `ask` unless
+I moved it down at plan review: a rotated credential, a deleted resource, a first public
+launch, a change to a device I would have to be in the room to undo. Naming the way back is
+what turns "I ran the deploy" into "the next step cannot be undone — approve it": the decision
+reaching me while it is still a decision, not a report after it.
 
-A reversible action you own like any other `how`: take it, tell me after in one line. It is
-only the irreversible edge that stops for me — a routine redeploy does not.
+**An action with no row is `ask`**, even in auto mode, even when the plan implied it, and the
+missing row goes in `FINDINGS.md`.
 
 **When the way back mattered, it goes in `FINDINGS.md` with the date** — the rollback that
 worked, or the step that turned out to have none. A reversibility written down once is one
@@ -603,22 +609,42 @@ plan-review(screen-time): 6 fixes, 3 decisions            ← the plan read back
 T05: policy decision function                             ← implementation
 T05 review: fix warning threshold                         ← a fix found while reviewing
 T05 review: clean                                         ← review found nothing; the PROGRESS update is the commit
+                                                          (body: risk list + deviation verdicts)
+fix: stale branch on restart                              ← a fix of work already reviewed, with a trailer:
+Escape: coordinator-restart-resume T03
 ```
 
 The `plan-review` message is the *only* account of that session, so it is written long — every
-fix by name and every decision with its reason. All the others stay short.
+fix by name and every decision with its reason. All the others stay short, with one exception:
+**a review commit carries its risk list and its per-deviation verdicts** in the body, about ten to
+fifteen lines — the ways the change could be wrong, written before the builder's account was read,
+and each recorded deviation marked `held by <check>` or `falsified`. Nothing else in a review
+commit grows; the account of the review is that list and those verdicts.
+
+**A fix of work already reviewed carries an `Escape:` trailer.** Any commit that fixes a defect in a
+✅ task or a merged single run ends with one trailer line naming what escaped review:
+`Escape: {plan} T{nn}`, `Escape: single {name}`, or `Escape: unknown` when the origin cannot be
+traced. A trailer, not a subject prefix, because subjects already follow fixed forms (`T05:`,
+`single(name):`) that people and tools read. It is what makes escapes countable per plan:
+`git log --grep '^Escape:'` lists every one.
 
 ### Where sessions run
 
-**Work in the main checkout, on the main branch. Always.** One checkout, one branch, commits
-straight onto it — no worktrees, no branch per task, and so nothing to merge, ever. The
-review boundary here is the *session*, not the branch: `pir-work` already guarantees that
-whoever reviews a task did not write it, and a branch per task buys nothing on top of that
-while costing a merge every time.
+**`pir` runs every session in its own worktree, on a `pir/…` branch.** A planner and its plan
+reviewer share the plan's side branch, which then becomes the build's feature branch; each build
+task gets a branch of its own off it; a single run gets one branch. A session's own procedure says
+where it commits.
 
-**If you nevertheless find yourself on a branch or in a worktree, stop and say so.** Folding
-it back is a decision about history and it is mine to make — never reach for a merge, a
-rebase or a reset on your own initiative.
+**Nothing reaches the base branch except through me.** No session merges into the base branch or
+pushes on its own; the merge is mine, or the finisher's on my go. If you find history to fold back
+that your procedure does not cover, stop and say so: a merge, a rebase or a reset is mine to decide.
+
+**The base branch is the one this repo names.** It is set by `baseBranch` in
+`.pir/settings.json` at the root of the repo (committed, for everyone), and a person can override it
+for their own machine in `~/.pir/{repo}/settings.json` (`{repo}` being the repo's folder name). In a
+repo with `dev`, `stage` and `prod` it is usually `dev`. `pir` refuses to plan or to start a build
+until one of the two files names it, whatever branches the repo has: it never guesses the branch.
+A `pir` run records which branch it was cut from and keeps to it for the rest of the run.
 
 ---
 
@@ -628,6 +654,8 @@ Each plan is a folder under `plans/`. `ls plans/` lists them.
 
 1. **`plans/{slug}/PROGRESS.md`** — task states and the queue. Always current.
    **Sixty words to a Notes cell**: it is the index, and the account is the commit message.
+   Its `Task` cell is the task's slug — the same kebab name as its `tasks/T{nn}-{slug}.md`
+   file and, in parallel mode, its worker's agent name.
 2. **`plans/{slug}/FINDINGS.md`** — what the build taught, newest first, **forty words a
    row**. **Where "verified by hand with the user" is written down**, and therefore the only
    record that anything was ever seen working for real.
@@ -644,7 +672,10 @@ the session that later builds the real UI. It is not present in every plan.
 `PROGRESS.md` is the handoff and `FINDINGS.md` is the memory. A stale one of either costs
 the next session more than it saved this one.
 
-**Both are read at the start of every session, so both are kept short on purpose.** The word
+**Both are read at the start of every session, so both are kept short on purpose.** One
+exception: a review session reads `FINDINGS.md` only after its cold read — once it has read the task
+doc and the diff and written its own list of how the change could be wrong — so the builder's account
+does not set its search. The word
 limits above are what stop them growing into a history of the project: when a note wants a
 paragraph, the paragraph goes in the commit message. In the project this method came from
 they were one file, and it reached 175 000 characters — three quarters of it history about
@@ -711,3 +742,46 @@ decisions. The current time arrives as an argument, never from the system. That 
 is what makes a day of behaviour testable in milliseconds. `DESIGN.md § Architecture` names
 where the boundary runs here and how it is enforced.
 
+### A code change is not live until you install it
+
+The `pir` command and the procedure its sessions follow do not run from this checkout.
+`install.sh` copies the engine, its npm packages and its procedure texts (`roles/`) to
+`~/.claude/pir-engine/`, the `pir-install` skill to `~/.claude/skills/` and the `pir` launcher onto
+the PATH, and the installed `pir` execs `~/.claude/pir-engine/src/shell/pir.mjs` — the baked-in
+path, not this repo. So editing `src/` or `roles/` here changes nothing a user runs until the
+install is refreshed.
+
+**A session never installs.** The installed copy is the one every `pir` session on the machine
+runs, live builds included, so it only ever receives merged code. A session run by `pir` — a
+build worker, a planner or plan reviewer, a single run's builder or reviewer — never runs
+`./install.sh` and never copies into `~/.claude/`. Its branch is unmerged and unreviewed, and
+installing it would swap the engine under every live run, the run it belongs to included. The
+finishing rules (`.pir/rules/on-finish.md`) install once the branch is merged, so a session
+neither asks about it nor logs it.
+
+The script is idempotent — re-running only refreshes in place. `./install.sh /path/to/project`
+also appends the method to that project's CLAUDE.md; the bare form touches no project.
+
+### The README follows every major feature
+
+`README.md` is how someone who has never opened this repo learns what the method does and why to
+use it. It leads with what a user gets — the parallel run, the autonomy they set, clean-slate
+sessions, no self-review — and a feature missing from it is, for a new reader, a feature that does
+not exist.
+
+**Update `README.md` in the same change whenever:**
+
+- **a major feature lands** — a new command or view, a new step in the workflow, a new thing the
+  person decides or sees, a change to what an agent may do on its own; or
+- **a page in `/docs` is added, or its behaviour changes** — every behaviour `/docs` describes has
+  at least a sentence and a link in the README, pitched at a user rather than restating the spec.
+
+Write for a user, not a maintainer: what it does for them and how they reach it, then a link to
+`/docs` for the detail. Say only what the code does today, and state a limit where a reader would
+otherwise assume more. `/docs` stays canonical; where the two disagree, `/docs` wins and the README
+is the one fixed.
+
+**Plan it, do not bolt it on.** The planner puts the README update in the "Done when" of the task
+that completes the feature, so it passes review with the rest. That task touching `README.md` is
+part of its scope, not scope creep. A README gap noticed anywhere else goes in `FINDINGS.md` like
+any other.
