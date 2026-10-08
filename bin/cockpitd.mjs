@@ -34,7 +34,7 @@ import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google
 // BitBucket -- GET only, DESIGN 3.1) and its store. readCache/writeCache are
 // aliased because the agenda store already owns those names.
 import { getUser, listOpenPRs, listPRComments, listPRDiffstat } from "./cockpit-bitbucket-client.mjs";
-import { normalizePR, concernsMe, summarizeDiffstat, renderDashboard } from "./cockpit-bitbucket-model.mjs";
+import { normalizePR, concernsMe, concernsMeQuery, summarizeDiffstat, renderDashboard } from "./cockpit-bitbucket-model.mjs";
 import {
   isConfigured,
   readCache as readBBCache,
@@ -45,6 +45,7 @@ import {
 } from "./cockpit-bitbucket-store.mjs";
 
 import { browseConfChain } from "./cockpit-browse-conf.mjs";
+import { refreshApertureCache } from "./cockpit-aperture-client.mjs";
 // The pure half of following the pir dashboard (pir-pane DESIGN 3.1): this daemon
 // gathers the facts (file text, pid liveness, folders, git) and the model decides.
 import { decidePir, followPirReport, isPirKey, shouldReapPirKey, startingMode } from "./cockpit-pir-model.mjs";
@@ -127,8 +128,16 @@ const MUX_LINK = path.join(WEZ_DIR, "default-org.wezfurlong.wezterm");
 const REPAIR_COOLDOWN_MS = 5000;
 let lastRepair = 0;
 
+// `--no-auto-start` on every call: this daemon is nohup'd and outlives its window,
+// and a cli that cannot reach its GUI otherwise spawns `wezterm-mux-server
+// --daemonize` -- which runs default_prog, i.e. cockpit-layout.sh, i.e. a whole
+// invisible second cockpit whose `pkill -f cockpitd.mjs` kills the daemon of the
+// window that just opened. Measured 2026-10-01: three such ghosts in five minutes,
+// each leaving the real window with no daemon. A refused call is logged instead.
+const WEZ_CLI = ["cli", "--no-auto-start"];
+
 function wezRaw(args, stdin) {
-  return execFileSync("wezterm", ["cli", ...args], {
+  return execFileSync("wezterm", [...WEZ_CLI, ...args], {
     input: stdin, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"],
   });
 }
@@ -163,10 +172,15 @@ function repairMuxSocket() {
     return false;
   }
 
+  // WEZTERM_UNIX_SOCKET, inherited from the window that started us, outranks the
+  // symlink: left alone it keeps naming the dead window's socket and the repaired
+  // link is never consulted. Each candidate is tried through the variable as well.
+  const inherited = process.env.WEZTERM_UNIX_SOCKET;
   for (const { full } of candidates) {
     try {
       fs.rmSync(MUX_LINK, { force: true });
       fs.symlinkSync(full, MUX_LINK);
+      if (inherited !== undefined) process.env.WEZTERM_UNIX_SOCKET = full;
       wezRaw(["list"]);                       // prove it before believing it
       log(`repaired stale mux socket → ${path.basename(full)}`);
       return true;
@@ -174,6 +188,7 @@ function repairMuxSocket() {
       /* dead socket too; try the next */
     }
   }
+  if (inherited !== undefined) process.env.WEZTERM_UNIX_SOCKET = inherited;
   return false;
 }
 
@@ -3212,6 +3227,28 @@ const BITBUCKET_OPENER = process.env.BITBUCKET_BROWSER || "/usr/bin/open";
 // reconcile are: overlapping passes interleave cache writes and burn calls.
 let prFetching = false;
 
+// A 429 stops calling altogether for a while (2026-10-05). BitBucket's limit is a
+// rolling hour, so a daemon that retried every minute spent each trickle of returned
+// allowance on the first repo of the next pass and every repo read "offline" for
+// hours. 5 minutes, doubling to 30, reset by the first pass that is not refused.
+// Every trigger is skipped while it runs -- the on-return one too, or switching
+// agents would knock just as often. Env seam for the suite, like the tick's.
+const PR_BACKOFF_MS = Number(process.env.COCKPIT_BITBUCKET_BACKOFF_MS) || 5 * 60_000;
+const PR_BACKOFF_MAX_STEPS = 6;   // x PR_BACKOFF_MS: 5, 10, 20, 30, 30 ... minutes
+let prBackoffUntil = 0;
+let prBackoffStep = 0;
+
+// How long a shown PR's comments and diffstat are reused while the list says the PR
+// is unchanged (same updated_on, comment_count and source commit). Two GETs per shown
+// PR every minute were ~a third of the budget and almost always returned what the
+// cache held. The age bound is for what none of those three fields reveal -- a thread
+// resolved with no new comment -- so the unresolved-thread sort is at most this
+// stale. Env seam: the suite sets 0 to make every pass re-read, as before.
+const PR_DETAIL_MAX_AGE_MS = (() => {
+  const v = Number(process.env.COCKPIT_BITBUCKET_DETAIL_MAX_AGE_MS);
+  return process.env.COCKPIT_BITBUCKET_DETAIL_MAX_AGE_MS !== undefined && Number.isFinite(v) ? v : 15 * 60_000;
+})();
+
 /**
  * Fetch every watched repo's open PRs and write the cache (DESIGN 2.9, 3.4).
  *
@@ -3239,7 +3276,22 @@ async function refreshPRs(reason) {
     if (!isConfigured(cfg)) return;
 
     const now = Date.now();
-    const cache = readBBCache();   // { meUuid, repos: { <slug>: { fetchedAt, prs, error } } }
+    if (now < prBackoffUntil) return;
+    const cache = readBBCache();
+
+    // Record a 429 and start (or lengthen) the pause. Called at most once a pass.
+    const backOff = (what) => {
+      prBackoffStep += 1;
+      const wait = PR_BACKOFF_MS * Math.min(2 ** (prBackoffStep - 1), PR_BACKOFF_MAX_STEPS);
+      prBackoffUntil = Date.now() + wait;
+      log(`bitbucket ${reason}: rate-limited on ${what}, pausing ${Math.round(wait / 1000)}s`);
+    };
+    // A repo not refreshed because of a 429 keeps its PRs and fetchedAt, exactly as
+    // any failure does; the kind is what makes the pane say rate-limited.
+    const markLimited = (slug) => {
+      const prev = cache.repos[slug];
+      cache.repos[slug] = { fetchedAt: prev?.fetchedAt ?? 0, prs: prev?.prs ?? [], error: { kind: "limited" } };
+    };   // { meUuid, repos: { <slug>: { fetchedAt, prs, error } } }
 
     // "Me" is resolved from the token, once, and PERSISTED in the cache (DESIGN
     // 2.6). So getUser is called only until it succeeds -- across ticks and across
@@ -3254,6 +3306,12 @@ async function refreshPRs(reason) {
         // store), so the signal is recorded on every watched repo, previous PRs
         // kept, and the pass stops. A transient failure writes nothing and heals on
         // the next tick -- meUuid is still unset, so getUser is retried then.
+        if (me.error.kind === "limited") {
+          for (const slug of cfg.repos) markLimited(slug);
+          writeBBCache(cache);
+          backOff("getUser");
+          return;
+        }
         if (me.error.kind === "auth") {
           for (const slug of cfg.repos) {
             const prev = cache.repos[slug];
@@ -3268,11 +3326,23 @@ async function refreshPRs(reason) {
     }
 
     // One GET per repo, sequential (DESIGN 2.9). Each repo is cached independently
-    // (DESIGN 2.n): one failing must not stop the next or blank the others.
+    // (DESIGN 2.n): one failing must not stop the next or blank the others -- except
+    // a 429, which is about the token, not the repo: once refused, the rest of the
+    // pass makes no call at all and every repo still to come is marked limited.
+    //
+    // The list is filtered on the server to the PRs that can concern me (the model's
+    // concernsMeQuery, a superset of concernsMe): cribl goes from 20 pages to one.
+    const query = concernsMeQuery({ meUuid: cache.meUuid, team: cfg.team });
+    let limited = false;
     for (const slug of cfg.repos) {
       const prev = cache.repos[slug];
-      const res = await listOpenPRs({ key: cfg.key, workspace: cfg.workspace, repo: slug, origin: BITBUCKET_ORIGIN });
-      if (res.error) {
+      if (limited) { markLimited(slug); continue; }
+      const res = await listOpenPRs({ key: cfg.key, workspace: cfg.workspace, repo: slug, origin: BITBUCKET_ORIGIN, query });
+      if (res.error?.kind === "limited") {
+        markLimited(slug);
+        limited = true;
+        backOff(safeText(slug));
+      } else if (res.error) {
         // KEEP THE PREVIOUS PRs on any failure (DESIGN 2.7/2.n): a wifi blip or an
         // expired token must not empty a repo's last good list. fetchedAt is kept
         // too -- it IS the age a staleness line reports. "auth" is the
@@ -3319,15 +3389,44 @@ async function refreshPRs(reason) {
         const prevDiffstat = (id) => prevById.get(id)?.diffstatSummary;
         let commentGets = 0;
         let diffstatGets = 0;
+        let unchanged = 0;
         for (const pr of res.prs) {
           const norm = normalizePR(pr, { meUuid: cache.meUuid, repo: slug });
           if (!concernsMe(norm, { meUuid: cache.meUuid, team: cfg.team })) {
             pr.comments = prevComments(pr.id);   // not shown -> no read; keep any it had
             continue;                            // and no diffstatSummary: an unshown PR carries none (DESIGN 2.4)
           }
+          // Unchanged since its details were last read, and not yet too old: reuse
+          // them (PR_DETAIL_MAX_AGE_MS). `detailsAt` is stamped only when BOTH reads
+          // succeeded, so a PR with a failed read is retried on the next pass.
+          const was = prevById.get(pr.id);
+          if (was && Array.isArray(was.comments) && was.diffstatSummary
+              && was.updated_on === pr.updated_on && was.comment_count === pr.comment_count
+              && was.source?.commit?.hash === pr.source?.commit?.hash
+              && now - (Number(was.detailsAt) || 0) < PR_DETAIL_MAX_AGE_MS) {
+            pr.comments = was.comments;
+            pr.diffstatSummary = was.diffstatSummary;
+            pr.detailsAt = was.detailsAt;
+            unchanged++;
+            continue;
+          }
+          // Refused earlier in this repo: keep what it had, call nothing more.
+          if (limited) {
+            pr.comments = prevComments(pr.id);
+            const keep = prevDiffstat(pr.id);
+            if (keep) pr.diffstatSummary = keep;
+            continue;
+          }
           const cr = await listPRComments({ key: cfg.key, workspace: cfg.workspace, repo: slug, prId: pr.id, origin: BITBUCKET_ORIGIN });
           pr.comments = cr.error ? prevComments(pr.id) : cr.comments;
           if (!cr.error) commentGets++;
+          if (cr.error?.kind === "limited") {
+            limited = true;
+            backOff(safeText(slug));
+            const keep = prevDiffstat(pr.id);
+            if (keep) pr.diffstatSummary = keep;
+            continue;
+          }
           // One diffstat GET per shown PR too (DESIGN 2.4), the same shape and budget
           // as the comment read: fetched, summed by the pure summarizeDiffstat, and the
           // triple cached on the PR entry -- never the per-file list, so the repaint
@@ -3338,19 +3437,23 @@ async function refreshPRs(reason) {
           if (dr.error) {
             const keep = prevDiffstat(pr.id);
             if (keep) pr.diffstatSummary = keep;
+            if (dr.error.kind === "limited") { limited = true; backOff(safeText(slug)); }
           } else {
             pr.diffstatSummary = summarizeDiffstat(dr.diffstat);
             diffstatGets++;
+            if (!cr.error) pr.detailsAt = now;
           }
         }
         cache.repos[slug] = { fetchedAt: now, prs: res.prs, error: null };
         // The fetch counts make the per-minute call volume visible in the log (DESIGN
         // 2.9): if a real workspace ever makes the budget tight, this is what shows it
         // -- counts only, never a title or author.
-        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs, ${commentGets} comment fetches, ${diffstatGets} diffstat fetches`);
+        log(`bitbucket ${reason}: ${safeText(slug)} ok, ${res.prs.length} prs, ${commentGets} comment fetches, ${diffstatGets} diffstat fetches, ${unchanged} unchanged`);
       }
     }
 
+    // A pass that was not refused ends any pause's doubling.
+    if (!limited) prBackoffStep = 0;
     writeBBCache(cache);
   } catch (e) {
     // A pass must never take the daemon down or leave a rejection for the
@@ -3401,6 +3504,38 @@ async function refreshUsage() {
     log(`usage: poll failed, ${e?.name ?? "Error"}`);
   } finally {
     usagePolling = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The footer's Aperture budget: keeping aperture-cache.json current
+//
+// The same split as the agenda and the PR dashboard: the daemon fetches, the
+// footer only draws. Only on a machine whose settings.json routes Claude through
+// Bedrock (bedrockConfigured), against that same gateway's origin -- off Bedrock
+// there is no call at all and the footer shows Claude's own rate limits instead.
+// A failed fetch writes nothing: the last reading stays and the footer dims it
+// once it is 15 minutes old. Nothing but the outcome kind is logged.
+// ---------------------------------------------------------------------------
+
+// Test seams, like the PR dashboard's: a suite cannot wait a real minute, and
+// must never reach the real gateway.
+const APERTURE_TICK_MS = Number(process.env.COCKPIT_APERTURE_TICK_MS) || 60_000;
+const APERTURE_ORIGIN = process.env.COCKPIT_APERTURE_ORIGIN || "";
+let apertureFetching = false;
+
+async function refreshAperture(reason) {
+  if (apertureFetching) return;
+  apertureFetching = true;
+  try {
+    const outcome = await refreshApertureCache({ origin: APERTURE_ORIGIN || undefined });
+    // A failed pass is logged at start only: offline, a per-tick line would add one
+    // to daemon.log every minute. The footer's stale mark is the lasting signal.
+    if (outcome !== "ok" && outcome !== "off" && reason !== "tick") log(`aperture ${reason}: ${outcome}`);
+  } catch (e) {
+    log(`aperture ${reason}: pass failed, ${e?.name ?? "Error"}`);
+  } finally {
+    apertureFetching = false;
   }
 }
 
@@ -3609,7 +3744,7 @@ async function paneState() {
   let text;
   try {
     const { stdout } = await execFileAsync(
-      "wezterm", ["cli", "get-text", "--pane-id", String(panes.fleet)],
+      "wezterm", [...WEZ_CLI, "get-text", "--pane-id", String(panes.fleet)],
       { timeout: 4000, maxBuffer: 8 << 20 },
     );
     text = stdout;
@@ -4104,6 +4239,8 @@ setInterval(() => refreshAgenda("tick"), AGENDA_TICK_MS);
 setInterval(() => refreshPRs("tick"), PR_TICK_MS);
 // The pir usage feed's every-30-s trigger (pir-usage-reader DESIGN 2.2).
 setInterval(refreshUsage, USAGE_TICK_MS);
+// The footer's Aperture budget, every minute; a no-op off Bedrock.
+setInterval(() => refreshAperture("tick"), APERTURE_TICK_MS);
 reconcile();
 // DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
 // only fires when an agent WAS attached -- at start-up none is, so without this
@@ -4117,6 +4254,7 @@ refreshPRs("start");
 // And at start, so a rebuilt window does not wait half a minute for the bar. Costs
 // one failed file read when pir is absent, and logs nothing then.
 refreshUsage();
+refreshAperture("start");
 
 const shutdown = () => {
   stopWatchers();

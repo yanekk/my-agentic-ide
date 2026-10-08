@@ -301,6 +301,29 @@ export function concernsMe(pr, { meUuid = "", team = [] } = {}) {
   return inToReview(pr, meUuid, teamSet) || inMine(pr, meUuid);
 }
 
+/**
+ * The same membership as a BitBucket filter (`q=`), so the LIST call returns only
+ * the PRs concernsMe could accept instead of every open PR. Fetching all of cribl's
+ * ~1000 open PRs was 20 pages a minute and, with the other repos, ~4300 requests an
+ * hour against a limit of about 1000 (2026-10-05). The filter may let through MORE
+ * than concernsMe (drafts and PRs I approved still match the reviewer clause), never
+ * fewer: concernsMe still runs on every returned PR, so the server only has to be a
+ * superset. Hence the clauses are the three inclusion paths with none of the
+ * exclusions. The team clause matches the author's nickname with `=`, because
+ * BitBucket rejects `~` on nickname ("nickname expressions only support = and !=").
+ * Returns "" when nothing could concern me (no uuid, no team): the caller then
+ * fetches unfiltered rather than send an empty disjunction.
+ */
+export function concernsMeQuery({ meUuid = "", team = [] } = {}) {
+  const lit = (v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const clauses = [];
+  if (meUuid) clauses.push(`reviewers.uuid=${lit(meUuid)}`, `author.uuid=${lit(meUuid)}`);
+  const nicks = (Array.isArray(team) ? team : []).map((t) => String(t).trim()).filter(Boolean);
+  for (const n of new Set(nicks)) clauses.push(`author.nickname=${lit(n)}`);
+  if (!clauses.length) return "";
+  return `state="OPEN" AND (${clauses.join(" OR ")})`;
+}
+
 // A PR is identified by repo + id, so the same PR reached by two inclusion rules
 // collapses to one row. First occurrence wins; order is preserved for the sort that
 // follows (Array.sort is stable).
@@ -461,23 +484,27 @@ function greetingLines() {
   ];
 }
 
-// The tab strip (DESIGN 2.2). Active tab bold, the other dim; each carries its
-// total count so "what needs me" is answered at a glance. Returns the line and the
-// click zones (x-only; the caller stamps y once it knows the line's position).
+// The tab strip (DESIGN 2.2). Drawn like the footer's diff-mode and program
+// switches, so every clickable switch in the cockpit reads the same: the active tab
+// in reverse video padded by a space each side, the other dim, a dim ` | ` between.
+// Each carries its total count so "what needs me" is answered at a glance. Returns
+// the line and the click zones (x-only; the caller stamps y once it knows the
+// line's position); a zone covers the padding too, as the footer's do.
 function buildTabs(tab, counts) {
   const items = [
     { verb: "bb-tab:toReview", label: `To review · ${counts.toReview}`, active: tab === "toReview" },
     { verb: "bb-tab:mine", label: `Mine · ${counts.mine}`, active: tab === "mine" },
   ];
-  const SEP = "   ";
+  const SEP = " | ";
   let line = "";
   let col = 1;               // 1-indexed pane-local column of the next glyph
   const zones = [];
   items.forEach((it, i) => {
-    if (i) { line += SEP; col += SEP.length; }
+    if (i) { line += dim(SEP); col += SEP.length; }
     const x0 = col;
-    line += it.active ? bold(it.label) : dim(it.label);
-    col += visibleLen(it.label);
+    const text = it.active ? ` ${it.label} ` : it.label;
+    line += it.active ? reverse(text) : dim(text);
+    col += visibleLen(text);
     zones.push({ verb: it.verb, x0, x1: col - 1 });
   });
   return { line, zones };
@@ -524,8 +551,13 @@ function buildTrailer(cfgRepos, cacheRepos, now, w) {
   if (!errored.length) return [];
 
   const withEntry = cfgRepos.filter((slug) => cacheRepos[slug]).length;
-  const allTransient = errored.every((x) => x.e.error.kind === "transient");
-  if (allTransient && errored.length === withEntry) {
+  // "limited" (BitBucket refused for too many requests) is drawn like offline -- the
+  // last rows stay, one dim line -- but named for what it is, so it is not mistaken
+  // for the wifi.
+  const waitable = (k) => k === "transient" || k === "limited";
+  const reasonOf = (k) => (k === "limited" ? "rate-limited" : "offline");
+  const allWaitable = errored.every((x) => waitable(x.e.error.kind));
+  if (allWaitable && errored.length === withEntry) {
     let stalest = 0;
     let never = false;
     for (const { e } of errored) {
@@ -534,13 +566,14 @@ function buildTrailer(cfgRepos, cacheRepos, now, w) {
       if (age > stalest) stalest = age;
     }
     const when = never ? "never" : ageText(stalest);
-    return [clip(dim(`last updated ${when} · offline`), w)];
+    const limited = errored.some((x) => x.e.error.kind === "limited");
+    return [clip(dim(`last updated ${when} · ${reasonOf(limited ? "limited" : "transient")}`), w)];
   }
 
   return errored.map(({ slug, e }) => {
     const msg = e.error.kind === "auth"
       ? "sign-in expired · config bitbucket-key"
-      : "couldn't fetch · offline";
+      : `couldn't fetch · ${reasonOf(e.error.kind)}`;
     return clip(dim(`${safeText(slug)}  ${msg}`), w);
   });
 }
@@ -857,21 +890,25 @@ export function renderDashboard({ width, rows, cache, view, now, config, emphasi
   // one line you can act on is not the first pushed off the bottom.
   const trailer = buildTrailer(cfgRepos, cacheRepos, now, w);
 
+  // The tab line sits between two blank lines, so it reads as the pane's switch
+  // rather than as the table's first row.
   const tabs = buildTabs(tab, { toReview: toReview.length, mine: mine.length });
+  push("");
   push(tabs.line);
   zonesAt(tabs.zones);
+  push("");
 
   if (list.length === 0) {
     // A one-line "checked, all clear" beats an empty table reading as broken (2.n).
     push(dim(tab === "mine" ? "nothing of yours open" : "nothing waiting on you"));
   } else {
-    // Budget: tabs (1) + header (1) reserved above the rows; the pager, only when the
+    // Budget: tabs (1 + a blank either side) + header (1) reserved above the rows; the pager, only when the
     // list overflows one page, costs one more row. Each PR is TWO lines (DESIGN 2) plus a
     // dedicated `────` separator BETWEEN consecutive PRs (DESIGN 2.6, revised 2026-09-06):
     // k PRs cost 2k + (k-1) = 3k - 1 lines, so the largest k with 3k - 1 <= avail is
     // floor((avail + 1) / 3). paginate still takes and returns a PR count.
     const perPageFor = (a) => Math.max(1, Math.floor((a + 1) / 3));
-    const avail = Math.max(0, n - 2 - trailer.length);
+    const avail = Math.max(0, n - 4 - trailer.length);
     let perPage = perPageFor(avail);
     let paged = paginate(list, { page, perPage });
     if (paged.pages > 1) {

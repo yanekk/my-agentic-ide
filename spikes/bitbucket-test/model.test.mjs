@@ -4,7 +4,7 @@
 // network, no state dir touched. The bash run.sh separately greps the module for
 // anything impure.
 
-import { normalizePR, classify, concernsMe, paginate, summarizeDiffstat, ageLabel, activityTags } from "../../bin/cockpit-bitbucket-model.mjs";
+import { normalizePR, classify, concernsMe, concernsMeQuery, paginate, summarizeDiffstat, ageLabel, activityTags } from "../../bin/cockpit-bitbucket-model.mjs";
 import { ok, eq, section, done } from "./harness.mjs";
 
 // A raw BitBucket PR, only the fields the model reads. The comments array is what
@@ -257,6 +257,24 @@ function main() {
       concernsMe(nPR({ authorUuid: "{leon}", authorNick: "leon", reviewers: [] }), { meUuid: "", team: [] }) === false);
     ok("but a pick-list author concerns me even with no meUuid",
       concernsMe(nPR({ authorUuid: "{leon}", authorNick: "leon" }), { meUuid: "", team: ["leon"] }) === true);
+  }
+
+  // The server-side filter only has to be a SUPERSET of concernsMe: the daemon still
+  // runs concernsMe on what comes back, but a PR the filter drops is gone for good.
+  section("concernsMeQuery names every inclusion path concernsMe has, and nothing narrower");
+  {
+    const q = concernsMeQuery({ meUuid: ME, team: [" Leon ", "Ann Lee", "Leon"] });
+    ok("the OPEN condition is inside the query", q.startsWith('state="OPEN" AND ('), q);
+    ok("PRs I review", q.includes(`reviewers.uuid="${ME}"`));
+    ok("PRs I wrote", q.includes(`author.uuid="${ME}"`));
+    ok("a pick-list author, trimmed", q.includes('author.nickname="Leon"'));
+    ok("a nickname with a space", q.includes('author.nickname="Ann Lee"'));
+    eq("a repeated pick-list name is asked for once", q.split('author.nickname="Leon"').length, 2);
+    ok("no draft or approval clause narrows it", !/draft|approved|participants/.test(q));
+    eq("team only, no uuid", concernsMeQuery({ meUuid: "", team: ["leon"] }), 'state="OPEN" AND (author.nickname="leon")');
+    eq("nothing could concern me -> no filter", concernsMeQuery({ meUuid: "", team: [] }), "");
+    eq("a quote in a name is escaped, not a broken query",
+      concernsMeQuery({ team: ['a"b'] }), 'state="OPEN" AND (author.nickname="a\\"b")');
   }
 
   section("sort: toReview by myUnresolved asc, mine by unresolved desc, updatedOn tiebreak");

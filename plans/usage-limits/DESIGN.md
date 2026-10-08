@@ -125,6 +125,27 @@ inspects the object. Belt and braces, because "never on the company account" is 
 requirement and a future Claude gateway could in principle attach a `spend_limit` we would not
 want to surface.
 
+The **footer** applies the same gate to the machine (decided 2026-10-02): when
+`~/.claude/settings.json` sets `env.CLAUDE_CODE_USE_BEDROCK` on, it draws no usage at all, whatever
+the cache holds. The cache keeps the last personal reading after a sign-out, and on a machine whose
+sessions run on Bedrock that reading describes an account the work is not spending
+(`bedrockConfigured` in the store, re-read every repaint; `COCKPIT_CLAUDE_SETTINGS` overrides the path
+for tests).
+
+In its place the footer shows the company gateway's **Aperture** budget (added 2026-10-02): one
+`aperture NN%` window, used percentage, same roles and staleness, no reset mark. The daemon POSTs
+the gateway's `GetMyQuotas` (the RPC its `/quotas` page calls, keyless under the Tailscale identity)
+every minute to the origin of `ANTHROPIC_BEDROCK_BASE_URL` and writes `aperture-cache.json`. The bucket
+refills continuously at `$100/day` per bucket (measured +$0.0700 in 60.5s; the effective tank +$0.14/min,
+both buckets refilling), so there is no reset instant. In its place the window carries a **forecast**
+(decided 2026-10-02): `empty ~HH:MM`, shown **only when that falls today** (local date); a refill time,
+`full now`, a later-day empty and the warm-up (under 5 minutes of history) draw nothing (decided 2026-10-02,
+replacing "always shown" after a light-use morning read `empty ~Mon`). It is the NET change between the
+newest reading and the oldest within **15 minutes** (30 tried, 2026-10-02, to steady a far-off forecast; back to 15 once only same-day empties show), so the refill rate is never needed; a step over 3
+minutes between readings restarts the history, a capacity change (new tier) drops it, and the history
+is kept in the cache so a restart keeps it. Stale, the forecast is dropped. The figure is the **effective** balance, overdraft buckets
+included, since that is what can still be spent; the most-used bucket wins if there are several.
+
 Only `five_hour` and `seven_day` are read. `spend_limit` and the per-model weekly windows the
 raw endpoint exposes are ignored (§8).
 

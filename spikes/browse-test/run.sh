@@ -331,9 +331,14 @@ chmod +x "$T/vbin/cockpit-open"
 # Enter, then wait for the recorder rather than for a fixed time, then `q` so broot
 # leaves on its own instead of being killed and orphaned. stdin stays open until
 # the end: an EOF would quit broot before it could run anything.
+# The leading `ESC[?62c` is the terminal's half of a handshake: since broot 1.60
+# startup sends `CSI ? u` + `CSI c` to ask about keyboard enhancement and exits
+# ("keyboard enhancement status could not be read") when nothing answers within
+# ~2s. script(1)'s pty answers nothing, so this plays a real terminal's DA1 reply
+# -- no `?u` reply, so no kitty keyboard -- and it waits in the pty until read.
 vfire() { # vfire <conf> <startdir> <broot --cmd>: echoes the argv, or nothing
   : > "$VARGV"
-  ( sleep 1.5; printf '\r'
+  ( printf '\033[?62c'; sleep 1.5; printf '\r'
     j=0; while [ ! -s "$VARGV" ] && [ "$j" -lt 40 ]; do sleep 0.1; j=$((j + 1)); done
     sleep 0.2; printf 'q'; sleep 0.5 ) \
   | ( PATH="$T/vbin:$PATH" HOME="$T/vhome" script -q /dev/null \

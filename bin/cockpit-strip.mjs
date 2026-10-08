@@ -28,8 +28,8 @@ import { execFileSync } from "node:child_process";
 // to draw (T05). The model returns semantic roles, never ANSI, so the colour is
 // applied here in the display layer -- and the clock (Date.now) is read here too,
 // then handed to the model as an argument (DESIGN 3.1, 3.4).
-import { readCache } from "./cockpit-usage-store.mjs";
-import { renderUsage } from "./cockpit-usage-model.mjs";
+import { readCache, bedrockConfigured, readApertureCache } from "./cockpit-usage-store.mjs";
+import { renderUsage, renderAperture } from "./cockpit-usage-model.mjs";
 
 const DIR = process.env.COCKPIT_DIR || path.join(os.homedir(), ".claude", "cockpit");
 const FILE = path.join(DIR, "terminals.json");
@@ -124,22 +124,35 @@ const SELF = Number.parseInt(process.env.WEZTERM_PANE ?? "", 10);
 
 function wez(args) {
   try {
-    return execFileSync("wezterm", ["cli", ...args],
+    // --no-auto-start: a cli that cannot reach its GUI would otherwise spawn a
+    // headless mux, whose default_prog builds a ghost cockpit (see cockpitd.mjs).
+    return execFileSync("wezterm", ["cli", "--no-auto-start", ...args],
                         { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] });
   } catch { return null; }
 }
 
-// The row count of the last correction we tried. Focus is borrowed for ~100ms
-// per attempt, so a drift that cannot be fixed (no wezterm cli, a pane at its
-// minimum) must not be retried on every tick -- only a NEW height is worth
-// another go.
+// The row count of the last correction we tried, and how many tries it has had.
+// Focus is borrowed for ~100ms per attempt, so a drift that cannot be fixed (no
+// wezterm cli, a pane at its minimum) must not be retried on every tick. But ONE
+// try per height was too few: attaching an agent re-splits the slots, the footer
+// grows to two rows mid-swap, and the 250ms-debounced try lands while the daemon
+// is still moving panes -- the shrink goes to a pane that is about to be replaced,
+// the layout settles at two rows again, and a height already "tried" was never
+// tried again (seen 2026-10-01: stuck at two rows for the life of the attach). So
+// a height gets PIN_TRIES goes, one per 2s tick, which is after the swap settles.
+const PIN_TRIES = 3;
 let pinned = 0;
+let pinTries = 0;
 
 function pinHeight() {
-  const rows = process.stdout.rows || 1;
-  if (rows <= 1) { pinned = 0; return; }        // right size: arm for the next drift
-  if (rows === pinned || !Number.isInteger(SELF)) return;
-  pinned = rows;
+  // LINES, like COLUMNS for the width: the seam a piped test render (no TTY) uses
+  // to stand in for an oversized pane.
+  const rows = process.stdout.rows || Number(process.env.LINES) || 1;
+  if (rows <= 1) { pinned = 0; pinTries = 0; return; }   // right size: arm for the next drift
+  if (!Number.isInteger(SELF)) return;
+  if (rows !== pinned) { pinned = rows; pinTries = 0; }
+  if (pinTries >= PIN_TRIES) return;
+  pinTries++;
 
   const out = wez(["list", "--format", "json"]);
   if (out === null) return;
@@ -198,7 +211,12 @@ function formatUsage(u, { short = false } = {}) {
   // joined with " / " (5h / 1d / 7d) and carry no leading glyph -- the keys name
   // themselves, so nothing else is needed to read it as the usage segment.
   const win = (w) => {
-    const text = short ? `${w.key} ${w.pct}%` : `${w.key} ${w.pct}% ↺${w.reset}`;
+    // Aperture's window has no reset (its budget refills continuously), so no ↺;
+    // it carries its forecast (`empty ~15:40`, only when that is today) as `eta` instead.
+    const text = short ? `${w.key} ${w.pct}%`
+      : w.reset ? `${w.key} ${w.pct}% ↺${w.reset}`
+      : w.eta ? `${w.key} ${w.pct}% · ${w.eta}`
+      : `${w.key} ${w.pct}%`;
     return u.stale ? text : `${USAGE_COLOR[w.role]}${text}${ESC}0m`;
   };
   const body = u.windows.map(win).join(" / ");
@@ -313,7 +331,12 @@ function renderFooter() {
   // corrupt cache, or a company Bedrock session that never wrote one): the footer
   // is byte-for-byte today's, no segment and no trimming (DESIGN 2.n, a "Done when"
   // the suite asserts). The clock is read HERE and handed to the pure model.
-  const usage = renderUsage(readCache(), Date.now());
+  // A machine configured for Bedrock shows the company gateway's Aperture budget
+  // (the daemon's aperture-cache.json) instead of Claude's personal rate limits,
+  // which describe an account this work is not spending (bedrockConfigured).
+  const usage = bedrockConfigured()
+    ? renderAperture(readApertureCache(), Date.now())
+    : renderUsage(readCache(), Date.now());
   const usageSeg = usage ? formatUsage(usage) : "";
   const usageShort = usage ? formatUsage(usage, { short: true }) : "";
 
@@ -338,7 +361,13 @@ function renderFooter() {
   let nameKept = true;
   let captionKept = true;
   let usageDrawn = usageSeg;
-  if (usageSeg && cols > 0) {
+  // With NO usage segment the same levels apply, but only once the line would
+  // otherwise wrap: a footer that fits stays byte-for-byte today's (level one is
+  // the full line). Gating the trim on usage alone left a machine that never
+  // writes a usage cache (a company Bedrock session) with no trim and no cut, so a
+  // long agent name -- `sdet-tools / worktree-pr-comment` at 215 columns, 244 wide
+  // -- wrapped and the one-row pane showed only part of it (2026-10-01).
+  if (cols > 0) {
     const levels = [
       { keys: [...PRIMARY, ...SECONDARY], name: true, caption: true },
       { keys: [...PRIMARY], name: true, caption: true },
@@ -358,7 +387,7 @@ function renderFooter() {
       const p = buildPre(lv.keys, lv.name);
       const { diff } = buildDiff(p, lv.caption);
       const u = lv.shortUsage ? usageShort : usageSeg;
-      if (vlen(p) + vlen(diff) + 1 + vlen(u) <= cols) { chosen = lv; break; }
+      if (vlen(p) + vlen(diff) + (u ? 1 + vlen(u) : 0) <= cols) { chosen = lv; break; }
     }
     keysKept = chosen.keys;
     nameKept = chosen.name;
@@ -371,7 +400,8 @@ function renderFooter() {
   hitZones = zones;
 
   if (!usageSeg) {
-    paint(`${pre}${diff}${ESC}K`);
+    // Still too wide at the last level: cut, never wrap. cutTo is a no-op on a fit.
+    paint(`${cols > 0 ? cutTo(`${pre}${diff}`, cols) : `${pre}${diff}`}${ESC}K`);
     return;
   }
   // Right-align the usage readout: pad so it ends at the window's right edge when
@@ -531,7 +561,7 @@ enableMouse(FOOTER ? (x) => onFooterClick(x) : onStripClick);
 // atomically, so a file watch would go deaf after the first rename.
 // Also watch usage-cache.json (written by the tap): a fresh reading repaints the
 // footer at once, rather than waiting up to 2s for the belt-and-braces interval.
-try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json") render(); }); } catch {}
+try { fs.watch(DIR, (_e, name) => { if (!name || name === "terminals.json" || name === "usage-cache.json" || name === "aperture-cache.json") render(); }); } catch {}
 process.stdout.on("resize", () => { lastFrame = null; render(); schedulePin(); });
 setInterval(() => { render(); schedulePin(); }, 2000); // belt-and-braces if a watch is missed
 schedulePin();                                        // the pane may open already oversized

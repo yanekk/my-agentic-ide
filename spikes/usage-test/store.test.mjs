@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { section, ok, eq, done } from "./harness.mjs";
-import { readCache, writeCache } from "../../bin/cockpit-usage-store.mjs";
+import { readCache, writeCache, bedrockConfigured } from "../../bin/cockpit-usage-store.mjs";
 
 const CACHE = "usage-cache.json";
 
@@ -108,6 +108,28 @@ section("tolerant read");
     fiveHour: null,
     sevenDay: { usedPct: 30, resetsAt: 99 },
   });
+}
+
+section("bedrockConfigured: the settings.json gate");
+{
+  const dir = scratch();
+  const f = path.join(dir, "settings.json");
+  const put = (v) => fs.writeFileSync(f, v);
+  put('{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}');
+  eq("CLAUDE_CODE_USE_BEDROCK=1 is on", bedrockConfigured(f), true);
+  put('{"env":{"CLAUDE_CODE_USE_BEDROCK":"true"}}');
+  eq("...so is true", bedrockConfigured(f), true);
+  put('{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}');
+  eq("0 is off", bedrockConfigured(f), false);
+  put('{"env":{"CLAUDE_CODE_USE_BEDROCK":"false"}}');
+  eq("false is off", bedrockConfigured(f), false);
+  put('{"env":{"CLAUDE_CODE_USE_BEDROCK":""}}');
+  eq("empty is off", bedrockConfigured(f), false);
+  put('{"model":"opus"}');
+  eq("no env block is off", bedrockConfigured(f), false);
+  put('{ not json');
+  eq("an unparseable file is off, no throw", bedrockConfigured(f), false);
+  eq("an absent file is off, no throw", bedrockConfigured(path.join(dir, "nope.json")), false);
 }
 
 done();

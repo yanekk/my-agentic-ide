@@ -93,3 +93,77 @@ export function writeCache(cache, dir = cockpitDir()) {
   fs.chmodSync(tmp, MODE);
   fs.renameSync(tmp, file);
 }
+
+// The Claude settings file the footer consults for the Bedrock gate below.
+// COCKPIT_CLAUDE_SETTINGS overrides it so a test never reads the real one.
+function settingsPath() {
+  return process.env.COCKPIT_CLAUDE_SETTINGS || path.join(os.homedir(), ".claude", "settings.json");
+}
+
+/**
+ * True when ~/.claude/settings.json sets env.CLAUDE_CODE_USE_BEDROCK on. The footer
+ * then draws no usage at all: the cache only ever holds a PERSONAL subscription's
+ * reading, and on a machine whose sessions run on Bedrock that reading is someone
+ * else's account (or a signed-out one), not the limits this work is spending.
+ * "On" is the tap's own reading of the flag -- present, non-empty, not 0/false.
+ * Absent, unreadable or unparseable settings read as off. Never throws.
+ */
+export function bedrockConfigured(file = settingsPath()) {
+  try {
+    const env = JSON.parse(fs.readFileSync(file, "utf8"))?.env;
+    const t = String(env?.CLAUDE_CODE_USE_BEDROCK ?? "").trim().toLowerCase();
+    return t !== "" && t !== "0" && t !== "false";
+  } catch { return false; }
+}
+
+/**
+ * The company gateway's origin (scheme://host[:port]) from settings.json's
+ * env.ANTHROPIC_BEDROCK_BASE_URL -- the same gateway the sessions use, and the one
+ * that serves Aperture's GetMyQuotas -- or null when it is absent or not a URL.
+ * Never throws.
+ */
+export function bedrockGatewayOrigin(file = settingsPath()) {
+  try {
+    const url = JSON.parse(fs.readFileSync(file, "utf8"))?.env?.ANTHROPIC_BEDROCK_BASE_URL;
+    return url ? new URL(String(url)).origin : null;
+  } catch { return null; }
+}
+
+// aperture-cache.json -- { writtenAt, usedPct, balance, capacity, readings:
+// [{ t, balance }] }, nanodollars, 0600 like the usage cache (it is account spend).
+// `readings` is the last ~18 minutes of balances the forecast is made from, kept
+// on disk so a daemon restart does not throw the history away. ONE writer, the
+// daemon, so a fixed temp is safe here, as for bitbucket-cache.json; the read
+// tolerates anything, as readCache does, dropping malformed readings.
+const APERTURE_FILE = "aperture-cache.json";
+
+function apertureShape(data) {
+  const num = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+  const readings = (Array.isArray(data?.readings) ? data.readings : [])
+    .map((r) => ({ t: num(r?.t), balance: num(r?.balance) }))
+    .filter((r) => r.t !== null && r.balance !== null);
+  return {
+    writtenAt: num(data?.writtenAt) ?? 0,
+    usedPct: num(data?.usedPct) ?? 0,
+    balance: num(data?.balance),
+    capacity: num(data?.capacity),
+    readings,
+  };
+}
+
+export function readApertureCache(dir = cockpitDir()) {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(dir, APERTURE_FILE), "utf8"));
+    if (!Number.isFinite(Number(data?.usedPct))) return null;
+    return apertureShape(data);
+  } catch { return null; }
+}
+
+export function writeApertureCache(cache, dir = cockpitDir()) {
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, APERTURE_FILE);
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(apertureShape(cache), null, 2)}\n`, { mode: MODE });
+  fs.chmodSync(tmp, MODE);
+  fs.renameSync(tmp, file);
+}

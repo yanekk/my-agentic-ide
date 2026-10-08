@@ -48,7 +48,7 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
   16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o
-chain footer 12 12b 12c
+chain footer 12 12b 12c 12d
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
 chain usage 15
@@ -116,6 +116,9 @@ section() {
 }
 
 T="$(mktemp -d)"
+# Every footer reads ~/.claude/settings.json for the Bedrock gate; point them all at
+# a scratch file (absent unless a check writes it) so the real one cannot hide usage.
+export COCKPIT_CLAUDE_SETTINGS="$T/claude-settings.json"
 # ONE EXIT trap, set here and never replaced: bash keeps only the last one set.
 # It stops every daemon/stub pid the sections below may leave set, then sweeps by
 # $T for any cockpitd a section launched without a pid variable here
@@ -173,7 +176,14 @@ echo 1  > "$NEXTTAB"
 
 cat > "$T/bin/wezterm" <<'STUB'
 #!/usr/bin/env bash
-# invoked as: wezterm cli <subcommand> [args...]
+# invoked as: wezterm cli --no-auto-start <subcommand> [args...]
+# The flag is noted on its own and dropped, so ARGV lines read as before.
+if [ "${2:-}" = "--no-auto-start" ]; then
+  echo "$3" >> "$CALLS.noauto"
+  set -- "$1" "${@:3}"
+else
+  echo "${2:-}" >> "$CALLS.auto"
+fi
 sub="${2:-}"
 
 {
@@ -3247,6 +3257,42 @@ check  "a stale reading dims the whole segment"    "$(printf '\033[2m5h')" "$RAW
 check  "...and stamps the write time (as of)"      "· as of " "$PLAIN"
 refute "...role colour suppressed (crit not red)"  "$(printf '\033[31m')" "$RAW"
 
+# CLAUDE_CODE_USE_BEDROCK on in ~/.claude/settings.json hides the segment even
+# with a fresh cache; "0" counts as off, as the tap reads it.
+useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":61,\"resetsAt\":$R7}}"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}' > "$T/claude-settings.json"
+footer uncommitted
+refute "Bedrock in settings.json hides the usage"  "5h 45%" "$PLAIN"
+check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
+# ...and draws the Aperture budget from aperture-cache.json in its place: one
+# percentage, no reset mark, the same role colours and the same stale dimming.
+printf '{"writtenAt":%s,"usedPct":36}' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "Bedrock draws the Aperture budget"         "aperture 36%" "$PLAIN"
+refute "...with no reset mark"                     "aperture 36% ↺" "$PLAIN"
+check  "...green under 70%"                        "$(printf '\033[32maperture 36%%')" "$RAW"
+refute "...with no history yet, no forecast"       "aperture 36% · empty" "$PLAIN"
+# Fifteen minutes falling $1/min, with what is left sized to run out halfway to
+# local midnight: only an empty that falls TODAY is drawn, so a fixed "$100 left"
+# (empty in 100 minutes) went red every night after ~22:20. The exact time string
+# is the model's own test; here only the shape is asserted.
+node -e 'const n=+process.argv[1],m=new Date(n);m.setHours(24,0,0,0);const left=(m-n)/2/60000*1e9,r=[];
+  for(let k=0;k<16;k++)r.push({t:n-(15-k)*60000,balance:left+(15-k)*1e9});
+  process.stdout.write(JSON.stringify({writtenAt:n,usedPct:50,balance:left,capacity:2000e9,readings:r}))' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "a falling balance draws empty ~"           "aperture 50% · empty ~" "$PLAIN"
+printf '{"writtenAt":%s,"usedPct":92}' "$NOW_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "...red at 90% or more"                     "$(printf '\033[31maperture 92%%')" "$RAW"
+printf '{"writtenAt":%s,"usedPct":36}' "$STALE_MS" > "$SD/aperture-cache.json"
+footer uncommitted
+check  "a stale Aperture reading is dimmed and stamped" "$(printf '\033[2maperture 36%% · as of ')" "$RAW"
+rm -f "$SD/aperture-cache.json"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}' > "$T/claude-settings.json"
+footer uncommitted
+check  "CLAUDE_CODE_USE_BEDROCK=0 still shows it"  "5h 45% ↺" "$PLAIN"
+rm -f "$T/claude-settings.json"
+
 # An absent cache: no usage segment, and the rest of the footer is today's -- the
 # full legend (incl. the dim secondary hints) is kept, proving nothing was trimmed.
 # The 1d key appears only inside the usage segment, so its absence proves no segment.
@@ -3390,6 +3436,24 @@ ffooter "test agent" "" 100
 check  "100, no switch: reset times kept (no new level without the switch)" "↺" "$PLAIN"
 rm -f "$SD/usage-cache.json"
 
+# NO usage cache at all (a company Bedrock machine never writes one): the trim used
+# to be gated on usage, so a long agent name wrapped the line and the one-row pane
+# showed only part of it. Measured live: 244 wide at 215 columns.
+LONG="sdet-tools / worktree-pane-display-and-more"
+ffooter "$LONG" "$FL_CLAUDE" 215
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 215 ]; then okline "no usage, 215: a long name keeps the footer one row ($NW <= 215)"
+else echo "  FAIL the no-usage footer wrapped: width $NW > 215 columns"; fail=1; fi
+check  "no usage, 215: the name is kept"                  "$LONG" "$PLAIN"
+check  "no usage, 215: ...the primary keys too"           "send→claude" "$PLAIN"
+refute "no usage, 215: ...the dim secondary keys go first" "zoom" "$PLAIN"
+ffooter "$LONG" "$FL_CLAUDE" 300
+check  "no usage, 300: a line that fits is not trimmed"   "zoom" "$PLAIN"
+ffooter "$LONG" "$FL_CLAUDE" 60
+NW=$(node -e "$LEN" "$RAW")
+if [ "${NW:-0}" -le 60 ]; then okline "no usage, 60: cut at the edge, never wrapped ($NW <= 60)"
+else echo "  FAIL the no-usage 60 footer wrapped: width $NW > 60 columns"; fail=1; fi
+
 # The click path, under script(1) exactly like section 12's click().
 if command -v script >/dev/null; then
 cp "$ROOT/bin/cockpit-strip.mjs" "$CLICKER"          # the copy with the switch in it
@@ -3414,6 +3478,30 @@ for W in 319 140; do
 done
 rm -f "$SD/usage-cache.json"
 fi
+fi
+
+if section 12d "the footer pins itself back to one row -- and retries, bounded"; then
+# A footer that opens two rows tall (LINES stands in for the pty) and STAYS two
+# rows, as when the shrink lands mid-swap on an attach and the layout settles at
+# two again. It used to try once per height and never again; now a height gets
+# three tries, one per 2s tick, each borrowing focus and handing it straight back.
+# Its own stub state, so its focus calls cannot touch the main chain's.
+PIN="$T/pin"; mkdir -p "$PIN"
+printf '9 0 sh\n20 0 sh\n' > "$PIN/panes"; echo 20 > "$PIN/active"; : > "$PIN/calls.log"
+printf '{"agent":"test agent","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' > "$SD/terminals.json"
+( CALLS="$PIN/calls.log" PANESTATE="$PIN/panes" ACTIVE="$PIN/active" WEZTERM_PANE=9 LINES=2 \
+  COCKPIT_DIR="$SD" node "$ROOT/bin/cockpit-strip.mjs" footer > "$PIN/out" 2>&1 ) &
+PINP=$!
+adjusts() { grep -cxF "ARGV: cli adjust-pane-size --pane-id 9 --amount 1 Down" "$PIN/calls.log"; }
+pinned3() { [ "$(adjusts)" -ge 3 ]; }
+waituntil 12 "three pin attempts" pinned3
+sleep 2.6                                           # one more tick: no fourth try
+kill "$PINP" 2>/dev/null; wait "$PINP" 2>/dev/null
+same "an oversized footer is shrunk three times, not once and not for ever" "$(adjusts)" "3"
+same "...each borrowing focus" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 9" "$PIN/calls.log")" "3"
+same "...and handing it straight back" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 20" "$PIN/calls.log")" "3"
 fi
 
 }  # run_footer
@@ -3885,6 +3973,7 @@ const server = http.createServer((req, res) => {
   if (m === "net") return req.socket.destroy();          // dropped socket -> transient
   if (m === "auth") return json(res, 401, { type: "error" });
   if (m === "one-bad" && repo === "bad") return json(res, 500, { type: "error" });  // -> transient
+  if (m === "limited") { res.writeHead(429); return res.end("Rate limit for this resource has been exceeded"); }
   if (m === "slow") return setTimeout(() => json(res, 200, PRS), 2000);
   if (m === "two-prs") return json(res, 200, PRS2);
   if (m === "many") return json(res, 200, MANY);
@@ -3934,8 +4023,12 @@ d4env() {
   TITLELAG="$A4/titlelag" ACTIVE="$A4/active" PANECWD="$A4/panecwd" \
   PSBUSY="$A4/psbusy" AGENTS_JSON="$SIDE_AGENTS" \
   BITBUCKET_ORIGIN="$BBORIGIN" COCKPIT_BITBUCKET_TICK_MS="$BB_TICK_MS" \
+  COCKPIT_BITBUCKET_DETAIL_MAX_AGE_MS=0 COCKPIT_BITBUCKET_BACKOFF_MS=5000 \
   "$@"
 }
+# DETAIL_MAX_AGE 0: every pass re-reads each shown PR's comments and diffstat, which
+# the keep-last checks below rely on; D5 runs on the real reuse window. BACKOFF is a
+# real 5s, not scaled by SPEED: the pause check needs a window of known length.
 d4env node "$ROOT/bin/cockpitd.mjs" > "$A4/daemon.log" 2>&1 &
 D4PID=$!
 waitfor "cockpitd up" "$A4/daemon.log" 10 "D4 to start"
@@ -3966,7 +4059,11 @@ waituntil 10 "a pass that resolves 'me' and clears alpha's auth error" \
   bqtrue "$S4" 'c.meUuid==="ME-UUID" && !!c.repos.alpha && c.repos.alpha.error===null'
 same "a good token resolves 'me' once, cached"   "$(bq "$S4" 'c.meUuid')" "ME-UUID"
 check "each repo's PRs are fetched"               "/repositories/testws/alpha/pullrequests" "$BBHITS"
-check "...with the field expansion for approvals" "fields=+values.participants,+values.reviewers" "$BBHITS"
+check "...with the approval fields whitelisted"   "values.participants.approved,values.participants.user.uuid,values.reviewers.uuid" "$BBHITS"
+# Filtered on the server to the PRs that can concern me (concernsMeQuery), so a repo
+# with a thousand open PRs is one page, not twenty. Team is empty here. The stub's
+# decodeURIComponent leaves the query string's `+` for a space as it is.
+check "...filtered on the server to what can concern me" 'q=state="OPEN"+AND+(reviewers.uuid="ME-UUID"+OR+author.uuid="ME-UUID")' "$BBHITS"
 same  "a repo's raw PRs land in the cache"        "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
 same  "...untouched -- the raw title, not a normalised row" "$(bq "$S4" 'c.repos.alpha.prs[0].title')" "SECRET-PR-TITLE"
 same  "...with a fresh fetchedAt"                 "$(bq "$S4" 'c.repos.alpha.fetchedAt > 0')" "true"
@@ -4072,6 +4169,24 @@ same "...added"                                                          "$(bq "
 same "...removed"                                                        "$(bq "$S4" 'c.repos.alpha.prs[0].diffstatSummary.removed')" "3"
 same "...and the repo itself stays a success"                            "$(bq "$S4" 'c.repos.alpha.error')" "null"
 echo ok > "$BBMODE"
+
+# A 429 is about the token, not the repo (2026-10-05): the refused repo and every repo
+# after it are marked limited with their PRs kept, the rest of the pass calls nothing,
+# and no trigger calls anything until the pause (BACKOFF, 5s here) is over.
+: > "$BBHITS"
+echo limited > "$BBMODE"
+waituntil 10 "a refused pass in the cache" \
+  bqtrue "$S4" '!!c.repos.alpha.error && c.repos.alpha.error.kind==="limited"'
+same  "a 429 marks the refused repo limited"          "$(bq "$S4" 'c.repos.bad.error.kind')" "limited"
+same  "...and the repo after it, without asking"      "$(grep -c '/alpha/pullrequests' "$BBHITS")" "0"
+same  "...which keeps its previous PRs"               "$(bq "$S4" 'c.repos.alpha.prs.length')" "1"
+check "...and the pause is logged"                    "bitbucket tick: rate-limited on bad, pausing 5s" "$A4/daemon.log"
+: > "$BBHITS"
+sleep 2                              # window: ~2.5 ticks, inside the 5s pause
+same  "no call at all while paused"                   "$(wc -l < "$BBHITS" | tr -d ' ')" "0"
+echo ok > "$BBMODE"
+waituntil 10 "the pause to end and alpha to refresh" bqtrue "$S4" 'c.repos.alpha.error===null'
+same  "after the pause the repos are fetched again"   "$(bq "$S4" 'c.repos.bad.error')" "null"
 
 # The in-flight guard (DESIGN 2.9): a second pass entered while one is running starts
 # nothing. Unconfiguring drains any pass and gives a clean edge (no staleness window
@@ -4306,6 +4421,11 @@ echo list > "$A5/fleetstate"
 waituntil 10 "the return's pass in the cache" bqtrue "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START"
 check "the return to the fleet list refreshed the repos" "bitbucket returned: alpha ok" "$A5/daemon.log"
 same  "...and the cache was rewritten"                   "$(bq "$S5" "c.repos.alpha.fetchedAt > $FETCHED_START")" "true"
+# The list says PR 7 is unchanged and its details are minutes old, so the return's
+# pass reuses its comments and diffstat instead of reading them again.
+check "...reusing an unchanged PR's details"            "bitbucket returned: alpha ok, 1 prs, 0 comment fetches, 0 diffstat fetches, 1 unchanged" "$A5/daemon.log"
+same  "...so no comment read was made"                  "$(grep -c '/pullrequests/7/comments' "$BBHITS")" "0"
+same  "...and the PR still carries them"                "$(bq "$S5" 'c.repos.alpha.prs[0].comments.length')" "1"
 
 daemon_stop $D5PID; D5PID=""
 kill $BBPID 2>/dev/null; BBPID=""
@@ -4323,6 +4443,10 @@ same "no line in this suite names the real bitbucket host" \
 # states -- so the default is asserted in the source, not trusted.
 same "the bitbucket tick defaults to 60s" \
      "$(grep -c 'COCKPIT_BITBUCKET_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "the rate-limit pause defaults to 5 minutes" \
+     "$(grep -c 'COCKPIT_BITBUCKET_BACKOFF_MS) || 5 \* 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "unchanged PR details are reused for 15 minutes by default" \
+     "$(grep -c ': 15 \* 60_000;' "$ROOT/bin/cockpitd.mjs")" "1"
 fi
 }  # run_dashboard
 
@@ -4613,6 +4737,11 @@ fi
 # tripwire would report it on every run (DESIGN §2.5).
 daemon_stop $DPID $D2PID $D3PID $D4PID $D5PID $D6PID; DPID=""; D2PID=""; D3PID=""; D4PID=""; D5PID=""; D6PID=""
 if daemon_tripwire "$T"; then okline "no cockpitd of this run is left running"; else fail=1; fi
+# Every cli call the daemons made carried --no-auto-start: one without it, against a
+# dead socket, spawns a headless mux whose default_prog builds a ghost cockpit.
+AUTO=$(cat $(find "$T" -name 'calls.log.auto') /dev/null | sort | uniq -c | tr '\n' ' ')
+if [ -z "$AUTO" ] && { [ -n "$PARTIAL" ] || [ -s "$T/calls.log.noauto" ]; }; then okline "every wezterm cli call carried --no-auto-start"
+else echo "  FAIL wezterm cli calls without --no-auto-start: ${AUTO:-none, but none with it either}"; fail=1; fi
 
 echo
 if [ "$fail" != 0 ]; then echo "FAILURES"; sed -n '1,40p' "$T/daemon.log"
