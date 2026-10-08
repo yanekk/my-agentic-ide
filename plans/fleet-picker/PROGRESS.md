@@ -10,10 +10,9 @@ commit message. Whoever writes a cell also fixes the over-budget cell they walk 
 
 **Plan reviewed:** 2026-10-07 — 3 fixed, 3 decided with the user
 
-**Status:** Planned. Nothing built.
+**Status:** Built. Every task ✅; the whole suite runs once at pir's end gate.
 **Last updated:** 2026-10-08
-**Next `pir-work` will:** implement T00 (keypress-spike), the riskiest unknown; T02 has no
-dependencies and may run beside it.
+**Next `pir-work` will:** nothing; the plan is complete.
 
 ## Tasks
 
@@ -28,11 +27,10 @@ done · ⛔ blocked, needs a human.
 | T03 | daemon-picker | T00, T02 | ✅ | |
 | T04 | picker-drill | T02, T03 | ✅ | |
 | T05 | docs | T01, T03 | ✅ | |
-| T06 | live-check | T04, T05 | 🔍 | Person verified ← live 2026-10-08 (FINDINGS). config.lua and ~/.wezterm.lua restored, confirmed by readlink and a read. Ran keys, picker and pir-pane suites; cockpit-test left to pir's end run (parallel rule), a deviation from the task doc. |
+| T06 | live-check | T04, T05 | ✅ | Review clean, no fix commit. Restore confirmed by readlink and config.lua read; person's answer backed by live daemon.log picker open/close lines over claude and pir 2026-10-08. Keys, picker, pir-pane suites rerun green; cockpit-test deferred to pir's end run (parallel rule). Feel and lag read-only, person's word. |
 
-**Review queue:** T06
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
-Nothing yet. T00 needs the person at the keyboard for about a minute; T06 needs a rebuild of the
-live window and approval to repoint `~/.wezterm.lua`.
+Nothing.
