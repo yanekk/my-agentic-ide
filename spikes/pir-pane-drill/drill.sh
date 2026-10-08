@@ -184,6 +184,11 @@ SHIM
       "$now" "$((now+7200))" "$((now+400000))" > "$CD/usage-cache.json"
   fi
 
+  # One cached PR, so a `bb-review` verb has a URL to spawn with (fleet-picker T04). The
+  # BitBucket settings stay unset, so the daemon never fetches and never overwrites it.
+  printf '{"version":1,"meUuid":null,"repos":{"repo":{"fetchedAt":0,"error":null,"prs":[{"id":7,"title":"drill pr","links":{"html":{"href":"https://bitbucket.org/drill/repo/pull-requests/7"}}}]}}}\n' \
+    > "$CD/bitbucket-cache.json"
+
   cat > "$MUXCFG" <<LUA
 return {
   initial_cols = $cols, initial_rows = $rows,
@@ -217,6 +222,8 @@ slot_pane() {
 }
 # "slot shell strip diff" widths, and the diff pane's rows: the geometry that must hold
 geometry() { echo "$(colsof "$(slot_pane)")x$(rowsof "$(slot_pane)") $(colsof "$(pj shell)") $(colsof "$(pj strip)") $(colsof "$(pj diff)")x$(rowsof "$(pj diff)")"; }
+# The screen as one string, so text the stand-in's echo wrapped at the edge still matches.
+shows_joined() { screen "$1" | tr -d '\n' | grep -qF -- "$2"; }
 shows()    { screen "$1" | grep -qF -- "$2"; }
 switch_visible() { screen "$(pj foot)" | grep -qE "Claude Agents +\| +PIR"; }
 diff_has() { shows "$(pj diff)" "$1"; }
@@ -245,6 +252,28 @@ count_panes_showing() { local n=0 id; for id in $(table | awk '{print $1}'); do
 logged()   { grep -qF -- "$1" "$CD/daemon.log"; }
 not() { ! "$@"; }
 
+# The picker (fleet-picker T04)
+picker_open() { [ "$(tj fleet.pickerOpen)" = true ]; }
+picker_shut() { [ "$(tj fleet.pickerOpen)" = false ] && [ -z "$(pj picker)" ]; }
+picker_pane() { pj picker; }
+# is '<command>' <value>: re-runs the command on every poll, which `test "$(...)"` would not
+is()       { [ "$(eval "$1")" = "$2" ]; }
+pane_alive() { [ -n "$(paneinfo "$1")" ]; }
+# The picker's line for an entry: `▸ PIR` when highlighted.
+picked()   { screen "$1" | grep -qF -- "▸ $2"; }
+shown_tag() { screen "$1" | grep -F -- "$2" | grep -qF "shown now"; }
+# Every line of the pane's screen within its width.
+fits()     { local c; c=$(colsof "$1"); screen "$1" | python3 -c "
+import sys; c=int(sys.argv[1]); sys.exit(0 if all(len(l.rstrip('\\n'))<=c for l in sys.stdin) else 1)" "$c"; }
+rule_len() { screen "$1" | python3 -c "import sys; print(max(l.count('─') for l in sys.stdin))"; }
+nterms()   { python3 -c "import json; print(len(json.load(open('$CD/terminals.json'))['terminals']))"; }
+npanes()   { table | wc -l | tr -d ' '; }
+open_picker() {   # what the ← binding does once decide() says open: append the verb
+  verb picker
+  wait_for 5 picker_open && wait_for 5 shows "$(picker_pane)" "SWITCH PROGRAM"
+}
+UP=$'\x1b[A'; DOWN=$'\x1b[B'; RIGHT=$'\x1b[C'; LEFT=$'\x1b[D'; SS3UP=$'\x1bOA'
+
 SNAPS="${DRILL_SNAPS:-}"
 snap() {   # snap <size> <step>: every cockpit-tab pane's screen, for RESULTS.md
   [ -n "$SNAPS" ] || return 0
@@ -271,7 +300,7 @@ drill_size() {
   echo "   geometry(slot shell strip diff) = $BASE"
   check "fleet slot holds the claude pane" test "$(slot_pane)" = "$FL"
   check "claude shows its list" wait_for 5 shows "$FL" "describe a task for a new session"
-  check "top pane is the welcome/notes pane" welcome
+  check "top pane is the welcome/notes pane" wait_for 5 welcome
   check "terminal at the repo" term_at "$R"
   check "footer: Claude Agents shown, bright" foot_bright "Claude Agents"
   # The O hint itself is trimmed away at both drill widths (usage-limits trim order),
@@ -279,6 +308,8 @@ drill_size() {
   check "terminals.json reviewable (O offered)" test "$(tj reviewable)" = true
   check "terminals.json: program claude, switchable" test "$(program) $(tj fleet.switchable)" = "claude true"
   common "list"; snap "$sz" 1-list
+
+  if [ -n "${DRILL_PICKER_ONLY:-}" ]; then drill_picker "$sz"; teardown; return; fi
 
   echo "-- 2. an agent attached: the switch is dim and refused"
   send "$FL" $'a\n'
@@ -337,7 +368,7 @@ drill_size() {
   check "...and its terminal" wait_for 8 term_at "$RUN"
   snap "$sz" 6a-worker-gone-no-write
   send "$PI" $'again\n'; sleep 2
-  check "the same report again keeps the run (DESIGN 2.5 fallback)" diff_has planwork.txt
+  check "the same report again keeps the run (DESIGN 2.5 fallback)" wait_for 5 diff_has planwork.txt
   common "worker gone"; snap "$sz" 6b-worker-gone-rewrite
 
   echo "-- 7. back to the run, then back to the list"
@@ -354,7 +385,7 @@ drill_size() {
   verb fleet-claude
   check "program becomes claude" wait_for 10 is_program claude
   check "claude pane back in the slot" wait_for 5 slot_is "$FL"
-  check "claude still at its list" shows "$FL" "describe a task for a new session"
+  check "claude still at its list" wait_for 3 shows "$FL" "describe a task for a new session"
   check "pir pane parked, not killed" parked "$PI"
   check "footer Claude Agents bright" wait_for 3 foot_bright "Claude Agents"
   common "claude again"; snap "$sz" 8-claude-again
@@ -366,8 +397,8 @@ drill_size() {
     sleep 0.1
   done
   sleep 5
-  check "exactly one claude pane" test "$(count_panes_showing 'describe a task for a new session')" = 1
-  check "exactly one pir pane" test "$(count_panes_showing 'PIR STAND-IN')" = 1
+  check "exactly one claude pane" wait_for 3 is "count_panes_showing 'describe a task for a new session'" 1
+  check "exactly one pir pane" wait_for 3 is "count_panes_showing 'PIR STAND-IN'" 1
   check "the last click (Claude Agents) is what is shown" is_program claude
   local sp; sp=$(slot_pane)
   if [ "$(program)" = pir ]; then
@@ -396,9 +427,177 @@ drill_size() {
   check "clean quit: terminal at the repo" wait_for 8 term_at "$R"
   common "pir exit"; snap "$sz" 10-pir-exit
 
+  drill_picker "$sz"
+
   check "daemon logged no uncaught error" not grep -qiE "uncaught|TypeError|ReferenceError" "$CD/daemon.log"
   [ -n "$SNAPS" ] && cp "$CD/daemon.log" "$SNAPS/$sz-daemon.log"
   teardown
+}
+
+# The ← program picker (fleet-picker T04, DESIGN 2.3-2.7). `send-text` bypasses the
+# GUI's key table, so the drill appends `picker` itself, as the binding would, and
+# then types the picker's keys into its real pty.
+drill_picker() {
+  local sz="$1" FL PI PK PK2 c0 c1 n0 p0 i
+  FL=$(pj fleet)
+  echo "-- 11. the picker over claude"
+  [ "$(program)" = claude ] || { verb fleet-claude; wait_for 10 is_program claude; }
+  check "claude shown, at its list" wait_for 5 slot_is "$FL"
+  check "armed: terminals.json picker names the claude pane" \
+    wait_for 3 is 'tj fleet.picker' "{\"pane\": $FL, \"program\": \"claude\"}"
+  # The stand-in draws its list once and echoes typing wherever its cursor was left;
+  # after a park it can sit mid-marker. Redraw it first so the draft has its own line.
+  send "$FL" $'l\n'; wait_for 3 shows "$FL" "describe a task for a new session"; sleep 0.3
+  send "$FL" "draft words"
+  check "text typed into claude's box" wait_for 3 shows "$FL" "draft words"
+  open_picker; PK=$(picker_pane)
+  check "picker open in its own pane" test -n "$PK" -a "$PK" != "$FL"
+  check "the slot holds the picker" slot_is "$PK"
+  check "SWITCH PROGRAM drawn" shows "$PK" "SWITCH PROGRAM"
+  check "PIR highlighted" wait_for 3 picked "$PK" "PIR"
+  check "Claude Agents marked shown now" shown_tag "$PK" "Claude Agents"
+  check "hint on the last line" test "$(screen "$PK" | tail -n 1 | sed 's/^ *//')" = "↑↓ choose · enter or → open · esc back"
+  check "no line over the width ($(colsof "$PK") cols)" fits "$PK"
+  check "claude parked, not killed" parked "$FL"
+  check "picker at the slot's size" test "$(geometry)" = "$BASE"
+  check "footer switch dim while open" wait_for 3 foot_dim "Claude Agents"
+  check "terminals.json: switchable false, disarmed" test "$(tj fleet.switchable) $(tj fleet.picker)" = "false null"
+  common "picker open"; snap "$sz" 11-picker-open
+
+  echo "-- 12. keys in the picker"
+  send "$PK" "$DOWN"
+  check "↓ moves the highlight to Claude Agents" wait_for 3 picked "$PK" "Claude Agents"
+  send "$PK" "$SS3UP"
+  check "↑ (SS3 form) moves it back to PIR" wait_for 3 picked "$PK" "PIR"
+  send "$PK" "$LEFT"; sleep 0.5
+  check "← does nothing: PIR still highlighted" wait_for 3 picked "$PK" "PIR"
+  send "$PK" "x"; sleep 0.5
+  check "a letter does nothing: still open" picker_open
+  check "...and nothing switched" is_program claude
+  snap "$sz" 12-picker-keys
+
+  echo "-- 13. → on PIR opens pir"
+  send "$PK" "$RIGHT"
+  check "program becomes pir" wait_for 10 is_program pir
+  PI=$(pj pir)
+  check "pir in the slot" wait_for 5 slot_is "$PI"
+  check "picker closed and its pane gone" wait_for 5 picker_shut
+  check "...the picker pane no longer exists" not pane_alive "$PK"
+  check "pir at the slot's size" test "$(geometry)" = "$BASE"
+  check "footer: PIR shown, bright" wait_for 3 foot_bright "PIR"
+  check "claude still parked" parked "$FL"
+  check "armed over pir" wait_for 3 is 'tj fleet.picker' "{\"pane\": $PI, \"program\": \"pir\"}"
+  common "pir via picker"; snap "$sz" 13-pir-via-picker
+  open_picker; PK=$(picker_pane)
+  check "picker over pir: Claude Agents highlighted" wait_for 3 picked "$PK" "Claude Agents"
+  check "picker over pir: PIR shown now" shown_tag "$PK" "PIR"
+  check "pir parked behind it" parked "$PI"
+
+  echo "-- 14. Enter on Claude Agents: claude back as it was"
+  send "$PK" $'\r'
+  check "program becomes claude" wait_for 10 is_program claude
+  check "the same claude pane back in the slot (not restarted)" wait_for 5 slot_is "$FL"
+  check "claude still at its list" wait_for 3 shows "$FL" "describe a task for a new session"
+  check "the text typed before the open is intact" shows "$FL" "draft words"
+  check "pir parked" parked "$PI"
+  check "picker closed" wait_for 5 picker_shut
+  common "claude via picker"; snap "$sz" 14-claude-via-picker
+  send "$FL" $'\n'   # the stand-in reads cooked lines: submit the draft (it ignores it)
+
+  echo "-- 15. Esc and Ctrl+C close and change nothing"
+  open_picker; PK=$(picker_pane)
+  send "$PK" $'\x1b'
+  check "Esc: picker closed" wait_for 5 picker_shut
+  check "Esc: claude shown, same pane" test "$(program) $(slot_pane)" = "claude $FL"
+  check "Esc: logged as a cancel onto claude" wait_for 3 logged "picker closed onto claude"
+  open_picker; PK=$(picker_pane)
+  send "$PK" $'\x03'
+  check "Ctrl+C: picker closed" wait_for 5 picker_shut
+  check "Ctrl+C: claude shown, same pane" test "$(program) $(slot_pane)" = "claude $FL"
+  check "Ctrl+C: no stray picker-cancel queued" not grep -q "picker-cancel ignored" "$CD/daemon.log"
+  verb fleet-pir; wait_for 10 is_program pir
+  open_picker; PK=$(picker_pane)
+  send "$PK" $'\x1b'
+  check "Esc over pir: pir back, same pane" wait_for 5 is 'echo "$(tj fleet.pickerOpen) $(program) $(slot_pane)"' "false pir $PI"
+  verb fleet-claude; wait_for 10 is_program claude
+  common "cancels"
+
+  echo "-- 16. the slot resized with the picker open"
+  open_picker; PK=$(picker_pane)
+  c0=$(colsof "$PK")
+  # No window to drag on a headless mux, so the slot itself is resized under the
+  # picker. Narrowed to 41 at 120 (the rule must shorten to 38); widened by 6 from the
+  # 39-column minimum at 80, below which the hint cannot fit (the rule grows to 40).
+  local dir back amt want
+  if [ "$c0" -gt 45 ]; then dir=Left; back=Right; amt=$((c0 - 41)); else dir=Right; back=Left; amt=6; fi
+  cli adjust-pane-size --pane-id "$PK" --amount "$amt" "$dir"
+  check "the picker pane resized from $c0 cols" wait_for 3 eval '[ "$(colsof "$PK")" != "$c0" ]'
+  c1=$(colsof "$PK"); want=$((c1 - 3 < 40 ? c1 - 3 : 40))
+  check "redrawn at $c1 cols: the rule is $want long" wait_for 3 is 'rule_len "$PK"' "$want"
+  check "redrawn: no line over the width" fits "$PK"
+  check "redrawn: title, both entries, shown now, the whole hint" wait_for 3 eval 'shows "$PK" "SWITCH PROGRAM" && shown_tag "$PK" "Claude Agents" && shows "$PK" "▸ PIR" && shows "$PK" "↑↓ choose · enter or → open · esc back"'
+  snap "$sz" 16-picker-resized
+  cli adjust-pane-size --pane-id "$PK" --amount "$amt" "$back"
+  check "the picker pane back to $c0 cols" wait_for 3 is 'colsof "$PK"' "$c0"
+  want=$((c0 - 3 < 40 ? c0 - 3 : 40))
+  check "redrawn at $c0 again: the rule is $want long" wait_for 3 is 'rule_len "$PK"' "$want"
+  check "redrawn: no line over the width" fits "$PK"
+  check "geometry restored" wait_for 3 is 'geometry' "$BASE"
+
+  echo "-- 17. a terminal opened beside the open picker"
+  n0=$(nterms)
+  cli activate-pane --pane-id "$(pj shell)" >/dev/null
+  verb new
+  check "⌥t: a new terminal" wait_for 8 is 'nterms' "$((n0+1))"
+  check "the picker is still open, still in the slot" eval 'picker_open && slot_is "$PK" && shows "$PK" "SWITCH PROGRAM"'
+  check "geometry unchanged" wait_for 3 is 'geometry' "$BASE"
+  snap "$sz" 17-picker-new-terminal
+  verb close
+  check "⌥w: back to $n0 terminal(s)" wait_for 8 is 'nterms' "$n0"
+  check "the picker is still open after the close" eval 'picker_open && slot_is "$PK"'
+
+  echo "-- 18. a BitBucket Review click with the picker open"
+  verb bb-review:repo/7
+  check "picker closed" wait_for 8 picker_shut
+  check "claude shown, same pane" wait_for 5 is 'echo "$(program) $(slot_pane)"' "claude $FL"
+  check "the spawn was typed into claude" wait_for 5 shows_joined "$FL" "@repo Review Bitbucket PR https://bitbucket.org/drill/repo/pull-requests/7"
+  check "daemon logged the spawn" logged "spawned agent in repo"
+  sleep 1
+  # Killing the live picker made WezTerm write `\n` + Ctrl+D into it, which it read as
+  # Enter and answered `fleet-pir` right after the spawn (fixed in cockpit-fleet-picker.mjs).
+  check "the closed picker handed back no choice after the click" \
+    not eval 'sed -n "/^bb-review:repo\/7\$/,\$p" "$CD/cmd" | tail -n +2 | grep -q "^fleet-"'
+  check "claude still shown a second later" is_program claude
+  check "geometry unchanged" test "$(geometry)" = "$BASE"
+  snap "$sz" 18-picker-bb-review
+
+  echo "-- 19. an agent attached: no picker"
+  send "$FL" $'a\n'
+  check "agent attached" wait_for 15 diff_has alphaedit.txt
+  check "terminals.json picker disarmed" wait_for 3 is 'tj fleet.picker' null
+  verb picker
+  check "picker refused while attached" wait_for 3 logged "refusing picker: alpha111 is attached"
+  sleep 0.5
+  check "...and nothing opened" eval 'picker_shut && slot_is "$FL"'
+  send "$FL" $'l\n'
+  check "back at the list" wait_for 10 welcome
+  check "armed again" wait_for 5 is 'tj fleet.picker' "{\"pane\": $FL, \"program\": \"claude\"}"
+
+  echo "-- 20. five open/close rounds"
+  p0=$(npanes)
+  for i in 1 2 3 4 5; do
+    open_picker; PK=$(picker_pane)
+    case $i in 3) send "$PK" $'\x1b';; *) send "$PK" "$RIGHT";; esac
+    wait_for 8 picker_shut
+  done
+  check "ended on claude (four switches, one cancel)" wait_for 5 is_program claude
+  check "exactly one claude pane" wait_for 3 is "count_panes_showing 'describe a task for a new session'" 1
+  check "exactly one pir pane" wait_for 3 is "count_panes_showing 'PIR STAND-IN'" 1
+  check "no picker left on screen anywhere" test "$(count_panes_showing 'SWITCH PROGRAM')" = 0
+  check "no stray panes ($p0 before, $(npanes) after)" test "$(npanes)" = "$p0"
+  check "the claude and pir panes are the original ones" test "$(pj fleet) $(pj pir)" = "$FL $PI"
+  common "rounds"; snap "$sz" 20-rounds
+  verb fleet-claude; wait_for 10 is_program claude
 }
 
 for s in "${SIZES[@]}"; do drill_size "${s%x*}" "${s#*x}"; done

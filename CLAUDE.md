@@ -122,9 +122,13 @@ that key legend, so the gestures are discoverable without memorising them.
 The bottom-left pane can hold a **second program**: the dashboard of **`pir`** (the
 plan-implement-review engine), whose workers run headless and so never appear in
 `claude agents`. The footer carries `Claude Agents | PIR`; clicking a label swaps the
-program in that slot — click only, no key, and only while the shown program sits on
-its list screen (the segment is dim otherwise, and absent when `pir` is not
-installed). The two are **parked, not killed**, like diffs, and every rebuild starts
+program in that slot, but only while the shown program sits on its list screen (the
+segment is dim otherwise, and absent when `pir` is not installed). Plain **←** in that
+slot, at the list with the program's box empty, opens a small **picker** there instead
+(↑↓, Enter or → opens, Esc backs out); anywhere else ← is the program's own. The
+decision is made in WezTerm at the press (`wezterm/fleet-picker.lua`), never in the
+daemon, so a forwarded ← cannot land after later keys. The plan is `plans/fleet-picker/`.
+The two are **parked, not killed**, like diffs, and every rebuild starts
 on `claude agents`. pir runs in `cockpit-pir.sh`, a relaunch loop, with
 `PIR_DASHBOARD_STATE` set, and reports what it has open through
 `pir-dashboard.json`; the daemon follows that file exactly as it follows an attached
@@ -216,10 +220,14 @@ bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a 
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-pir-model.mjs      pure: read pir-dashboard.json, decidePir (what to follow), pirKey, startingMode, shouldReapPirKey
 bin/cockpit-pir.sh             the pir pane's program: pir in a relaunch loop with PIR_DASHBOARD_STATE set
+bin/cockpit-fleet-picker-model.mjs  pure: the fleet picker's state, key decoding, reduce, render
+bin/cockpit-fleet-picker.mjs   the picker process: raw tty, SIGWINCH, hands back fleet-claude/fleet-pir/picker-cancel
+bin/cockpit-fleet-picker.sh    the picker pane's wrapper: picker-cancel on a crash, then never exits
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
-wezterm/cockpit.lua     window config; default_prog is the layout script
+wezterm/cockpit.lua     window config; default_prog is the layout script; the plain-← binding
+wezterm/fleet-picker.lua   pure Lua: decide(pane, terminals, screen) → open|pass, the two empty-box markers
 spikes/cockpit-test/    integration test, wezterm stubbed (812 checks, ~107s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
@@ -230,9 +238,12 @@ spikes/auto-name-test/  session naming and its settings.json merge (50 assertion
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (516)
 spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merge (49)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
+spikes/fleet-picker-keys-test/  the ← decision run inside `wezterm show-keys`, cockpit.lua's binding, Lua purity grep (56)
+spikes/fleet-picker-test/  the picker model, its purity grep, the picker process under a pty (381)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
 spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run
 spikes/pty-inject/      PTY harness used to settle how injection behaves
+spikes/fleet-picker-spike/  T00's probes: ← through a GUI Lua callback, the empty-box markers, picker open time
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
 docs/requirements.md    what this had to do, and why VSCode and Conductor didn't
@@ -245,11 +256,15 @@ the footer's height).
 
 State lives in `~/.claude/cockpit/`: `config.lua` (from the installer -- the one
 file that is *not* regenerated), `panes.json` (now records the `strip` and `foot`
-panes too, and `pir` once the pir pane has been spawned), `fleet.log`, `daemon.log`,
+panes too, `pir` once the pir pane has been spawned, and `picker` while the fleet
+picker is open), `fleet.log`, `daemon.log`,
 `review-<jobId>.md`, `terminals.json` (what
 the strip and footer render — carries the visible agent's own `diffMode` and, in
 custom mode, its `customRef`; a `fleet` block, `{ program: "claude"|"pir", switchable,
-available }`, that draws the `Claude Agents | PIR` switch; and `reviewable`, false only
+available, pickerOpen, picker }`, that draws the `Claude Agents | PIR` switch (`switchable`
+false while the picker is open) and arms ← — `picker` is `{ pane, program }` only when
+pir is installed, nothing is attached, the program is at its list and no picker is open,
+else `null`, and the ← binding reads it at every press; and `reviewable`, false only
 with a `pir.` key attached, which hides the `O` hint), `pir-dashboard.json` (what pir's
 dashboard has open — `view`, `run`, `worker`, `pid` — written temp-then-rename by
 the cockpit's own pir, read by the daemon, deleted on every rebuild; only a report

@@ -47,7 +47,8 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
   11 11a 11b "11b'" "11b''" 11c "11c'" "11c''" "11c'''" "11c''''" "11c'''''" 11d "11d'" \
   11e 11f 11g 11h 11i 11j 11k 11l 11m 11n 11o 11p \
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
-  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o
+  16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o \
+  17a 17b 17c 17d 17e 17f 17g 17h 17i
 chain footer 12 12b 12c 12d
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
@@ -2406,8 +2407,8 @@ fi
 
 if section 15c "back at the list: claude shown, switchable, pir available"; then
 echo list > "$FLEETSTATE"
-waitfor '"fleet":{"program":"claude","switchable":true,"available":true}' "$T/state/terminals.json" 10 "the switch to go clickable again"
-check  "terminals.json carries the fleet block"    '"fleet":{"program":"claude","switchable":true,"available":true}' "$T/state/terminals.json"
+waitfor '"fleet":{"program":"claude","switchable":true,"available":true,' "$T/state/terminals.json" 10 "the switch to go clickable again"
+check  "terminals.json carries the fleet block"    '"fleet":{"program":"claude","switchable":true,"available":true,' "$T/state/terminals.json"
 fi
 
 if section 15d "PIR at the list: the pir pane is spawned into the slot, claude parked"; then
@@ -2424,7 +2425,7 @@ parked "the claude pane is parked, not killed"     20
 in_slot "the pir pane holds the slot"              "$PIRP"
 check  "focus went to the pir pane"                "activate-pane --pane-id $PIRP" "$CALLS"
 refute "nothing was killed"                        "kill-pane" "$CALLS"
-check  "the footer says pir"                       '"fleet":{"program":"pir","switchable":true,"available":true}' "$T/state/terminals.json"
+check  "the footer says pir"                       '"fleet":{"program":"pir","switchable":true,"available":true,' "$T/state/terminals.json"
 FTAB="$(pane_tab 20)"
 fi
 
@@ -2950,6 +2951,15 @@ waitfor "refusing fleet-pir: pir is not on the daemon's PATH" "$A7/daemon.log" 1
 check  "PIR is refused, and says why"             "refusing fleet-pir: pir is not on the daemon's PATH" "$A7/daemon.log"
 refute "...spawning nothing"                      "cockpit-pir.sh" "$A7/calls.log"
 check  "...and claude stays shown"                '"program":"claude"' "$S7/terminals.json"
+# fleet-picker T03: no pir, no picker (DESIGN 2.1) -- the block is null, and a stray
+# `picker` verb is refused before any pane is touched.
+check  "no pir: the picker block is null"         '"pickerOpen":false,"picker":null' "$S7/terminals.json"
+: > "$A7/calls.log"
+echo picker >> "$S7/cmd"
+waitfor "refusing picker: pir is not on the daemon's PATH" "$A7/daemon.log" 10 "D7's picker refusal"
+check  "picker is refused, and says why"          "refusing picker: pir is not on the daemon's PATH" "$A7/daemon.log"
+refute "...splitting nothing"                     "split-pane" "$A7/calls.log"
+refute "...parking nothing"                       "move-pane-to-new-tab" "$A7/calls.log"
 daemon_stop $D7PID; D7PID=""
 fi
 
@@ -3010,6 +3020,210 @@ check  "...in a rebuild that got as far as the daemon" "nohup node" "$T/layout-c
 # this expected string as a kill.
 PKF="pkill -f"
 check  "the harness intercepted pkill"            "$PKF cockpitd.mjs" "$T/layout-calls"
+fi
+
+# --- the fleet picker (plans/fleet-picker T03) --------------------------------
+# ← at the list appends `picker`; the daemon stands a picker pane in front of the
+# shown program (parking it) and closes it onto the chosen one through the same
+# split-into-the-outgoing-pane swap the footer's switch uses. The picker answers
+# with fleet-claude / fleet-pir / picker-cancel. Its program is never run here (the
+# stub runs no pane), so the sections append its verbs themselves.
+# pickverb <verb> <log line>: append one verb, wait for the daemon's line for it.
+pickverb() {
+  local n0; n0=$(countof "$2" "$T/daemon.log")
+  echo "$1" >> "$T/state/cmd"
+  waitmore "$2" "$T/daemon.log" "$n0" 10 "$1 to be acted on ($2)"
+}
+# tjhas <fragment>: for waituntil, terminals.json carries a fragment.
+tjhas() { grep -qF -- "$1" "$T/state/terminals.json"; }
+# refused_picker <description> <log line>: `picker` is refused with that line, and
+# no pane is split, parked or killed for it.
+refused_picker() {
+  : > "$CALLS"
+  pickverb picker "$2"
+  check  "$1"                                        "$2" "$T/daemon.log"
+  refute "...splitting nothing"                      "split-pane" "$CALLS"
+  refute "...parking nothing"                        "move-pane-to-new-tab" "$CALLS"
+  refute "...and opening no picker"                  "cockpit-fleet-picker.sh" "$CALLS"
+}
+
+if section 17a "the armed block: at the list it names the claude pane"; then
+echo list > "$FLEETSTATE"
+waituntil 10 "the armed block at the list" tjhas '"picker":{"pane":20,"program":"claude"}'
+check  "armed at the list, naming claude's pane"   '"fleet":{"program":"claude","switchable":true,"available":true,"pickerOpen":false,"picker":{"pane":20,"program":"claude"}}' "$T/state/terminals.json"
+fi
+
+if section 17b "picker is refused attached, and while not switchable; the block is null"; then
+echo "test agent" > "$FLEETSTATE"
+waitfor '"agent":"test agent"' "$T/state/terminals.json" 10 "the agent attach to finish"
+check  "attached: the block is null"               '"pickerOpen":false,"picker":null' "$T/state/terminals.json"
+refused_picker "attached: picker is refused, logged"  "refusing picker: abc12345 is attached"
+echo list > "$FLEETSTATE"
+waitfor '"agent":"repo"' "$T/state/terminals.json" 10 "the exit to the list to finish"
+waituntil 10 "the armed block back at the list" tjhas '"picker":{"pane":20'
+# A header naming no known agent: not a list, so not switchable, yet nothing attaches.
+echo "nobody by this name" > "$FLEETSTATE"
+waituntil 10 "the switch to go dim off the list" tjhas '"switchable":false'
+check  "not switchable: the block is null"         '"pickerOpen":false,"picker":null' "$T/state/terminals.json"
+refused_picker "not switchable: picker is refused"  "refusing picker: claude is not at its list"
+echo list > "$FLEETSTATE"
+waituntil 10 "the armed block back at the list" tjhas '"picker":{"pane":20'
+fi
+
+if section 17c "picker opens: spawned into claude's pane, claude parked, focus on it"; then
+: > "$CALLS"
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+same   "panes.json names the picker"               "$([ -n "$PICK" ] && echo yes || echo no)" "yes"
+check  "one split into claude's pane, through env" "split-pane --left --percent 50 --pane-id 20 -- /usr/bin/env COCKPIT_REPO=$WT PATH=$T/state/bin:" "$CALLS"
+check  "...running the wrapper on cmd and the shown program" "$ROOT/bin/cockpit-fleet-picker.sh $T/state/cmd claude" "$CALLS"
+same   "...exactly one split"                      "$(grep -c -- ' split-pane ' "$CALLS")" "1"
+before "the picker came in before claude was parked" "cockpit-fleet-picker.sh" "move-pane-to-new-tab --pane-id 20" "$CALLS"
+parked "claude is parked, not killed"              20
+in_slot "the picker holds the slot"                "$PICK"
+check  "focus went to the picker"                  "activate-pane --pane-id $PICK" "$CALLS"
+refute "nothing was killed"                        "kill-pane" "$CALLS"
+check  "the footer: claude shown, switch dim, open, not armed" \
+       '"fleet":{"program":"claude","switchable":false,"available":true,"pickerOpen":true,"picker":null}' "$T/state/terminals.json"
+fi
+
+if section 17d "while open: a second picker is refused, reconcile reads nothing"; then
+refused_picker "a second picker is refused"         "refusing picker: one is already open in pane $PICK"
+: > "$CALLS"
+E0="$(countof "enter abc12345" "$T/daemon.log")"
+echo "test agent" > "$FLEETSTATE"
+# Window: an ungated reconcile reads the claude pane every POLL_MS (800 scaled) and
+# enters within one poll plus a `claude agents` read; 1.5s at 0.5 is ~4 polls.
+nap 3
+refute "reconcile read no pane"                    "get-text --pane-id 20" "$CALLS"
+same   "...and attached nothing"                   "$(countof "enter abc12345" "$T/daemon.log")" "$E0"
+in_slot "the picker still holds the slot"          "$PICK"
+echo list > "$FLEETSTATE"
+F0="$(countof "focus-claude ignored: the picker is open" "$T/daemon.log")"
+echo focus-claude >> "$T/state/cmd"
+waitmore "focus-claude ignored: the picker is open" "$T/daemon.log" "$F0" 10 "focus-claude to be ignored"
+refute "focus-claude activated nothing"            "activate-pane --pane-id 20" "$CALLS"
+fi
+
+if section 17e "while open: ⌥t into an empty terminal slot splits off the picker pane"; then
+# Kill the shown repo terminal so the slot is empty (any parked sibling is not in the
+# slot): the new terminal is then split off the fleet slot's pane, slotFleetPane's.
+SH="$(pane_key shell)"
+awk -v p="$SH" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+: > "$CALLS"
+N0="$(countof "opened terminal pane" "$T/daemon.log")"
+echo new >> "$T/state/cmd"
+waitmore "opened terminal pane" "$T/daemon.log" "$N0" 10 "⌥t to open a terminal"
+check  "the new terminal split off the picker pane" "split-pane --right --percent 50 --pane-id $PICK" "$CALLS"
+refute "...never off parked claude"                "--pane-id 20 --cwd" "$CALLS"
+NEWT="$(grep -oE 'opened terminal pane [0-9]+ for repo' "$T/daemon.log" | tail -1 | grep -oE '[0-9]+')"
+in_slot "the new terminal is in the cockpit tab"   "$NEWT"
+in_slot "the picker still holds the slot"          "$PICK"
+parked "claude is still parked"                    20
+fi
+
+if section 17f "picker-cancel: claude split back, picker killed, nothing restarted"; then
+: > "$CALLS"
+pickverb picker-cancel "picker closed onto claude"
+check  "claude split back into the picker pane"    "split-pane --left --percent 50 --pane-id $PICK --move-pane-id 20" "$CALLS"
+before "...before the picker was killed"           "--move-pane-id 20" "kill-pane --pane-id $PICK" "$CALLS"
+gone   "the picker pane is gone"                   "$PICK"
+in_slot "claude holds the slot"                    20
+check  "focus back on claude"                      "activate-pane --pane-id 20" "$CALLS"
+refute "nothing was spawned: no pir"               "cockpit-pir.sh" "$CALLS"
+refute "...and no second picker"                   "cockpit-fleet-picker.sh" "$CALLS"
+same   "panes.json has no picker"                  "$(pane_key picker)" ""
+check  "the footer: claude, switchable, armed again" \
+       '"fleet":{"program":"claude","switchable":true,"available":true,"pickerOpen":false,"picker":{"pane":20,"program":"claude"}}' "$T/state/terminals.json"
+: > "$CALLS"
+pickverb picker-cancel "picker-cancel ignored: no picker is open"
+refute "a stray picker-cancel moves nothing"       "split-pane" "$CALLS"
+# fleet-claude from the picker over claude: the same close, the program unchanged.
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+S0="$(countof "fleet slot now shows" "$T/daemon.log")"
+: > "$CALLS"
+pickverb fleet-claude "picker closed onto claude"
+check  "fleet-claude: claude split back"           "split-pane --left --percent 50 --pane-id $PICK --move-pane-id 20" "$CALLS"
+gone   "...the picker killed"                      "$PICK"
+same   "...and the program never switched"         "$(countof "fleet slot now shows" "$T/daemon.log")" "$S0"
+check  "...the footer still says claude"           '"program":"claude","switchable":true' "$T/state/terminals.json"
+fi
+
+if section 17g "fleet-pir from the picker: pir spawned into it first time, restored after"; then
+# The main chain's pir pane is killed so this is pir's first use again.
+OLDPIR="$(pane_key pir)"
+[ -n "$OLDPIR" ] && { awk -v p="$OLDPIR" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"; }
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+: > "$CALLS"
+pickverb fleet-pir "picker closed onto pir"
+PIRP3="$(pane_key pir)"
+check  "pir spawned into the picker pane"          "split-pane --left --percent 50 --pane-id $PICK --cwd $WT --" "$CALLS"
+check  "...running the relaunch loop"              "$ROOT/bin/cockpit-pir.sh $T/bin/pir $T/state/pir-dashboard.json" "$CALLS"
+before "...before the picker was killed"           "cockpit-pir.sh" "kill-pane --pane-id $PICK" "$CALLS"
+gone   "the picker pane is gone"                   "$PICK"
+in_slot "pir holds the slot"                       "$PIRP3"
+parked "claude stays parked"                       20
+check  "focus went to pir"                         "activate-pane --pane-id $PIRP3" "$CALLS"
+check  "the footer: pir shown, switchable, armed on pir's pane" \
+       "\"fleet\":{\"program\":\"pir\",\"switchable\":true,\"available\":true,\"pickerOpen\":false,\"picker\":{\"pane\":$PIRP3,\"program\":\"pir\"}}" "$T/state/terminals.json"
+# The real footer renderer on the daemon's own terminals.json, copied out of the
+# state dir (the renderer watches its dir): PIR drawn shown -- reverse video, not dim.
+PF="$T/picker-foot"; mkdir -p "$PF"; cp "$T/state/terminals.json" "$PF/terminals.json"
+( COCKPIT_DIR="$PF" COLUMNS=200 node "$ROOT/bin/cockpit-strip.mjs" footer > "$PF.raw" 2>&1 ) &
+PFP=$!
+waituntil 10 "the footer to draw a frame" grep -qF -- $'\033[?1006h' "$PF.raw"
+kill "$PFP" 2>/dev/null; wait "$PFP" 2>/dev/null
+check  "the footer draws PIR as the shown program" $'\033[7m PIR \033[0m' "$PF.raw"
+check  "...and Claude Agents as the other one"     $'\033[2mClaude Agents\033[0m' "$PF.raw"
+# A second round, over pir: claude and pir both come back as the same panes.
+: > "$CALLS"
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+check  "open over pir: the wrapper is told pir is shown" "$ROOT/bin/cockpit-fleet-picker.sh $T/state/cmd pir" "$CALLS"
+parked "pir is parked behind it"                   "$PIRP3"
+pickverb fleet-claude "picker closed onto claude"
+in_slot "fleet-claude: claude is back"             20
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+: > "$CALLS"
+pickverb fleet-pir "picker closed onto pir"
+check  "the second round restored the parked pir pane" "split-pane --left --percent 50 --pane-id $PICK --move-pane-id $PIRP3" "$CALLS"
+refute "...spawning no new one"                    "cockpit-pir.sh" "$CALLS"
+same   "panes.json names the same pir pane"        "$(pane_key pir)" "$PIRP3"
+in_slot "pir holds the slot"                       "$PIRP3"
+fleetclick claude
+in_slot "and the footer click still switches back" 20
+fi
+
+if section 17h "a Review click while the picker is open closes it onto claude, THEN spawns"; then
+printf '{"version":1,"meUuid":null,"repos":{"alpha":{"fetchedAt":1,"prs":[{"id":7,"links":{"html":{"href":"https://bitbucket.org/ws/pr/7"}}}]}}}\n' \
+  > "$T/state/bitbucket-cache.json"
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+: > "$CALLS"
+SP0="$(countof "spawned agent in alpha" "$T/daemon.log")"
+echo bb-review:alpha/7 >> "$T/state/cmd"
+waitmore "spawned agent in alpha" "$T/daemon.log" "$SP0" 10 "the Review click to spawn"
+before "claude was brought back before anything was typed" "--move-pane-id 20" "send-text --pane-id 20" "$CALLS"
+before "...and the picker killed before it too"   "kill-pane --pane-id $PICK" "send-text --pane-id 20" "$CALLS"
+check  "the review directive went to claude's box" "STDIN:@alpha Review Bitbucket PR https://bitbucket.org/ws/pr/7" "$CALLS"
+refute "nothing was typed into the picker"         "send-text --pane-id $PICK" "$CALLS"
+in_slot "claude holds the slot"                    20
+rm -f "$T/state/bitbucket-cache.json"
+fi
+
+if section 17i "the picker pane killed by hand: the open state is cleared, logged"; then
+pickverb picker "picker open in pane"
+PICK="$(pane_key picker)"
+awk -v p="$PICK" '$1 != p' "$PANESTATE" > "$PANESTATE.x" && mv "$PANESTATE.x" "$PANESTATE"
+G0="$(countof "picker pane $PICK is gone" "$T/daemon.log")"
+waitmore "picker pane $PICK is gone" "$T/daemon.log" "$G0" 10 "the dead picker to be noticed"
+grew   "the vanished picker was noticed and logged" "picker pane $PICK is gone" "$T/daemon.log" "$G0"
+check  "the footer no longer says open"            '"pickerOpen":false' "$T/state/terminals.json"
+same   "panes.json has no picker"                  "$(pane_key picker)" ""
+parked "claude stays parked (a rebuild restores it)" 20
 fi
 
 }  # run_main

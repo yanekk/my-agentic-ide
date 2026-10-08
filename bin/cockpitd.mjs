@@ -900,8 +900,18 @@ const PIR_BIN = (() => {
   return null;
 })();
 
+/**
+ * The program picker standing in the fleet slot (fleet-picker DESIGN 2.5-2.9), or
+ * null. `pane` is the picker's pane; `shown` is the program parked behind it, which
+ * fleetProgram still names. In memory only, so a rebuild never starts with it open.
+ */
+let pickerOpen = null;          // { pane: number, shown: "claude" | "pir" }
+/** The picker pane's program: the wrapper that always hands back a verb (DESIGN 2.7). */
+const PICKER_SH = path.join(HERE, "cockpit-fleet-picker.sh");
+
 /** The pane in the fleet slot right now: the anchor for splits and the focus hand-back. */
 function slotFleetPane() {
+  if (pickerOpen) return pickerOpen.pane;
   return fleetProgram === "pir" && panes.pir !== undefined ? panes.pir : panes.fleet;
 }
 /**
@@ -1330,7 +1340,16 @@ function writeTerminals(table = paneTable()) {
     // `fleet` is what the footer's `Claude Agents | PIR` segment draws (DESIGN 2.1,
     // 3.5): which program is shown, whether a click may switch it, and whether pir
     // exists at all (absent -> the segment is not drawn).
-    const fleet = { program: fleetProgram, switchable: fleetSwitchableNow, available: PIR_BIN !== null };
+    // While the picker is open it IS the switch, so the footer's goes dim
+    // (fleet-picker DESIGN 2.6). `picker` is the armed block the ← binding reads
+    // (DESIGN 2.1 conditions 2-4, 3.5): non-null only when ← may open a picker here,
+    // naming the pane that must hold focus and which empty-box line to look for.
+    const armed = PIR_BIN !== null && !attached && fleetSwitchableNow && !pickerOpen;
+    const fleet = {
+      program: fleetProgram, switchable: fleetSwitchableNow && !pickerOpen, available: PIR_BIN !== null,
+      pickerOpen: pickerOpen !== null,
+      picker: armed ? { pane: slotFleetPane(), program: fleetProgram } : null,
+    };
     // `reviewable` is false only with a pir key attached: there a flush is inert
     // (DESIGN 2.7), so the footer must not offer `O send→claude`.
     const reviewable = !(attached && isPirKey(attached.jobId));
@@ -2451,7 +2470,7 @@ function isGitRepo(dir) {
 const ENTER = /\[FV-attach\] respawnJob (\S+?):/;
 const EXIT = /\[FV-attach\] attachJob returned after (\d+)ms/;
 
-function tail(file, onLine) {
+function tail(file, onLine, { watch = false } = {}) {
   let pos = 0, ino = null, buf = "";
   const read = () => {
     let st;
@@ -2472,6 +2491,17 @@ function tail(file, onLine) {
   };
   try { pos = fs.statSync(file).size; ino = fs.statSync(file).ino; } catch {}
   setInterval(read, ms(200));
+  // The fast path for the cmd channel: the 200ms poll was ~200 of the ~212ms a
+  // picker took to open (fleet-picker T00). The DIRECTORY is watched, never the
+  // file (CLAUDE.md), and the poll stays as the backstop for an event macOS drops.
+  // read() is synchronous, so a watch event and a poll tick can never interleave.
+  if (watch) {
+    try {
+      fs.watch(path.dirname(file), (_e, name) => {
+        if (!name || name === path.basename(file)) read();
+      });
+    } catch (e) { log(`could not watch ${path.dirname(file)} for ${path.basename(file)}: ${e.message}`); }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3605,7 +3635,7 @@ function bitbucketOpen(slug, id) {
 function spawnAgent({ repo, prompt }) {
   // panes.fleet is claude's pane whether or not it is shown, and a parked one takes
   // keystrokes as readily as a visible one. Callers switch first; this is the fence.
-  if (fleetProgram !== "claude") return log(`not spawning in ${safeText(repo)}: claude agents is not shown`);
+  if (fleetProgram !== "claude" || pickerOpen) return log(`not spawning in ${safeText(repo)}: claude agents is not shown`);
   // Focus the fleet pane first: at the list it holds the new-session box, and unattached
   // the daemon otherwise never types there. Activate, then type, as a person would.
   wez(["activate-pane", "--pane-id", String(panes.fleet)]);
@@ -3661,8 +3691,10 @@ function bitbucketVerb(verb) {
       : `Address the review comments on Bitbucket PR ${url}`;
     // The spawn types into claude's new-session box, so claude has to be the program
     // shown: switch first (DESIGN 2.8) so one click still launches the agent. A
-    // switch that fails drops the spawn -- typing it into pir would drive pir.
-    if (fleetProgram !== "claude") {
+    // switch that fails drops the spawn -- typing it into pir would drive pir. With
+    // the picker open claude is parked behind it even when it is the program shown,
+    // so the switch then closes the picker onto claude first (fleet-picker 2.6).
+    if (fleetProgram !== "claude" || pickerOpen) {
       switchFleet("claude").then((ok) => {
         if (ok) spawnAgent({ repo: slug, prompt });
         else log(`bitbucket ${kind}: not spawned, could not switch to claude agents`);
@@ -3855,6 +3887,9 @@ async function onPirState() {
   if (!(await acquireReconcileLock())) { schedulePirState(); return; }
   try {
     if (fleetProgram !== "pir") return;         // switched back while we waited
+    // pir is parked behind the picker and nothing is attached; closing it onto pir
+    // re-reads the report (closePicker), so nothing is lost by waiting.
+    if (pickerOpen) return;
     // Identity before content: a write landing between the two is then re-read by
     // the backstop, where the other order would take the new content's identity
     // for the old content's and never read the new one.
@@ -3951,15 +3986,62 @@ function noteSwitchable(v) {
 }
 
 /**
+ * Split a pane INTO `outgoing`, the pane holding the fleet slot, so it inherits the
+ * slot at its exact size; the caller then parks or kills `outgoing`. The order is
+ * pir-pane T00's, measured on wezterm 20240203 (FINDINGS 2026-09-27): the terminal
+ * and strip beside the slot keep their widths -- the diff slot's trick, applied to
+ * the bottom-left. `tail` is the split's own arguments: `--move-pane-id <id>` to
+ * bring a parked pane back, or `[--cwd d] -- argv` to spawn one. The ONE split every
+ * fleet-slot swap goes through: a program switch, the picker opening, the picker
+ * closing. Returns the pane id now in the slot, or null.
+ */
+function splitIntoFleetSlot(outgoing, tail) {
+  const out = wez(["split-pane", "--left", "--percent", "50", "--pane-id", String(outgoing), ...tail]);
+  if (out === null) return null;
+  const moveAt = tail.indexOf("--move-pane-id");
+  if (moveAt !== -1) return Number(tail[moveAt + 1]);
+  const id = Number.parseInt(out.trim(), 10);
+  return Number.isInteger(id) ? id : null;
+}
+
+/**
+ * Bring `target`'s pane into the slot over `outgoing`: the parked pane if it is
+ * alive, else (pir only) a fresh one. The pir pane is spawned the first time only (a
+ * person who never asks for PIR pays nothing), and again only if it has died; the
+ * claude pane is the layout's own and is never respawned. Returns its id, or null.
+ */
+function fleetPaneInto(outgoing, target, live) {
+  const parked = target === "pir" ? panes.pir : panes.fleet;
+  if (parked !== undefined && live.has(parked)) {
+    const id = splitIntoFleetSlot(outgoing, ["--move-pane-id", String(parked)]);
+    if (id === null) { log(`could not restore the ${target} pane ${parked}`); return null; }
+    log(`restored the ${target} pane ${parked} into the fleet slot`);
+    return id;
+  }
+  if (target === "pir") {
+    // Through /usr/bin/env for the reason every terminal is: a split inherits the
+    // mux server's environment, not ours, so PATH and COCKPIT_REPO are named here
+    // or runs pir starts would lose `note` and the session namer (DESIGN 2.3).
+    const id = splitIntoFleetSlot(outgoing,
+      ["--cwd", panes.repo, "--", ...cockpitEnv(), PIR_LOOP, PIR_BIN, PIR_STATE]);
+    if (id === null) { log("could not open the pir pane"); return null; }
+    publishPanes({ pir: id });
+    log(`opened the pir pane ${id} (${PIR_BIN})`);
+    return id;
+  }
+  // Its relaunch loop lives in cockpit-layout.sh, and a rebuild is the way back.
+  log(`refusing fleet-claude: the claude agents pane ${parked} is gone`);
+  return null;
+}
+
+const fleetLabel = (program) => (program === "pir" ? "pir" : "claude agents");
+
+/**
  * Show `target` ("claude" | "pir") in the fleet slot, parking the other program.
  * Returns true when `target` is in the slot afterwards (including "already was").
- *
- * The order is T00's, measured on wezterm 20240203 (FINDINGS 2026-09-27): split the
- * incoming pane INTO the outgoing one at 50%, then park the outgoing one, so the
- * incoming inherits the slot at its exact size and the terminal and strip beside it
- * keep theirs -- the diff slot's trick, applied to the bottom-left. The pir pane is
- * spawned the first time only (a person who never clicks PIR pays nothing), and
- * again only if it has died.
+ * With the picker open the same verb is the picker's answer, and closes it onto
+ * `target` instead -- decided under the lock, so a `picker` and a `fleet-*` read in
+ * one tick are taken in the order they were written.
  */
 async function switchFleet(target) {
   if (target === "pir" && PIR_BIN === null) {
@@ -3971,6 +4053,7 @@ async function switchFleet(target) {
     return false;
   }
   try {
+    if (pickerOpen) return closePickerLocked(target);
     // Only under the lock: two clicks read in one tick both start before the first
     // has switched, and a check made earlier took the second for "already shown"
     // and dropped it, leaving the first click's program up (pir-pane T06 drill).
@@ -3982,53 +4065,132 @@ async function switchFleet(target) {
     const table = paneTable();
     if (!table) { log(`refusing fleet-${target}: cannot read the pane list`); return false; }
     const live = new Set(table.map((p) => p.pane_id));
-    const cockpitTab = cockpitTabId(table);
     const outgoing = slotFleetPane();
-    let incoming = target === "pir" ? panes.pir : panes.fleet;
-
-    if (incoming !== undefined && live.has(incoming)) {
-      const moved = wez(["split-pane", "--left", "--percent", "50",
-                         "--pane-id", String(outgoing), "--move-pane-id", String(incoming)]);
-      if (moved === null) { log(`could not restore the ${target} pane ${incoming}`); return false; }
-      log(`restored the ${target} pane ${incoming} into the fleet slot`);
-    } else if (target === "pir") {
-      // Through /usr/bin/env for the reason every terminal is: a split inherits the
-      // mux server's environment, not ours, so PATH and COCKPIT_REPO are named here
-      // or runs pir starts would lose `note` and the session namer (DESIGN 2.3).
-      const out = wez(["split-pane", "--left", "--percent", "50", "--pane-id", String(outgoing),
-                       "--cwd", panes.repo, "--", ...cockpitEnv(), PIR_LOOP, PIR_BIN, PIR_STATE]);
-      const id = Number.parseInt((out ?? "").trim(), 10);
-      if (!Number.isInteger(id)) { log("could not open the pir pane"); return false; }
-      incoming = id;
-      publishPanes({ pir: id });
-      log(`opened the pir pane ${id} (${PIR_BIN})`);
-    } else {
-      // The claude pane is the layout's own and is never respawned here: its
-      // relaunch loop lives in cockpit-layout.sh, and a rebuild is the way back.
-      log(`refusing fleet-claude: the claude agents pane ${incoming} is gone`);
-      return false;
-    }
-
-    parkPane(outgoing, fleetProgram === "pir" ? "pir" : "claude agents", cockpitTab);
-    fleetProgram = target;
-    pirSeenId = null;   // the backstop waits for a first read (scheduled below for pir)
-    // The person clicked to see this program, so the keyboard goes with it.
-    wez(["activate-pane", "--pane-id", String(incoming)]);
-    // Claude could only have been parked from its list. pir says for itself.
-    fleetSwitchableNow = target === "pir" ? readPir().view === "list" : true;
-    writeTerminals();
-    log(`fleet slot now shows ${target}`);
-    // A pir already inside a run is followed now, not at its next write (DESIGN 2.4).
-    // Scheduled, not awaited: it needs the lock this call is still holding.
-    if (target === "pir") schedulePirState();
+    const incoming = fleetPaneInto(outgoing, target, live);
+    if (incoming === null) return false;
+    parkPane(outgoing, fleetLabel(fleetProgram), cockpitTabId(table));
+    showFleet(target, incoming);
     return true;
   } finally {
     reconciling = false;
   }
 }
 
+/**
+ * The slot now holds `program`'s pane `pane`: record it, give it the keyboard (the
+ * person asked to see it) and redraw the footer. Under the reconcile lock.
+ */
+function showFleet(program, pane) {
+  const changed = program !== fleetProgram;
+  fleetProgram = program;
+  if (changed) pirSeenId = null;   // the backstop waits for a first read (scheduled below)
+  wez(["activate-pane", "--pane-id", String(pane)]);
+  // Claude could only have been parked from its list. pir says for itself.
+  fleetSwitchableNow = program === "pir" ? readPir().view === "list" : true;
+  writeTerminals();
+  if (changed) log(`fleet slot now shows ${program}`);
+  // A pir already inside a run is followed now, not at its next write (DESIGN 2.4),
+  // and one shown again from behind the picker catches up on what it wrote there.
+  // Scheduled, not awaited: it needs the lock the caller is still holding.
+  if (program === "pir") schedulePirState();
+}
+
+/**
+ * Open the program picker in the fleet slot (fleet-picker DESIGN 2.5, 2.8): spawn
+ * it INTO the shown program's pane, park that program (never kill it), focus the
+ * picker. The checks are made again here because the binding decided on a
+ * terminals.json up to a poll old; the box is NOT re-read (2.8), and a refusal is a
+ * log line, never a replayed ←. Every refusal before the shown-pane check costs no
+ * wezterm call at all.
+ */
+async function openPicker() {
+  if (PIR_BIN === null) return log("refusing picker: pir is not on the daemon's PATH");
+  if (!(await acquireReconcileLock())) return log("refusing picker: the panes are busy");
+  try {
+    if (pickerOpen) return log(`refusing picker: one is already open in pane ${pickerOpen.pane}`);
+    if (attached) return log(`refusing picker: ${attached.jobId} is attached`);
+    if (!fleetSwitchableNow) return log(`refusing picker: ${fleetProgram} is not at its list`);
+    const table = paneTable();
+    if (!table) return log("refusing picker: cannot read the pane list");
+    const shown = slotFleetPane();
+    if (!table.some((p) => p.pane_id === shown)) return log(`refusing picker: the ${fleetProgram} pane ${shown} is gone`);
+    // Through /usr/bin/env like every pane the daemon spawns: the split inherits the
+    // mux server's environment, so the wrapper would not find node on a bare PATH.
+    const pane = splitIntoFleetSlot(shown, ["--", ...cockpitEnv(), PICKER_SH, CMD_FILE, fleetProgram]);
+    if (pane === null) return log("could not open the picker pane");
+    parkPane(shown, fleetLabel(fleetProgram), cockpitTabId(table));
+    pickerOpen = { pane, shown: fleetProgram };
+    publishPanes({ picker: pane });
+    wez(["activate-pane", "--pane-id", String(pane)]);
+    writeTerminals();
+    log(`picker open in pane ${pane} over ${fleetProgram}`);
+  } finally {
+    reconciling = false;
+  }
+}
+
+/** `picker-cancel`: close the picker onto the program it was opened over. */
+async function cancelPicker() {
+  if (!(await acquireReconcileLock())) return log("refusing picker-cancel: the panes are busy");
+  try {
+    if (!pickerOpen) return log("picker-cancel ignored: no picker is open");
+    closePickerLocked(pickerOpen.shown);
+  } finally {
+    reconciling = false;
+  }
+}
+
+/**
+ * Close the picker onto `target`: split its pane (the parked one, or pir's first
+ * pane) INTO the picker pane, kill the picker, focus `target` (DESIGN 2.5). Called
+ * under the reconcile lock. A target that cannot be brought back falls back to the
+ * program the picker was opened over, so the slot is never left holding a picker
+ * whose process has already answered. Returns true when `target` is shown.
+ */
+function closePickerLocked(target) {
+  const { pane: picker, shown } = pickerOpen;
+  const table = paneTable();
+  if (!table) { log(`picker: cannot read the pane list to close onto ${target}`); return false; }
+  const live = new Set(table.map((p) => p.pane_id));
+  if (!live.has(picker)) { pickerGone(picker); return false; }
+  let program = target;
+  let pane = fleetPaneInto(picker, target, live);
+  if (pane === null && target !== shown) {
+    log(`picker: could not show ${target}; back to ${shown}`);
+    program = shown;
+    pane = fleetPaneInto(picker, shown, live);
+  }
+  if (pane === null) { log("picker: nothing to close onto; left open until a rebuild"); return false; }
+  wez(["kill-pane", "--pane-id", String(picker)]);
+  pickerOpen = null;
+  publishPanes({ picker: undefined });   // JSON drops it: panes.json has no `picker`
+  log(`picker closed onto ${program}`);
+  showFleet(program, pane);
+  return program === target;
+}
+
+/** The picker pane vanished (killed by hand): forget it. The program stays parked (2.9). */
+function pickerGone(picker) {
+  pickerOpen = null;
+  publishPanes({ picker: undefined });
+  writeTerminals();
+  log(`picker pane ${picker} is gone; the picker is closed, ${fleetProgram} stays parked until a rebuild`);
+}
+
+/** From the reconcile poll, which does nothing else while the picker is open. */
+function pickerHealth() {
+  if (reconciling || !pickerOpen) return;
+  const table = paneTable();
+  if (!table || !pickerOpen) return;
+  if (!table.some((p) => p.pane_id === pickerOpen.pane)) pickerGone(pickerOpen.pane);
+}
+
 async function reconcile() {
   if (reconciling) return;
+  // The picker stands in front of the shown program, which is parked and cannot
+  // change, so there is nothing to read (fleet-picker DESIGN 2.6) -- only whether
+  // the picker pane itself is still there (2.9).
+  if (pickerOpen) { pickerHealth(); return; }
   // Everything below reads the CLAUDE pane. While pir is shown that pane is parked
   // at its list and cannot change, so a poll would only re-read a frozen screen --
   // and a stale header there must never attach anything (DESIGN 2.9).
@@ -4083,8 +4245,9 @@ log(`cockpitd up · panes ${JSON.stringify(panes)} · auto-reload ${AUTO_RELOAD}
 // Nothing is attached at startup, so there is no viewer. Publishing the three keys
 // as null (rather than leaving them absent) means panes.json answers the question
 // in every state -- and cockpit-open refuses on either, so this costs nothing but
-// makes the file readable by a person.
-publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null });
+// makes the file readable by a person. A `picker` left by a daemon that died with
+// one open names nothing this one knows: dropped.
+publishPanes({ viewer: null, viewerAgent: null, viewerRoot: null, picker: undefined });
 writeTerminals();   // give the strip its first frame (the repo shell)
 
 // The log only nudges; reconcile() decides.
@@ -4118,6 +4281,7 @@ tail(CMD_FILE, (line) => {
     // Not while pir is shown: the claude pane is then parked in a tab of its own,
     // and activating it would fill the window with it (DESIGN 2.7).
     if (fleetProgram === "pir") return log("focus-claude ignored: pir is shown");
+    if (pickerOpen) return log("focus-claude ignored: the picker is open");
     if (panes.fleet !== undefined) {
       wez(["activate-pane", "--pane-id", String(panes.fleet)]);
     }
@@ -4125,7 +4289,13 @@ tail(CMD_FILE, (line) => {
   }
   // Clicking `Claude Agents` / `PIR` in the footer (DESIGN 2.1). Refused unless the
   // shown program is at its list (DESIGN 2.2); switchFleet says why in the log.
+  // With the picker open the same two verbs are its answer: switchFleet closes it
+  // onto the one named (fleet-picker DESIGN 2.7), deciding which under the lock.
   if (verb === "fleet-claude" || verb === "fleet-pir") { switchFleet(verb.slice("fleet-".length)); return; }
+  // The ← binding appends `picker` (wezterm/cockpit.lua); the picker's Esc appends
+  // `picker-cancel`, as does its wrapper after a crash (fleet-picker DESIGN 2.7).
+  if (verb === "picker") { openPicker(); return; }
+  if (verb === "picker-cancel") { cancelPicker(); return; }
   // Clicking a terminal's [x] in the strip appends this (see cockpit-strip.mjs); it
   // names the terminal outright, so unlike ⌥w it can close a parked one, not only
   // the one on screen.
@@ -4147,7 +4317,7 @@ tail(CMD_FILE, (line) => {
     if (customPromptOpen) return;       // the prompt owns the pane; keys are swallowed until it resolves
     diffModeCommand(verb);
   } else terminalCommand(verb);
-});
+}, { watch: true });
 // The owner backstop (plans/test-daemon-leaks DESIGN 2.4). TEST-ONLY: the real
 // cockpit never sets COCKPIT_OWNER_PID (cockpit-layout.sh does not), so there it
 // is inert. A suite sets it to its own shell's pid, and when that shell is gone

@@ -1,0 +1,205 @@
+{
+  "59x22": {
+    "claude": {
+      "size": "59x22",
+      "intact": true,
+      "line": "\"❯ describe a task for a new session\"",
+      "hidesWithText": true,
+      "returnsWhenCleared": true
+    },
+    "pir": {
+      "size": "59x22",
+      "settled": true,
+      "intact": true,
+      "line": "\"↑↓ move · ↵ open · Ctrl+O browser · Ctrl+P pair · esc quit\"",
+      "hidesWithText": true,
+      "typedHint": "\"↵ start planning · shift+↵ new line · esc clear\"",
+      "returnsWhenCleared": true,
+      "screen": [
+        "pir  runs on this machine",
+        "  ⧗ test queue  idle",
+        "  No runs yet — type after @ below to plan or build",
+        "0 runs · 0 running · 0 finished · 0 crashed",
+        "new  start with @repo",
+        "───────────────────────────────────────────────────────────",
+        "@",
+        "───────────────────────────────────────────────────────────",
+        "↑↓ move · ↵ open · Ctrl+O browser · Ctrl+P pair · esc quit"
+      ]
+    },
+    "pirWithRun": {
+      "size": "59x22",
+      "settled": true,
+      "intact": true,
+      "line": "\"↑↓ move · ↵ open · Ctrl+O browser · Ctrl+P pair · esc quit\"",
+      "hidesWithText": true,
+      "typedHint": "\"↵ start planning · shift+↵ new line · esc clear\"",
+      "returnsWhenCleared": true,
+      "screen": [
+        "pir  runs on this machine",
+        "  ⧗ test queue  idle",
+        "  SLUG                       TYPE  STATE         REPO",
+        "  rig                        work  ● running     rigrepo",
+        "1 run · 1 running · 0 finished · 0 crashed",
+        "new  start with @repo",
+        "───────────────────────────────────────────────────────────",
+        "@",
+        "───────────────────────────────────────────────────────────",
+        "↑↓ move · ↵ open · Ctrl+O browser · Ctrl+P pair · esc quit"
+      ]
+    }
+  },
+  "getTextCost": {
+    "n": 20,
+    "median": 10.4,
+    "min": 9.6,
+    "max": 13.9
+  },
+  "echo": {
+    "charHidesPlaceholder": {
+      "n": 20,
+      "median": 41.2,
+      "min": 21.7,
+      "max": 64
+    },
+    "backspaceRestores": {
+      "n": 20,
+      "median": 24.8,
+      "min": 19.6,
+      "max": 43
+    },
+    "misses": 0,
+    "sendTextCall": {
+      "n": 20,
+      "median": 25.1,
+      "min": 11.3,
+      "max": 42.7
+    }
+  },
+  "open-poll": {
+    "verbSeen": {
+      "n": 10,
+      "median": 141.5,
+      "min": 10.1,
+      "max": 201.7
+    },
+    "splitDone": {
+      "n": 10,
+      "median": 163.8,
+      "min": 38.7,
+      "max": 226.4
+    },
+    "parkDone": {
+      "n": 10,
+      "median": 179.2,
+      "min": 64.5,
+      "max": 247.9
+    },
+    "activateDone": {
+      "n": 10,
+      "median": 188.8,
+      "min": 76.2,
+      "max": 257.8
+    },
+    "firstFrame": {
+      "n": 10,
+      "median": 212.2,
+      "min": 97.7,
+      "max": 277.9
+    },
+    "onScreenViaGetText": {
+      "n": 10,
+      "median": 219.6,
+      "min": 102.8,
+      "max": 290.4
+    }
+  },
+  "open-watch": {
+    "verbSeen": {
+      "n": 10,
+      "median": 12.2,
+      "min": 3.1,
+      "max": 17.9
+    },
+    "splitDone": {
+      "n": 10,
+      "median": 42.7,
+      "min": 26.5,
+      "max": 56.2
+    },
+    "parkDone": {
+      "n": 10,
+      "median": 63,
+      "min": 42.4,
+      "max": 81.6
+    },
+    "activateDone": {
+      "n": 10,
+      "median": 74.5,
+      "min": 51.3,
+      "max": 95.1
+    },
+    "firstFrame": {
+      "n": 10,
+      "median": 99.9,
+      "min": 73.8,
+      "max": 119.3
+    },
+    "onScreenViaGetText": {
+      "n": 10,
+      "median": 108.7,
+      "min": 83.5,
+      "max": 132.5
+    }
+  },
+  "39x12": {
+    "claude": {
+      "size": "39x12",
+      "intact": true,
+      "line": "\"❯ describe a task for a new session\"",
+      "hidesWithText": true,
+      "returnsWhenCleared": true
+    },
+    "pir": {
+      "size": "39x12",
+      "settled": true,
+      "intact": true,
+      "line": "\"↑↓ move · ↵ open · Ctrl+O browser · Ctr\"",
+      "hidesWithText": true,
+      "typedHint": "\"↵ start planning · shift+↵ new line · e\"",
+      "returnsWhenCleared": true,
+      "screen": [
+        "pir  runs on this machine",
+        "  ⧗ test queue  idle",
+        "  No runs yet — type after @ below to p",
+        "0 runs · 0 running · 0 finished · 0 cra",
+        "new  start with @repo",
+        "───────────────────────────────────────",
+        "@",
+        "───────────────────────────────────────",
+        "↑↓ move · ↵ open · Ctrl+O browser · Ctr"
+      ]
+    },
+    "pirWithRun": {
+      "size": "39x12",
+      "settled": true,
+      "intact": true,
+      "line": "\"↑↓ move · ↵ open · Ctrl+O browser · Ctr\"",
+      "hidesWithText": true,
+      "typedHint": "\"↵ start planning · shift+↵ new line · e\"",
+      "returnsWhenCleared": true,
+      "screen": [
+        "pir  runs on this machine",
+        "  ⧗ test queue  idle",
+        "  SLUG                       TYPE  STAT",
+        "  rig                        work  ● as",
+        "1 run · 0 running · 0 finished · 0 cras",
+        "new  start with @repo",
+        "───────────────────────────────────────",
+        "@",
+        "───────────────────────────────────────",
+        "↑↓ move · ↵ open · Ctrl+O browser · Ctr"
+      ]
+    }
+  }
+}

@@ -20,7 +20,15 @@
       "Bash(git merge-base:*)",
       "Bash(git merge:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(bash spikes/fleet-picker-keys-test/run.sh)",
+      "Bash(bash spikes/fleet-picker-test/run.sh)",
+      "Bash(bash spikes/fleet-picker-spike/probe.sh)",
+      "Bash(ln -sfn /Users/jankrolikowski/git/my-agentic-ide/wezterm/cockpit.lua /Users/jankrolikowski/.wezterm.lua)",
+      "Bash(readlink /Users/jankrolikowski/.wezterm.lua)"
+    ],
+    "ask": [
+      "Bash(ln -sfn /Users/jankrolikowski/git/my-agentic-ide/.claude/worktrees/* /Users/jankrolikowski/.wezterm.lua)"
     ]
   }
 }
