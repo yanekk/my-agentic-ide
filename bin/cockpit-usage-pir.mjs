@@ -39,44 +39,77 @@ export function isAlive(pid) {
   catch (e) { return e?.code === "EPERM"; }
 }
 
+// The api.json read and liveness check every GET shares, so /v1/usage and
+// /v2/runs cannot disagree about whether the service is up (fleet-picker-status
+// DESIGN 3.2). Returns { api } or the quiet { state } that ends the fetch.
+function findPirService(home, alive) {
+  let text;
+  try { text = fs.readFileSync(path.join(home, ".pir", "api.json"), "utf8"); }
+  catch (e) {
+    // No .pir/, or .pir/ without the file: pir is absent or its service is off.
+    // Anything else (a directory in its place, no permission) is a broken file.
+    return { state: e?.code === "ENOENT" || e?.code === "ENOTDIR" ? "absent" : "bad-file" };
+  }
+  const api = parsePirApiFile(text);
+  if (!api) return { state: "bad-file" };
+  // A crashed service leaves its api.json behind; its pid is how we know not to
+  // knock on a port some other program may since have taken.
+  if (!alive(api.pid)) return { state: "dead" };
+  return { api };
+}
+
+// One GET of `route` on an already-found service. The signal covers the body read
+// too: headers can arrive and the body never. redirect "error": the url was checked
+// to be loopback, and a redirect must not be able to send the request (or the key
+// in `headers`) anywhere else (DESIGN 2.6).
+async function getJson(api, route, headers, timeoutMs) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  let res, raw;
+  try {
+    res = await fetch(`${api.origin}${route}`, { redirect: "error", signal, headers });
+    if (res.status !== 200) {
+      // Release the socket; the error body is never read (every non-200 is alike).
+      try { await res.body?.cancel(); } catch { /* already gone */ }
+      return { state: "http", status: res.status };
+    }
+    raw = await res.text();
+  } catch {
+    return { state: "unreachable" };       // refused, reset, redirect, or the limit
+  }
+  let body;
+  try { body = JSON.parse(raw); } catch { return { state: "bad-body" }; }
+  return { state: "answered", body };
+}
+
 // One GET to the service named by ${home}/.pir/api.json. Never throws, never
 // rejects. Every state before "unreachable" is decided without sending anything.
+// No header of our own: /v1/usage is unauthenticated.
 export async function fetchPirUsage({ home, alive = isAlive, timeoutMs = PIR_TIMEOUT_MS } = {}) {
   try {
-    let text;
-    try { text = fs.readFileSync(path.join(home, ".pir", "api.json"), "utf8"); }
-    catch (e) {
-      // No .pir/, or .pir/ without the file: pir is absent or its service is off.
-      // Anything else (a directory in its place, no permission) is a broken file.
-      return { state: e?.code === "ENOENT" || e?.code === "ENOTDIR" ? "absent" : "bad-file" };
-    }
-    const api = parsePirApiFile(text);
-    if (!api) return { state: "bad-file" };
-    // A crashed service leaves its api.json behind; its pid is how we know not to
-    // knock on a port some other program may since have taken.
-    if (!alive(api.pid)) return { state: "dead" };
-
-    // The signal covers the body read too: headers can arrive and the body never.
-    // redirect "error": the url was checked to be loopback, and a redirect must not
-    // be able to send the request anywhere else (DESIGN 2.6). No header of our own.
-    const signal = AbortSignal.timeout(timeoutMs);
-    let res, raw;
-    try {
-      res = await fetch(`${api.origin}/v1/usage`, { redirect: "error", signal });
-      if (res.status !== 200) {
-        // Release the socket; the error body is never read (every non-200 is alike).
-        try { await res.body?.cancel(); } catch { /* already gone */ }
-        return { state: "http", status: res.status };
-      }
-      raw = await res.text();
-    } catch {
-      return { state: "unreachable" };       // refused, reset, redirect, or the limit
-    }
-    let body;
-    try { body = JSON.parse(raw); } catch { return { state: "bad-body" }; }
-    return { state: "answered", origin: api.origin, body };
+    const found = findPirService(home, alive);
+    if (!found.api) return found;
+    const got = await getJson(found.api, "/v1/usage", undefined, timeoutMs);
+    return got.state === "answered" ? { state: "answered", origin: found.api.origin, body: got.body } : got;
   } catch {
     return { state: "unreachable" };         // belt and braces: never reject
+  }
+}
+
+// GET /v2/runs for the fleet picker's status (fleet-picker-status DESIGN 2.7).
+// Unlike /v1/usage it needs pir's access key, ${home}/.pir/api-key, trimmed; a
+// missing, unreadable or empty key is "no-key", decided after the liveness check
+// and without sending anything. Never throws, never rejects.
+export async function fetchPirRuns({ home, alive = isAlive, timeoutMs = PIR_TIMEOUT_MS } = {}) {
+  try {
+    const found = findPirService(home, alive);
+    if (!found.api) return found;
+    let key;
+    try { key = fs.readFileSync(path.join(home, ".pir", "api-key"), "utf8").trim(); }
+    catch { key = ""; }
+    if (!key) return { state: "no-key" };
+    return await getJson(found.api, "/v2/runs", { authorization: `Bearer ${key}` }, timeoutMs);
+  } catch {
+    return { state: "unreachable" };
   }
 }
 
