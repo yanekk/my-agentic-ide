@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | claude-status-spike | — | ⬜ | |
+| T00 | claude-status-spike | — | ✅ | |
 | T01 | status-model | T00 | ⬜ | |
 | T02 | status-gather | T00 | ⬜ | |
 | T03 | picker-render | — | ✅ | |
