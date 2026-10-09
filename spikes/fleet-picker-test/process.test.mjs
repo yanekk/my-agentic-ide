@@ -33,7 +33,8 @@ function check(name, got, want) {
 }
 
 const UP = "\x1b[A", DOWN = "\x1b[B", RIGHT = "\x1b[C", LEFT = "\x1b[D";
-const READY = ["wait", "SWITCH PROGRAM"];
+// The hint is on screen at every size; the title is gone below 18 rows (status DESIGN §2.4).
+const READY = ["wait", "choose"];
 
 let n = 0;
 function drive(name, shown, cols, rows, steps) {
@@ -88,7 +89,7 @@ oneVerb("fast ↓→ in one read", drive("burst", "claude", 59, 22, [READY, ["se
     ["send", "\x1b[5~"], ["sleep", 0.3], ["snap", "after"]]);
   if (r) {
     check("← q x mouse PgUp: nothing appended", r.cmd, []);
-    check("← q x mouse PgUp: the highlight has not moved", r.snaps.after[6], "   ▸ PIR");
+    check("← q x mouse PgUp: the highlight has not moved", r.snaps.after[7], "   ▸ PIR");
     check("← q x mouse PgUp: still drawn", r.snaps.after[1], "   SWITCH PROGRAM");
   }
 }
@@ -99,7 +100,7 @@ oneVerb("fast ↓→ in one read", drive("burst", "claude", 59, 22, [READY, ["se
   const r = drive("pane-closing", "claude", 59, 22, [READY, ["send", "\n\x04"], ["sleep", 0.5], ["snap", "after"],
     ["send", DOWN], ["send", RIGHT], ...settle]);
   if (r) {
-    check("pane-closing bytes: still drawn, PIR still highlighted", r.snaps.after[6], "   ▸ PIR");
+    check("pane-closing bytes: still drawn, PIR still highlighted", r.snaps.after[7], "   ▸ PIR");
     // ↓ first, so a `\n` taken for Enter (fleet-pir) and the picker still answering differ.
     check("pane-closing bytes: no choice, then ↓ → answers", r.cmd, ["fleet-claude"]);
   }
@@ -129,35 +130,34 @@ oneVerb("bad argument", drive("bad-arg", "nope", 59, 22, [["sleep", 0.5], ...set
 {
   const r = drive("frame-59", "claude", 59, 22, [READY, ["snap", "a"], ["send", DOWN], ["snap", "b"]]);
   if (r) {
-    check("59x22: the §2.3 frame", r.snaps.a, [
+    check("59x22: the §2.3 frame, … under each entry", r.snaps.a, [
       "", "   SWITCH PROGRAM", "   " + "─".repeat(40), "",
-      "     Claude Agents             shown now", "", "   ▸ PIR",
-      ...Array(14).fill(""), "   ↑↓ choose · enter or → open · esc back",
+      "     Claude Agents             shown now", "       …", "", "   ▸ PIR", "       …",
+      ...Array(12).fill(""), "   ↑↓ choose · enter or → open · esc back",
     ]);
-    check("59x22: ↓ redraws with ▸ on Claude Agents", [r.snaps.b[4], r.snaps.b[6]],
+    check("59x22: ↓ redraws with ▸ on Claude Agents", [r.snaps.b[4], r.snaps.b[7]],
       ["   ▸ Claude Agents             shown now", "     PIR"]);
   }
 }
 {
   const r = drive("frame-39", "pir", 39, 12, [READY, ["snap", "a"]]);
   if (r) {
-    check("39x12: the whole frame, nothing cut", r.snaps.a, [
-      "", "   SWITCH PROGRAM", "   " + "─".repeat(36), "",
-      "   ▸ Claude Agents", "", "     PIR" + " ".repeat(22) + "shown now",
-      "", "", "", "", "↑↓ choose · enter or → open · esc back",
+    check("39x12: entries, lists, one spacer and hint, no title", r.snaps.a, [
+      "   ▸ Claude Agents", "   …", "", "     PIR" + " ".repeat(22) + "shown now", "   …",
+      "", "", "", "", "", "", "↑↓ choose · enter or → open · esc back",
     ]);
   }
 }
 
 // --- a resize redraws at the new size ---------------------------------------------
 {
-  const r = drive("resize", "pir", 59, 22, [READY, ["resize", 39, 12], ["wait", "SWITCH PROGRAM"], ["snap", "small"],
-    ["resize", 20, 6], ["wait", "SWITCH"], ["snap", "tiny"], ["resize", 120, 40], ["wait", "SWITCH PROGRAM"], ["snap", "big"],
+  const r = drive("resize", "pir", 59, 22, [READY, ["resize", 39, 12], ["wait", "choose"], ["snap", "small"],
+    ["resize", 20, 6], ["wait", "choose"], ["snap", "tiny"], ["resize", 120, 40], ["wait", "SWITCH PROGRAM"], ["snap", "big"],
     ["send", RIGHT], ...settle]);
   if (r) {
-    check("resize to 39x12: redrawn with the shortened rule", r.snaps.small[2], "   " + "─".repeat(36));
+    check("resize to 39x12: redrawn without the title", r.snaps.small.some((l) => l.includes("SWITCH PROGRAM")), false);
     check("resize to 39x12: hint on the last row", r.snaps.small[11], "↑↓ choose · enter or → open · esc back");
-    check("resize to 39x12: shown now intact", r.snaps.small[6], "     PIR" + " ".repeat(22) + "shown now");
+    check("resize to 39x12: shown now intact", r.snaps.small[3], "     PIR" + " ".repeat(22) + "shown now");
     check("resize to 20x6: six rows, hint last", r.snaps.tiny.length === 6 && r.snaps.tiny[5].startsWith("↑↓"), true);
     check("resize to 120x40: hint on row 40", r.snaps.big[39], "   ↑↓ choose · enter or → open · esc back");
     check("resize to 120x40: full rule", r.snaps.big[2], "   " + "─".repeat(40));

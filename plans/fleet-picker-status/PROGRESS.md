@@ -12,7 +12,7 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** Plan written; nothing built.
+**Status:** T03 implemented, awaiting review.
 **Last updated:** 2026-10-09
 **Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
 
@@ -26,12 +26,12 @@ done · ⛔ blocked, needs a human.
 | T00 | claude-status-spike | — | ⬜ | |
 | T01 | status-model | T00 | ⬜ | |
 | T02 | status-gather | T00 | ⬜ | |
-| T03 | picker-render | — | ⬜ | |
+| T03 | picker-render | — | 🔍 | `render(state, cols, rows, lists)` draws each List under its entry; model 324 checks, suite 439. Deviations: word column sized to the items drawn, not all items; an unrecognised List value renders `status unavailable`; process tests wait on the hint, since the title is gone at 39×12. |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 

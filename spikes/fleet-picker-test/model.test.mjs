@@ -83,27 +83,31 @@ for (const shown of ORDER) {
   check(`reduce(${shown}): does not mutate`, (reduce(s, "down"), s), initialState(shown));
 }
 
-// --- render: the full frame ----------------------------------------------------
+// --- render: the full frame, lists omitted (both still loading) ------------------
 const full = render(initialState("claude"), 59, 22).map(plain);
-check("render 59x22: exactly the §2.3 frame", full, [
+check("render 59x22: the frame with … under each entry", full, [
   "",
   "   SWITCH PROGRAM",
   "   " + "─".repeat(40),
   "",
   "     Claude Agents             shown now",
+  "       …",
   "",
   "   ▸ PIR",
-  ...Array(14).fill(""),
+  "       …",
+  ...Array(12).fill(""),
   "   ↑↓ choose · enter or → open · esc back",
 ]);
 const fullPir = render(initialState("pir"), 59, 22).map(plain);
 check("render 59x22 pir shown: ▸ on Claude Agents", fullPir[4], "   ▸ Claude Agents");
-check("render 59x22 pir shown: shown now on PIR", fullPir[6], "     PIR                       shown now");
+check("render 59x22 pir shown: shown now on PIR", fullPir[7], "     PIR                       shown now");
 const flippedFrame = render({ shown: "claude", sel: "claude" }, 59, 22).map(plain);
-check("render: ▸ follows sel onto the shown entry", [flippedFrame[4], flippedFrame[6]],
+check("render: ▸ follows sel onto the shown entry", [flippedFrame[4], flippedFrame[7]],
   ["   ▸ Claude Agents             shown now", "     PIR"]);
 check("render: styles are reset on every styled line",
   render(initialState("claude"), 59, 22).every((l) => !l.includes("\x1b[") || l.endsWith("\x1b[0m")), true);
+check("render: … is dim", render(initialState("claude"), 59, 22)[5], "       \x1b[2m…\x1b[0m");
+check("render: lists {} is loading too", render(initialState("claude"), 59, 22, {}), render(initialState("claude"), 59, 22));
 
 // --- render: every size --------------------------------------------------------
 const sizes = [[59, 22], [39, 12], [20, 6], [120, 40], [80, 24], [10, 3], [44, 8], [5, 2], [1, 1], [0, 0], [40, 7]];
@@ -132,28 +136,204 @@ for (const shown of ORDER) {
   }
 }
 
-// --- render: the smallest slot of an 80x24 window (39x12) keeps the whole frame -------
+// --- render: the smallest slot of an 80x24 window (39x12) drops the title -------------
 const small = render(initialState("claude"), 39, 12).map(plain);
-check("render 39x12: the whole frame, rule shortened, nothing clipped", small, [
-  "",
-  "   SWITCH PROGRAM",
-  "   " + "─".repeat(36),
-  "",
+check("render 39x12: no title or rule, entries, lists, one spacer, hint", small, [
   "     Claude Agents            shown now",
+  "   …",
   "",
   "   ▸ PIR",
-  "", "", "", "",
+  "   …",
+  "", "", "", "", "", "",
   "↑↓ choose · enter or → open · esc back",
 ]);
 const tiny = render(initialState("claude"), 20, 6).map(plain);
-check("render 20x6: spacers go first, title, entries and hint stay", tiny.length === 6 &&
-  tiny.some((l) => l.includes("SWITCH PROGRAM")) && tiny[tiny.length - 1].startsWith("↑↓"), true);
+check("render 20x6: entries, their lists, spacer and hint", tiny, [
+  "  Claude Agents  sho", "   …", "", "   ▸ PIR", "   …", "↑↓ choose · enter or",
+]);
 const three = render(initialState("claude"), 59, 3).map(plain);
 check("render 59x3: just the entries and the hint", three, [
   "     Claude Agents             shown now",
   "   ▸ PIR",
   "   ↑↓ choose · enter or → open · esc back",
 ]);
+const four = render(initialState("claude"), 59, 4).map(plain);
+check("render 59x4: the spacer stays, no room for lists", four, [
+  "     Claude Agents             shown now", "", "   ▸ PIR", "   ↑↓ choose · enter or → open · esc back",
+]);
+const five = render(initialState("claude"), 59, 5).map(plain);
+check("render 59x5: the one spare row goes to Claude", five, [
+  "     Claude Agents             shown now", "       …", "", "   ▸ PIR", "   ↑↓ choose · enter or → open · esc back",
+]);
+
+// --- render: the title rule (status DESIGN §2.4) ---------------------------------
+for (const r of [17, 18, 19, 30]) {
+  const p = render(initialState("claude"), 59, r).map(plain);
+  check(`render 59x${r}: title ${r >= 18 ? "stays" : "gone"}`, p.includes("   SWITCH PROGRAM"), r >= 18);
+  check(`render 59x${r}: rule ${r >= 18 ? "stays" : "gone"}`, p.includes("   " + "─".repeat(40)), r >= 18);
+  check(`render 59x${r}: hint last`, p[r - 1], "   ↑↓ choose · enter or → open · esc back");
+}
+
+// --- render: the lists (status DESIGN §2.2, §2.4, §2.7, §3.3) --------------------
+const it = (cls, word, name) => ({ cls, word, name });
+const typical = {
+  claude: [
+    it("wait", "needs you", "sdet-tools / epic-readiness"),
+    it("run", "working", "sdet-tools / branch-tilt-setup"),
+    it("bad", "failed", "sdet-tools / denormalization-gaps"),
+    it("done", "done 12m", "cribl / pack-delete-plumbing"),
+  ],
+  pir: [
+    it("wait", "asking you", "plan-implement-review / finisher-go-covers-steps"),
+    it("run", "building 4/9", "sdet-tools / rca-sidebar-filter"),
+  ],
+};
+const ty = render(initialState("claude"), 59, 22, typical);
+check("lists 59x22: the typical frame", ty.map(plain), [
+  "",
+  "   SWITCH PROGRAM",
+  "   " + "─".repeat(40),
+  "",
+  "     Claude Agents             shown now",
+  "       ● needs you  sdet-tools / epic-readiness",
+  "       ◐ working    sdet-tools / branch-tilt-setup",
+  "       ✗ failed     sdet-tools / denormalization-gaps",
+  "       ✓ done 12m   cribl / pack-delete-plumbing",
+  "",
+  "   ▸ PIR",
+  "       ● asking you    plan-implement-review / finisher-go…",
+  "       ◐ building 4/9  sdet-tools / rca-sidebar-filter",
+  ...Array(8).fill(""),
+  "   ↑↓ choose · enter or → open · esc back",
+]);
+check("lists: wait glyph and word yellow, name plain", ty[5], "       \x1b[33m● needs you\x1b[0m  sdet-tools / epic-readiness");
+check("lists: run plain throughout", ty[6], "       ◐ working    sdet-tools / branch-tilt-setup");
+check("lists: bad glyph and word red, name plain", ty[7], "       \x1b[31m✗ failed   \x1b[0m  sdet-tools / denormalization-gaps");
+check("lists: done whole line dim", ty[8], "       \x1b[2m✓ done 12m   cribl / pack-delete-plumbing\x1b[0m");
+check("lists: a cut name lands exactly on the width", vis(ty[11]), 59);
+check("lists: the word column is per entry", plain(ty[12]).indexOf("sdet"), 7 + 2 + 12 + 2);
+
+const tys = render(initialState("claude"), 39, 12, typical).map(plain);
+check("lists 39x12: the typical frame", tys, [
+  "     Claude Agents            shown now",
+  "   ● needs you  sdet-tools / epic-read…",
+  "   ◐ working    sdet-tools / branch-ti…",
+  "   ✗ failed     sdet-tools / denormali…",
+  "   ✓ done 12m   cribl / pack-delete-pl…",
+  "",
+  "   ▸ PIR",
+  "   ● asking you    plan-implement-revi…",
+  "   ◐ building 4/9  sdet-tools / rca-si…",
+  "", "",
+  "↑↓ choose · enter or → open · esc back",
+]);
+
+// The word is never cut before the name is: narrow until the name is gone.
+{
+  const one = { claude: [it("wait", "needs you", "sdet-tools / epic-readiness")], pir: [] };
+  const at = (c) => plain(render(initialState("claude"), c, 12, one)[1]);
+  check("narrow: name cut to one char then …", at(19), "   ● needs you  sd…");
+  check("narrow: name only …", at(17), "   ● needs you  …");
+  check("narrow: no room for a name, word whole", at(16), "   ● needs you");
+  check("narrow: word clipped only once the name is gone", at(10), "   ● needs");
+  for (let c = 0; c <= 40; c++) {
+    const l = render(initialState("claude"), c, 12, one)[1] ?? "";
+    if (vis(l) > c) check(`narrow ${c}: within width`, plain(l), "");
+    const w = plain(l);
+    if (w.includes("…") && !w.includes("needs you")) check(`narrow ${c}: name cut before word`, w, "");
+  }
+}
+
+// The row share. 59x22 has 13 rows for lists, 39x12 has 8.
+const many = (k, n) => Array.from({ length: n }, (_, i) => it("run", "working", `${k}-${i + 1}`));
+const rowsOf = (lines, entry) => {
+  const p = lines.map(plain);
+  const i = p.findIndex((l) => l.includes(entry));
+  let j = i + 1;
+  while (j < p.length && p[j].startsWith("   ") && !/(Claude Agents|PIR)/.test(p[j]) && p[j].trim()) j++;
+  return p.slice(i + 1, j).map((l) => l.trim());
+};
+const share = (c, r, nc, np) => {
+  const lines = render(initialState("claude"), c, r, { claude: many("c", nc), pir: many("p", np) });
+  return [rowsOf(lines, "Claude Agents").length, rowsOf(lines, "PIR").length];
+};
+check("share 59x22: both overflow, 7 and 6 (odd row to Claude)", share(59, 22, 20, 20), [7, 6]);
+check("share 39x12: both overflow, 4 and 4", share(39, 12, 20, 20), [4, 4]);
+check("share 39x11: 7 rows, 4 and 3", share(39, 11, 20, 20), [4, 3]);
+check("share 59x22: Claude needs 2, PIR gets 11", share(59, 22, 2, 20), [2, 11]);
+check("share 59x22: PIR needs 1, Claude gets 12", share(59, 22, 20, 1), [12, 1]);
+check("share 39x12: Claude empty, PIR gets 7", share(39, 12, 0, 20), [1, 7]);
+check("share 39x12: both fit exactly, 3 and 5", share(39, 12, 3, 5), [3, 5]);
+check("share 39x12: nothing overflows below the room", share(39, 12, 2, 2), [2, 2]);
+{
+  const lines = render(initialState("claude"), 59, 22, { claude: many("c", 20), pir: many("p", 20) });
+  const c = rowsOf(lines, "Claude Agents");
+  check("overflow: rows - 1 items then +N more", c, [...many("c", 6).map((i) => `◐ working  ${i.name}`), "+14 more"]);
+  check("overflow: +N more is dim", lines.find((l) => plain(l).includes("+14 more")), "       \x1b[2m  +14 more\x1b[0m");
+  check("overflow: +N more lines up under the word", plain(lines.find((l) => plain(l).includes("+14 more"))), "         +14 more");
+  check("overflow: PIR's N", rowsOf(lines, "PIR").at(-1), "+15 more");
+}
+{
+  // One spare row for PIR: `+N more` alone rather than a cut item.
+  const lines = render(initialState("claude"), 59, 5, { claude: many("c", 3), pir: many("p", 3) }).map(plain);
+  check("one row for Claude: +3 more alone", lines[1], "         +3 more");
+  const l6 = render(initialState("claude"), 59, 6, { claude: many("c", 3), pir: many("p", 3) }).map(plain);
+  check("one row each: +3 more under both", [l6[1], l6[4]], ["         +3 more", "         +3 more"]);
+}
+{
+  // The word column is as wide as the longest word among the items drawn.
+  const lines = render(initialState("claude"), 59, 22, { claude: [it("run", "working", "a"), it("bad", "crashed!!", "b")], pir: [] });
+  check("word column: padded to the longest", [plain(lines[5]), plain(lines[6])],
+    ["       ◐ working    a", "       ✗ crashed!!  b"]);
+}
+
+// The single-line states.
+const single = (list) => plain(render(initialState("claude"), 59, 22, { claude: list, pir: "loading" })[5]);
+check("[] → nothing running", single([]), "       nothing running");
+check("\"unavailable\" → status unavailable", single("unavailable"), "       status unavailable");
+check("{ unavailable: t } → t", single({ unavailable: "status unavailable · pir service not running" }),
+  "       status unavailable · pir service not running");
+check("\"loading\" → …", single("loading"), "       …");
+check("null → status unavailable", single(null), "       status unavailable");
+check("a malformed item is skipped", single([{ cls: "run", word: "working" }, it("nope", "x", "y"), null]), "       nothing running");
+check("nothing running is dim", render(initialState("claude"), 59, 22, { claude: [] })[5], "       \x1b[2mnothing running\x1b[0m");
+check("unavailable is dim", render(initialState("claude"), 59, 22, { claude: "unavailable" })[5], "       \x1b[2mstatus unavailable\x1b[0m");
+check("39x12: long unavailable text cut with …",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir service not running" } })[4]),
+  "   status unavailable · pir service no…");
+
+// --- render: the sweep (every line within cols, exactly rows lines) ----------------
+{
+  const fixtures = [
+    undefined,
+    {},
+    typical,
+    { claude: [], pir: "unavailable" },
+    { claude: { unavailable: "status unavailable · pir service not running" }, pir: [] },
+    { claude: many("a-very-long-repository-name / an-even-longer-topic-name", 30), pir: many("p", 1) },
+    { claude: [it("done", "finished 59m", "x".repeat(200))], pir: [it("wait", "w".repeat(70), "y")] },
+  ];
+  let bad = [];
+  let count = 0;
+  for (const f of fixtures) {
+    for (const st of [initialState("claude"), initialState("pir")]) {
+      for (let c = 30; c <= 80; c++) {
+        for (let r = 8; r <= 30; r++) {
+          const lines = render(st, c, r, f);
+          count++;
+          if (lines.length !== r) bad.push(`${c}x${r}: ${lines.length} lines`);
+          for (const l of lines) if (vis(l) > c) bad.push(`${c}x${r}: ${plain(l)}`);
+          if (lines.some((l) => l.split("\x1b[0m").at(-1).includes("\x1b["))) bad.push(`${c}x${r}: unreset style`);
+          const p = lines.map(plain);
+          if (!p[r - 1].includes("choose")) bad.push(`${c}x${r}: hint not last`);
+          if (!p.some((l) => l.includes("Claude Agents")) || !p.some((l) => l.includes("PIR"))) bad.push(`${c}x${r}: entry lost`);
+          if (p.includes("   SWITCH PROGRAM") !== (r >= 18)) bad.push(`${c}x${r}: title rule`);
+        }
+      }
+    }
+  }
+  check(`sweep 30–80 x 8–30 (${count} frames): every frame holds`, bad.slice(0, 5), []);
+}
 
 console.log(`CHECKS ${pass} ${fail}`);
 process.exit(fail ? 1 : 0);
