@@ -147,8 +147,11 @@ function writeKey(home, text) {
   fs.writeFileSync(path.join(home, ".pir", "api-key"), text);
 }
 
-const RUNS = [{ repo: "r", slug: "s", kind: "work", state: "running", waitingForYou: false,
-                display: { state: "testing", done: 1, total: 3 } }];
+// The shape the real service answers (checked against this machine's pir, T02
+// review): an object with `runs`, not a bare array. The gather passes it through raw.
+const RUNS = { version: 2, counts: { runs: 1, running: 1, waitingForYou: 0 },
+  runs: [{ key: "r/s", kind: "work", slug: "s", label: "s", repo: "r", state: "running",
+           waitingForYou: false, display: { state: "testing", done: 1, total: 3 } }] };
 function standIn() {
   const s = { mode: "200", body: RUNS, delay: 0, hits: 0, seen: [], server: null };
   s.server = http.createServer((req, res) => {
