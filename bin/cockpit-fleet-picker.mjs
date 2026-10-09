@@ -13,9 +13,15 @@
 // cmd file the daemon tails, then exit 0. Any other way out (a crash, a signal) exits
 // non-zero WITHOUT appending, and the wrapper appends `picker-cancel` for it -- so a choice
 // is never followed by a cancel that would race it (§2.7).
+//
+// Under each entry it lists what that program has going (plans/fleet-picker-status §2.5): the
+// frame is drawn first with `…`, both programs are asked once in the background, and the lists
+// are drawn when both have answered. Never refreshed while open; abandoned with the process.
 
 import fs from "node:fs";
 import { ORDER, initialState, decodeKey, splitKeys, reduce, render } from "./cockpit-fleet-picker-model.mjs";
+import { claudeItems, pirItems } from "./cockpit-fleet-status-model.mjs";
+import { gatherAll } from "./cockpit-fleet-status.mjs";
 
 const [cmdFile, shown] = process.argv.slice(2);
 if (!cmdFile || !ORDER.includes(shown)) {
@@ -26,6 +32,7 @@ if (!cmdFile || !ORDER.includes(shown)) {
 const ESC = "\x1b[";
 let state = initialState(shown);
 let finished = false;
+let lists = { claude: "loading", pir: "loading" };
 
 function draw() {
   const cols = process.stdout.columns || 80;
@@ -34,7 +41,7 @@ function draw() {
   // row it would scroll the whole frame up by one. A line that fills the width gets no clear:
   // the cursor then still sits ON the last column, and erasing from there wipes the line's
   // last character (seen at 39 columns, where `shown now` read `shown no`).
-  const lines = render(state, cols, rows);
+  const lines = render(state, cols, rows, lists);
   const full = (l) => [...l.replace(/\x1b\[[0-9;]*m/g, "")].length >= cols;
   process.stdout.write(`${ESC}H` + lines.map((l) => (full(l) ? l : `${l}${ESC}K`)).join("\r\n"));
 }
@@ -98,3 +105,23 @@ process.stdin.on("data", onData);
 process.stdin.on("end", () => finish("cancel"));
 process.stdout.on("resize", draw);
 draw();
+
+// After the first draw, so the fetch can never delay the frame. The model runs inside the
+// chain too: a throw anywhere, gather or model, ends as `status unavailable` rather than an
+// unhandled rejection, which would kill the picker and lose the person's ← to a cancel
+// (status §2.7). No redraw once a verb is appended: the screen never changes behind a choice.
+gatherAll()
+  .then(({ claude, pir }) => {
+    const now = Date.now();
+    return {
+      claude: claude.ok ? claudeItems(claude.agents, claude.finishedAt, now) : "unavailable",
+      pir: pir.ok ? pirItems(pir.body, now)
+        : pir.why === "down" ? { unavailable: "status unavailable · pir service not running" } : "unavailable",
+    };
+  })
+  .catch(() => ({ claude: "unavailable", pir: "unavailable" }))
+  .then((got) => {
+    lists = got;
+    if (!finished) draw();
+  })
+  .catch(() => {});

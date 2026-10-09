@@ -1,11 +1,16 @@
 """Drive bin/cockpit-fleet-picker.sh under a real pseudo-terminal (plans/fleet-picker T02).
 
-    python3 -I pty-drive.py <wrapper> <cmd-file> <shown> <cols> <rows> '<steps json>'
+    python3 -I pty-drive.py <wrapper> <cmd-file> <shown> <cols> <rows> '<steps json>' ['<env json>']
+
+The optional env is the wrapper's whole environment (plans/fleet-picker-status T04: a scratch
+HOME, PIR_HOME and a PATH with a fake `claude`, so no run reads the real machine); without it
+the wrapper inherits this process's.
 
 Spawns the wrapper as the session leader of a fresh pty of the given size, feeds its output
 to a minimal screen model, and runs the steps in order:
 
     ["wait", "<text>"]        until the screen shows <text> (5s)
+    ["wait-line", "<text>"]   until some row reads exactly <text>, trailing blanks aside (5s)
     ["send", "<bytes>"]       write <bytes> to the pty, as a key would arrive
     ["sleep", <seconds>]
     ["resize", cols, rows]    TIOCSWINSZ on the pty; the kernel signals the foreground group
@@ -124,10 +129,13 @@ def set_size(fd, cols, rows):
 def main():
     wrapper, cmd_file, shown, cols, rows, steps = sys.argv[1:7]
     cols, rows, steps = int(cols), int(rows), json.loads(steps)
+    env = json.loads(sys.argv[7]) if len(sys.argv) > 7 else None
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execvp("bash", ["bash", wrapper, cmd_file, shown])
+        if env is None:
+            os.execvp("bash", ["bash", wrapper, cmd_file, shown])
+        os.execvpe("bash", ["bash", wrapper, cmd_file, shown], env)
     set_size(fd, cols, rows)
 
     screen = Screen(cols, rows)
@@ -175,6 +183,12 @@ def main():
                     pump(0.05)
                 if not any(step[1] in line for line in screen.text()):
                     errors.append("never saw %r" % step[1])
+            elif kind == "wait-line":
+                end = time.time() + 5
+                while step[1] not in screen.text() and time.time() < end:
+                    pump(0.05)
+                if step[1] not in screen.text():
+                    errors.append("never saw the line %r" % step[1])
             elif kind == "send":
                 os.write(fd, step[1].encode())
                 pump(0.05)

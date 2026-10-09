@@ -1,0 +1,13 @@
+#!/bin/sh
+# A stand-in for `claude` on the picker's PATH (process.test.mjs), so no test reads this
+# machine's agents. It answers only `agents --json --all`, from the environment:
+#   FAKE_CLAUDE_SLEEP  seconds to wait first (a slow claude)
+#   FAKE_CLAUDE_MODE   huge: ~20 MB of non-JSON · fail: exit 1 · else print FAKE_CLAUDE_OUT
+#   FAKE_CLAUDE_OUT    a file holding the JSON array to print (absent: [])
+[ "$*" = "agents --json --all" ] || { echo "fake claude: unexpected args: $*" >&2; exit 2; }
+[ -n "${FAKE_CLAUDE_SLEEP:-}" ] && sleep "$FAKE_CLAUDE_SLEEP"
+case "${FAKE_CLAUDE_MODE:-}" in
+  huge) head -c 20000000 /dev/zero | tr '\0' x; exit 0 ;;
+  fail) exit 1 ;;
+esac
+if [ -n "${FAKE_CLAUDE_OUT:-}" ] && [ -f "$FAKE_CLAUDE_OUT" ]; then cat "$FAKE_CLAUDE_OUT"; else echo '[]'; fi

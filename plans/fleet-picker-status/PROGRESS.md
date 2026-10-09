@@ -27,11 +27,11 @@ done · ⛔ blocked, needs a human.
 | T01 | status-model | T00 | ✅ | |
 | T02 | status-gather | T00 | ✅ | |
 | T03 | picker-render | — | ✅ | |
-| T04 | picker-wiring | T01, T02, T03 | ⬜ | |
+| T04 | picker-wiring | T01, T02, T03 | 🔍 | Picker draws `…`, runs gatherAll once after the frame, redraws unless a verb went. Process suite: scratch HOME/PIR_HOME/PATH, fixtures/claude, pir stand-in; 54 new checks. Deviations: the models run inside the promise chain so their throw is caught too; no maxBuffer in gatherClaude, so the huge case is unparseable output, not a throw. |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T04
 
 ## Blocked on the user
 
