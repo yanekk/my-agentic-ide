@@ -26,7 +26,7 @@ done · ⛔ blocked, needs a human.
 | T00 | claude-status-spike | — | ⬜ | |
 | T01 | status-model | T00 | ⬜ | |
 | T02 | status-gather | T00 | ⬜ | |
-| T03 | picker-render | — | ⬜ | |
+| T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
