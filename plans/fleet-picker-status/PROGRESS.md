@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** T00, T03 done; T01 awaiting review.
+**Status:** T00, T01, T03 done.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
+**Next `pir-work` will:** T02, then T04 once T01, T02 and T03 are in.
 
 ## Tasks
 
@@ -24,14 +24,14 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | claude-status-spike | — | ✅ | |
-| T01 | status-model | T00 | 🔍 | `bin/cockpit-fleet-status-model.mjs`, 90 checks in `status.test.mjs`, status model added to run.sh's purity greps. Deviations: `parseTime` refuses an offset-less or date-only ISO (machine-zone leak); an unknown pir state is run; a pir row without `repo` is skipped; a finished build reads `merged 5/5 4m`. |
+| T01 | status-model | T00 | ✅ | Review clean, no fix commit. Four deviations held by tests. Probed the model on this machine's real `claude agents --json --all`, `state.json` times and `/v2/runs`; eight mutations (hour boundary, kind filter, order, future clamp, wait, progress, label, class order) all caught; purity grep bites. |
 | T02 | status-gather | T00 | ⬜ | |
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** T01
+**Review queue:** empty
 
 ## Blocked on the user
 
