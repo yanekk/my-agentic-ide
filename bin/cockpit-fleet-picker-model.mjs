@@ -21,6 +21,20 @@ const ESC = "\x1b[";
 const BOLD = `${ESC}1m`;
 const DIM = `${ESC}2m`;
 const RESET = `${ESC}0m`;
+const YELLOW = `${ESC}33m`;
+const RED = `${ESC}31m`;
+
+// The status lists (plans/fleet-picker-status DESIGN §2.2, §2.4, §2.7, §3.3).
+const GLYPH = { wait: "●", run: "◐", bad: "✗", done: "✓" };
+const LOADING = "…";
+const EMPTY = "nothing running";
+const UNAVAILABLE = "status unavailable";
+// Below this many rows the title and its rule are dropped to make room for the lists.
+const ROOMY_ROWS = 18;
+// A list sits past its entry's name: 7 columns in a wide slot, 3 in a narrow one.
+const WIDE_COLS = 50;
+const SUB_WIDE = "       ";
+const SUB_NARROW = "   ";
 
 function other(prog) {
   return prog === "claude" ? "pir" : "claude";
@@ -144,51 +158,122 @@ function styled(parts, cols) {
   return out;
 }
 
-// §2.3: the lines of variant A, top to bottom, with the hint on the last line of the pane.
-// Exactly `rows` lines, none wider than `cols` visible columns. When the pane is too short for
-// the whole frame the blank spacers go first, then the rule, then the title; the two entries
-// and the hint are the picker and go last. When it is too narrow the rule shortens, the
-// indents go, and only then is anything clipped.
-export function render(state, cols, rows) {
+// One line of an entry's list: `       ● needs you  sdet-tools / epic-readiness` (status DESIGN
+// §2.2, §2.4). The word column is `sw` wide; a name too long is cut with `…`, and the name goes
+// entirely before the word is touched, so the status survives the narrowest slot.
+function itemLine(item, sw, sub, cols) {
+  const word = item.word + " ".repeat(Math.max(0, sw - width(item.word)));
+  const lead = `${GLYPH[item.cls]} ${word}`;
+  const room = cols - width(sub) - width(lead) - 2;
+  const name = room > 0 ? clipDots(item.name, room) : "";
+  if (item.cls === "done") return styled([[sub, ""], [lead + (name ? `  ${name}` : ""), DIM]], cols);
+  const tone = item.cls === "wait" ? YELLOW : item.cls === "bad" ? RED : "";
+  return styled([[sub, ""], [lead, tone], [name ? `  ${name}` : "", ""]], cols);
+}
+
+// A dim line that is not an item: `…`, `nothing running`, `status unavailable`, `+N more`.
+function dimLine(text, sub, cols) {
+  return styled([[sub, ""], [clipDots(text, cols - width(sub)), DIM]], cols);
+}
+
+function clipDots(s, n) {
+  if (n <= 0) return "";
+  return width(s) <= n ? s : [...s].slice(0, n - 1).join("") + "…";
+}
+
+// Names, words and the unavailable text are wire text (claude agents, pir's service). A NEWLINE
+// in one would paint a second terminal line out of a single entry and an ESC would run as a
+// control sequence in the pane, so every control character becomes one space where the text
+// enters the drawing, as the agenda's safeText does (this module may import nothing).
+const safe = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+
+// The status DESIGN §3.3 List, normalised: omitted is still loading, anything unrecognised is
+// unavailable, and an array keeps only items it can draw (a malformed one is skipped, never a
+// blank line, §2.7).
+function normalise(list) {
+  if (list === undefined || list === "loading") return "loading";
+  if (Array.isArray(list)) {
+    return list
+      .filter((i) => i && typeof i === "object" && GLYPH[i.cls] && typeof i.word === "string" &&
+        typeof i.name === "string" && i.name !== "")
+      .map((i) => ({ cls: i.cls, word: safe(i.word), name: safe(i.name) }));
+  }
+  if (list && typeof list === "object" && typeof list.unavailable === "string" && list.unavailable) {
+    return { unavailable: safe(list.unavailable) };
+  }
+  return "unavailable";
+}
+
+// How many rows an entry would like: one per item, or the single line of every other state.
+function wanted(list) {
+  return Array.isArray(list) ? Math.max(1, list.length) : 1;
+}
+
+// The lines under one entry, in exactly `n` rows or fewer. An entry with more items than its
+// rows shows the first `n - 1` and `+N more`; one row alone holds `+N more` rather than a cut
+// item (status DESIGN §2.4).
+function listLines(list, n, sub, cols) {
+  if (n <= 0) return [];
+  if (list === "loading") return [dimLine(LOADING, sub, cols)];
+  if (list === "unavailable") return [dimLine(UNAVAILABLE, sub, cols)];
+  if (!Array.isArray(list)) return [dimLine(list.unavailable, sub, cols)];
+  if (list.length === 0) return [dimLine(EMPTY, sub, cols)];
+  const shown = list.length <= n ? list : list.slice(0, n - 1);
+  const sw = Math.max(...shown.map((i) => width(i.word)), 0);
+  const out = shown.map((i) => itemLine(i, sw, sub, cols));
+  if (shown.length < list.length) out.push(dimLine(`  +${list.length - shown.length} more`, sub, cols));
+  return out;
+}
+
+// §2.3 and status DESIGN §2.4: the frame top to bottom, each entry followed by its list, the
+// hint on the last line of the pane. Exactly `rows` lines, none wider than `cols` visible
+// columns. At 18 rows and more the title, its rule and the spacers around them stay; below
+// that they go, leaving the two entries, their lists, one spacer and the hint. The rows left
+// after the frame are shared between the two lists: half each, the odd row to the first
+// entry, and what one list does not need goes to the other. When it is too narrow the rule
+// shortens, the indents go, a name is cut with `…`, and only then is anything clipped.
+export function render(state, cols, rows, lists) {
   cols = Math.max(0, Math.floor(cols) || 0);
   rows = Math.max(0, Math.floor(rows) || 0);
   if (rows === 0) return [];
 
+  const roomy = rows >= ROOMY_ROWS;
   const indent = width(INDENT + TITLE) <= cols ? INDENT : "";
   const ruleLen = Math.max(0, Math.min(RULE_MAX, cols - width(indent)));
+  const sub = cols >= WIDE_COLS ? SUB_WIDE : SUB_NARROW;
   const entry = (prog) => {
     const e = entryText(state, prog, cols);
     const on = prog === state.sel;
     return styled([[e.lead, ""], [e.name, on ? BOLD : ""], [e.gap, ""], [e.tag, DIM]], cols);
   };
   const hintIndent = width(INDENT + HINT) <= cols ? INDENT : "";
-
-  // [text, priority]: a higher priority survives a shorter pane.
-  const top = [
-    ["", 0],
-    [styled([[indent, ""], [TITLE, BOLD]], cols), 3],
-    [styled([[indent, ""], ["─".repeat(ruleLen), DIM]], cols), 2],
-    ["", 1],
-    [entry(ORDER[0]), 9],
-    ["", 1],
-    [entry(ORDER[1]), 9],
-  ];
   const hint = styled([[hintIndent, ""], [HINT, DIM]], cols);
+  const data = Object.fromEntries(ORDER.map((p) => [p, normalise(lists ? lists[p] : undefined)]));
 
-  let body = top;
+  const head = roomy
+    ? ["", styled([[indent, ""], [TITLE, BOLD]], cols), styled([[indent, ""], ["─".repeat(ruleLen), DIM]], cols), ""]
+    : [];
+  // The spacer between the entries, and at the roomy size one more before the hint. In a
+  // pane too short even for that, the spacer goes before any entry does.
+  let spacers = roomy ? 2 : 1;
+  const frame = () => head.length + ORDER.length + spacers + 1;
+  if (frame() > rows) spacers = 0;
+  const avail = Math.max(0, rows - frame());
+
+  const [first, second] = ORDER;
+  let a = Math.min(wanted(data[first]), Math.ceil(avail / 2));
+  const b = Math.min(wanted(data[second]), avail - a);
+  a = Math.min(wanted(data[first]), avail - b);
+
+  let lines = [
+    ...head,
+    entry(first),
+    ...listLines(data[first], a, sub, cols),
+    ...(spacers > 0 ? [""] : []),
+    entry(second),
+    ...listLines(data[second], b, sub, cols),
+  ];
   const room = rows - 1;
-  for (const p of [0, 1, 2, 3]) {
-    if (body.length <= room) break;
-    // Drop this priority's lines from the top down until the frame fits.
-    const next = [];
-    let excess = body.length - room;
-    for (const line of body) {
-      if (excess > 0 && line[1] === p) { excess--; continue; }
-      next.push(line);
-    }
-    body = next;
-  }
-  let lines = body.map(([t]) => t);
   if (lines.length > room) lines = lines.slice(lines.length - room);
   while (lines.length < room) lines.push("");
   lines.push(hint);
