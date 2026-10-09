@@ -32,9 +32,9 @@ Phase 3  ▸  T05 T06          drill, docs            finish
 |---|---|---|
 | [T00](tasks/T00-claude-status-spike.md) | claude-status-spike | — |
 
-T00 gates DESIGN §2.2's Claude column and §2.3's finish time. If `blocked` is not what a waiting
-agent reports, T01 maps whatever is; if `lastTerminalAt` does not move on a second finish, the
-hour rule needs another source and the plan comes back to the person.
+T00 gates DESIGN §2.2's Claude column. If `blocked` is not what a waiting agent reports, T01 maps
+whatever is. That `lastTerminalAt` moves on later finishes was settled at plan review from the
+jobs folder (FINDINGS 2026-10-09).
 
 ## Phase 1 — The parts
 

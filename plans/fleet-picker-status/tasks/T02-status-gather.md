@@ -36,7 +36,7 @@ export async function fetchPirRuns({ home, alive, timeoutMs = PIR_TIMEOUT_MS } =
 export const CLAUDE_TIMEOUT_MS = 3000;
 // env gives PATH, HOME, CLAUDE_CONFIG_DIR. Never throws.
 export async function gatherClaude({ env = process.env, timeoutMs = CLAUDE_TIMEOUT_MS } = {})
-//   → { ok: true, agents, finishedAt: { [id]: number } } | { ok: false }
+//   → { ok: true, agents, finishedAt: { [id]: unknown } } | { ok: false }
 export async function gatherPir({ home = pirHome() } = {})
 //   → { ok: true, body } | { ok: false, why: "down" | "other" }
 //      "down": absent, dead, unreachable, any http other than 401; "other": no-key, 401, bad-file, bad-body
@@ -45,7 +45,8 @@ export async function gatherAll(opts)        // both at once → { claude, pir }
 
 `finishedAt` holds only background agents whose `state` is `done` (or T00's equivalent); reading
 every agent's file would cost reads for no shown line. A file that is missing, unreadable or not
-JSON, or whose `lastTerminalAt` is not a number, leaves that id out.
+JSON, or has no `lastTerminalAt`, leaves that id out. The value is passed through raw (an ISO
+string on this machine); T01's `parseTime` decides whether it is a time.
 
 ## Tests
 
@@ -53,8 +54,8 @@ JSON, or whose `lastTerminalAt` is not a number, leaves that id out.
       jobs folder under `HOME/.claude/jobs` and under `CLAUDE_CONFIG_DIR/jobs` when set
 - [ ] fake `claude` exiting non-zero, printing junk, sleeping past the limit, missing from PATH →
       `{ ok: false }`, within the limit plus a margin
-- [ ] a done agent's state.json missing, half-written (truncated JSON), with `lastTerminalAt`
-      a string → id absent from `finishedAt`
+- [ ] a done agent's state.json missing, half-written (truncated JSON), with no `lastTerminalAt`
+      → id absent from `finishedAt`; an ISO `lastTerminalAt` is passed through unchanged
 - [ ] the fake is invoked with exactly `agents --json --all`
 - [ ] pir stand-in (node:http, OS port, scratch `PIR_HOME`): 200 → answered with the body, and
       the request carried the Bearer key and asked `/v2/runs`

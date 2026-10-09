@@ -58,8 +58,8 @@ Every item falls in one of four classes, which set its order, glyph and colour:
 | done | `✓` | dim | `done` | `state` `finished` (display `finished`, `merged`, `closed`) |
 
 The status word is short and the program's own where it has one. pir's is `display.state` (e.g.
-`asking you`, `testing`, `your go`), with ` {done}/{total}` appended for a build whose `total` is
-above 0, because a build's progress is the one thing its word does not carry. Claude's is
+`asking you`, `testing`, `your go`), with ` {done}/{total}` (`display.done`, `display.total`) appended
+for a build (`kind: "work"`) whose `display.total` is above 0, because a build's progress is the one thing its word does not carry. Claude's is
 `needs you` for wait, `working` for run, and the state itself for bad. A done item reads
 `done 12m` or `finished 40m`: the word plus the age (§2.3). An unknown Claude state is class run
 and shows its own word, so a new state reads as something rather than vanishing. T00 settles the
@@ -74,13 +74,13 @@ Claude mapping on this machine; the table above is the planner's reading of the 
   (person, 2026-10-09). A failure may need looking at, so it does not time out.
 - A done item whose finish time is unknown is hidden, because it cannot be shown to be recent,
   and a week-old finish listed as recent is worse than a recent one missing.
-  - Claude's finish time is `lastTerminalAt` (epoch ms) in `~/.claude/jobs/{id}/state.json`
-    (measured 2026-10-09; T00 confirms it moves on every finish). A missing or unreadable file
+  - Claude's finish time is `lastTerminalAt` in `~/.claude/jobs/{id}/state.json`, an ISO 8601
+    string (measured 2026-10-09, plan review: every one of nine files), parsed like pir's `endedAt`. A missing or unreadable file
     is an unknown time.
   - pir's finish time is `endedAt` on the RunSummary, which pir does not have yet. It is a
     separate change in the pir project ([pir-ended-at.md](pir-ended-at.md)), started by the
-    person (person, 2026-10-09). Until it lands every finished pir run is hidden. The reader
-    accepts an ISO 8601 string or epoch ms and treats anything else as unknown.
+    person (person, 2026-10-09). Until it lands every finished pir run is hidden.
+  - Both readers accept an ISO 8601 string or epoch ms and treat anything else as unknown.
 - A finish time in the future (a clock that moved) counts as age 0, so the item shows rather
   than being hidden for an hour by a clock change.
 
@@ -327,6 +327,10 @@ prompted every time, so a script would only add a file.
 - **Read Claude's `jobs/{id}/state.json` for the finish time.** `claude agents --json` carries no
   finish time; `lastTerminalAt` in that file is the only one found. It is undocumented, which is
   why T00 confirms it and why a missing or changed field only hides done items (§2.3).
+- **T00 observes, it does not re-prompt** (person, 2026-10-09, plan review): that `lastTerminalAt`
+  moves was read from six existing jobs, so no prompt is sent to any agent the person has, which
+  would spend usage and set it working in its repo.
+- **The §5.3 bins as proposed** (person, 2026-10-09, plan review).
 - **`--all`.** Without it `claude agents --json` omits background agents whose process has exited,
   which are exactly the recent finishes (measured 2026-10-09).
 

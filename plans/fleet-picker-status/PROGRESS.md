@@ -10,7 +10,7 @@ the task you pick up, and append yours there.
 the account is the commit message. Whoever writes a cell also fixes the over-budget cell they
 walk past.
 
-**Plan reviewed:** not yet
+**Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
 **Status:** Plan written; nothing built.
 **Last updated:** 2026-10-09

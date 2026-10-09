@@ -26,9 +26,9 @@ DESIGN §2.2 (the Claude column), §2.3 (finish time), §7 (`--all`).
 
 1. What `state` does a background agent show while it waits on the person (an AskUserQuestion, a
    permission prompt)? Expected `blocked`. Another value: T01 maps that value to class wait.
-2. Does `lastTerminalAt` move each time the agent finishes a turn (first finish, then a follow-up
-   prompt and a second finish)? If it stays at the first finish, the hour rule reads a stale time
-   and the plan goes back to the person.
+2. Does `lastTerminalAt` move each time the agent finishes a turn? Answered at plan review from
+   the jobs folder, not live (person, 2026-10-09): in six of nine `state.json` files it is later
+   than `firstTerminalAt`. Record that in RESULTS.md; send no prompt to any existing agent.
 3. What do a stopped agent and an exited one look like in `--all` (`state`, `pid`, `status`)? Is
    `state.json` still there for them?
 4. Is `state.json` ever caught half-written (read it in a tight loop while the agent works for
@@ -44,9 +44,8 @@ DESIGN §2.2 (the Claude column), §2.3 (finish time), §7 (`--all`).
 Dispatch with a prompt that makes the agent ask a question and nothing else, e.g. `claude --bg
 "Use AskUserQuestion to ask me whether to continue, with options yes and no. Do nothing else."`
 First check `claude --help` for the exact dispatch form; do not pass `--help` or other flags to
-`--bg` (FINDINGS 2026-10-09). Answer it through `claude attach <id>` only if a pty driver can do
-so; otherwise stop it from the blocked state and use an existing finished agent for question 2
-by sending it a follow-up the same way.
+`--bg` (FINDINGS 2026-10-09). Observe it in the waiting state, then stop it. Do not answer it, and
+never type into or prompt any agent the person already has: that has no §5.3 row.
 
 ## Environment (the worker owns this)
 
@@ -57,6 +56,7 @@ teardown: claude stop <id>; then `claude agents --json --all` shows it stopped o
 
 ## Done when
 
-- [ ] FINDINGS has one row per question, with the observed values.
+- [ ] FINDINGS has one row per question, with the observed values (question 2 from the plan-review
+      evidence).
 - [ ] The test agent is stopped and the teardown check shows it.
 - [ ] No spike code remains outside `spikes/fleet-picker-status-spike/RESULTS.md`.

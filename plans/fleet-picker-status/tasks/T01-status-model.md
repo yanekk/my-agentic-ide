@@ -25,7 +25,7 @@ DESIGN §2.1, §2.2, §2.3, §2.4 (order only; the row share is T03), §2.7 (mal
 
 ```js
 // agents: the parsed --all array, or anything else (→ "unavailable")
-// finishedAt: { [jobId]: number | undefined }  lastTerminalAt per background done agent
+// finishedAt: { [jobId]: unknown }  raw lastTerminalAt per background done agent, parsed with parseTime
 // now: epoch ms
 export function claudeItems(agents, finishedAt, now)        // → Item[] | "unavailable"
 
@@ -35,8 +35,9 @@ export function pirItems(body, now)                          // → Item[] | "un
 // age in whole minutes, "0m".."59m"; null when hidden (≥ 60m) or unknown
 export function ageLabel(endedAtMs, now)                     // → string | null
 
-// endedAt as pir may send it: ISO string or epoch ms; anything else → undefined
-export function parseEndedAt(v)                              // → number | undefined
+// a finish time as Claude's lastTerminalAt or pir's endedAt carries it: ISO string or epoch ms;
+// anything else → undefined (unknown)
+export function parseTime(v)                                 // → number | undefined
 
 // Item = { cls: "wait"|"run"|"bad"|"done", word: string, name: string }
 ```
@@ -61,7 +62,7 @@ fetch failed (T02, T04).
       keeps its order within a class
 - [ ] a row missing its name or state is skipped
 - [ ] not an array / not an object / null → `"unavailable"`; `[]` → `[]`
-- [ ] `parseEndedAt`: ISO, epoch ms, garbage, null
+- [ ] `parseTime`: ISO, epoch ms, garbage, null; an ISO `lastTerminalAt` 12m old → `done 12m`
 
 ## Done when
 
