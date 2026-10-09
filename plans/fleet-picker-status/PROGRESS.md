@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** T00 implemented, awaiting review.
+**Status:** T00 ✅; T01–T06 not started.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
+**Next `pir-work` will:** T01, T02 and T03, which now depend on nothing open.
 
 ## Tasks
 
@@ -23,7 +23,7 @@ done · ⛔ blocked, needs a human.
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | claude-status-spike | — | 🔍 | Spike, no code kept; `RESULTS.md` plus six FINDINGS rows. Waiting reads `blocked` as planned, so no DESIGN change. Deviation: dispatched from the worktree, since `/tmp` is refused as untrusted. Test agent `6ad675f8` stopped but still listed; `claude rm` has no §5.3 row and was not run. |
+| T00 | claude-status-spike | — | ✅ | Review clean, no fix commit. Re-read live: `6ad675f8` listed `stopped` with no pid, its `state.json` stopped with equal terminal times; six of seven later `lastTerminalAt`, all ISO; `--all` 0.15–0.16s. `blocked` while waiting and `state.json`'s `working` are read-only: the transcript holds no pending tool call. No spike code left. |
 | T01 | status-model | T00 | ⬜ | |
 | T02 | status-gather | T00 | ⬜ | |
 | T03 | picker-render | — | ⬜ | |
@@ -31,7 +31,7 @@ done · ⛔ blocked, needs a human.
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** T00
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
