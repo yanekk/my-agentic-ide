@@ -41,10 +41,11 @@ The layout is fixed, not a workspace you arrange:
   *uncommitted* work, so a clean tree shows an empty diff. Auto-reloads as the
   agent writes; stops the moment you start annotating.
 - **Bottom-left — the fleet.** `claude agents`. Entering one here is the only
-  navigation gesture; the other panes follow. When `pir` is installed the slot can also hold its
-  dashboard: plain ← at the list, with the box empty, opens a small picker of
-  the two, and under each it lists what that program has going, whatever is
-  waiting for you first, so you see where you are needed before you switch
+  navigation gesture; the other panes follow. When `pir` is installed the slot
+  can also hold its dashboard: plain ← at the list, with the box empty, opens a
+  small picker of the two, and under each it lists what that program has
+  going, whatever is waiting for you first, so you see where you are needed
+  before you switch
   (`plans/fleet-picker-status/`). Failures stay until dismissed; clean finishes
   show for an hour, though pir's will only once pir reports when a run ended.
 - **Bottom-right — that agent's own shell**, in its worktree — a set of them,
