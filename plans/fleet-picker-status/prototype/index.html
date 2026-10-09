@@ -1,0 +1,183 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Program picker with status — mock</title>
+<style>
+  :root{
+    --bg:#14171c; --panel:#1b1f26; --ink:#e7eaf0; --muted:#9aa3b2; --faint:#727b8a; --line:#2a2f38;
+    --accent:#7d9cff; --term-bg:#22262e; --term-edge:#161a20; --dim:#6f7886; --bright:#d8dee8;
+    --name:#f2f5fa; --ok:#8fce7a; --warn:#e6b862; --bad:#ef7d7d; --sel:#8ea2ff;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;line-height:1.55;margin:0}
+  .wrap{max-width:1180px;margin:0 auto;padding:36px 16px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;margin:0 0 8px}
+  h1{font-size:30px;line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
+  .lede{color:var(--muted);max-width:76ch;margin:0}
+  .bar{display:flex;gap:8px;margin:22px 0 10px;flex-wrap:wrap;align-items:center}
+  .bar span{color:var(--faint);font-size:12px;letter-spacing:.08em;text-transform:uppercase;margin-right:4px}
+  .bar button{background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:7px 13px;font:inherit;font-size:14px;cursor:pointer}
+  .bar button.on{color:var(--ink);border-color:var(--accent);background:#232a3d}
+  .desc{color:var(--muted);font-size:14px;max-width:80ch;min-height:2.4em;margin:0 0 16px}
+  .stage{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap}
+  .term{background:var(--term-bg);border:1px solid var(--term-edge);border-radius:10px;padding:10px 12px;outline:none;box-shadow:0 18px 44px -22px rgba(0,0,0,.6)}
+  .term:focus{border-color:var(--accent)}
+  .cap{font-size:11px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase;margin:0 0 6px}
+  pre{margin:0;font:13px/1.45 Menlo,Monaco,ui-monospace,monospace;color:var(--bright);white-space:pre}
+  .d{color:var(--dim)} .b{color:var(--name);font-weight:600} .ok{color:var(--ok)} .w{color:var(--warn)} .x{color:var(--bad)}
+  .keys{font-size:14px;color:var(--muted);margin-top:18px} .keys kbd{font:12px Menlo,monospace;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--ink)}
+  .log{margin-top:8px;font-size:13px;color:var(--faint);font-family:Menlo,monospace}
+  .note{font-size:13px;color:var(--faint);max-width:80ch;margin-top:26px}
+</style>
+<div class="wrap">
+  <p class="eyebrow">Throwaway mock · fleet-picker-status</p>
+  <h1>The ← picker, now with what each program is doing</h1>
+  <p class="lede">The bottom-left pane after pressing ←, at its two real sizes: a 120×40 window (left) and the
+  smallest, an 80×24 window (right). Under each program is the list of what it has going. Items waiting for you come
+  first and are marked in yellow. Click a pane and use ↑↓, Enter or Esc.</p>
+
+  <div class="bar" id="scen"><span>Situation</span></div>
+  <p class="desc" id="desc"></p>
+
+  <div class="stage">
+    <div><p class="cap">120×40 window · slot 59×22</p><div class="term" tabindex="0" id="big"><pre></pre></div></div>
+    <div><p class="cap">80×24 window · slot 39×12</p><div class="term" tabindex="0" id="small"><pre></pre></div></div>
+  </div>
+  <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> choose the program · <kbd>Enter</kbd>/<kbd>→</kbd> open · <kbd>Esc</kbd> back. The lists are read-only.</p>
+  <div class="log" id="log"></div>
+
+  <p class="note">Status words: Claude reports needs you, working, failed, stopped, crashed and done. pir's words are taken
+  from its own dashboard (asking you, your go, ready to merge, planning, testing, building, …). A done or finished item
+  shows how long ago it finished and disappears after an hour. Failed, stopped and crashed stay until you dismiss them
+  in the program itself. Colours here are what the terminal draws: yellow = waiting for you, red = failed or crashed,
+  dim = finished. Nothing in this mock is wired to real data.</p>
+</div>
+<script>
+const SCEN = {
+  typical: {
+    label: "Typical",
+    desc: "A normal afternoon: one Claude agent needs you, one pir run is asking you, a few things are working and two finished recently.",
+    claude: [
+      ["wait","needs you","sdet-tools / epic-readiness"],
+      ["run","working","sdet-tools / branch-tilt-setup"],
+      ["done","done 12m","cribl / pack-delete-plumbing"],
+    ],
+    pir: [
+      ["wait","asking you","plan-implement-review / finisher-go-covers-steps"],
+      ["run","testing","plan-implement-review / shift-tab-manual-mode"],
+      ["run","building 4/9","sdet-tools / rca-sidebar-filter"],
+      ["bad","crashed","sdet-tools / normalization-rules"],
+      ["done","finished 40m","sdet-tools / group-by-jira"],
+    ],
+  },
+  busy: {
+    label: "Busy (overflow)",
+    desc: "More than fits. Each group keeps its items waiting for you, fills what room is left in order, and ends with a +N more line.",
+    claude: [
+      ["wait","needs you","sdet-tools / epic-readiness"],
+      ["wait","needs you","cribl / random-values-logging"],
+      ["run","working","sdet-tools / branch-tilt-setup"],
+      ["run","working","cribl / yaml-pipelines-webhook"],
+      ["run","working","my-agentic-ide / wezterm-memory"],
+      ["bad","failed","sdet-tools / denormalization-gaps"],
+      ["done","done 5m","cribl / pack-delete-plumbing"],
+      ["done","done 31m","sdet-tools / test-assignment-mapping"],
+    ],
+    pir: [
+      ["wait","asking you","plan-implement-review / finisher-go-covers-steps"],
+      ["wait","your go","sdet-tools / group-by-jira"],
+      ["run","testing","plan-implement-review / shift-tab-manual-mode"],
+      ["run","building 4/9","sdet-tools / rca-sidebar-filter"],
+      ["run","planning","my-agentic-ide / fleet-picker-status"],
+      ["bad","stopped","cribl / lookup-cache"],
+      ["done","merged 18m","sdet-tools / tilt-profiles"],
+    ],
+  },
+  quiet: {
+    label: "Nothing going",
+    desc: "Nothing running and nothing finished in the last hour. Each program says so in one dim line.",
+    claude: [], pir: [],
+  },
+  down: {
+    label: "pir service down",
+    desc: "pir's local service is not running, so its runs cannot be read. The PIR entry says so; Claude's list and the picker itself work as usual.",
+    claude: [
+      ["run","working","sdet-tools / branch-tilt-setup"],
+      ["done","done 12m","cribl / pack-delete-plumbing"],
+    ],
+    pir: null,
+  },
+  loading: {
+    label: "First moment",
+    desc: "The first fraction of a second after ←: the picker is up at once and the lists fill in about 0.2s later.",
+    claude: "loading", pir: "loading",
+  },
+};
+const NAMES = {claude:"Claude Agents", pir:"PIR"};
+const ORDER = ["claude","pir"];
+const HINT = "↑↓ choose · enter or → open · esc back";
+let scen = "typical";
+const state = {big:{shown:"claude",sel:"pir"}, small:{shown:"claude",sel:"pir"}};
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+const w = s => [...s].length;
+const clip = (s,n) => w(s)<=n ? s : [...s].slice(0,Math.max(0,n-1)).join("")+"…";
+const span = (cls,t) => cls ? `<span class="${cls}">${esc(t)}</span>` : esc(t);
+const GLYPH = {wait:"●", run:"◐", bad:"✗", done:"✓"};
+const CLS = {wait:"w", run:"", bad:"x", done:"d"};
+
+function itemLines(list, cols, max, indent){
+  if (list === "loading") return [[span("d", indent+"…")]];
+  if (list === null) return [[span("d", indent+"status unavailable · pir service not running")]];
+  if (!list.length) return [[span("d", indent+"nothing running")]];
+  const sw = Math.max(...list.map(i=>w(i[1])));
+  const fit = list.length <= max ? list : list.slice(0, max-1);
+  const out = fit.map(([k,st,name])=>{
+    const room = cols - w(indent) - 2 - sw - 2;
+    const nameCls = k==="done" ? "d" : "";
+    return [span(CLS[k], indent+GLYPH[k]+" "+st.padEnd(sw)) + "  " + span(nameCls, clip(name, room))];
+  });
+  if (fit.length < list.length) out.push([span("d", indent+"  +"+(list.length-fit.length)+" more")]);
+  return out;
+}
+
+function render(st, cols, rows){
+  const s = SCEN[scen];
+  const roomy = rows >= 18;
+  const ind = cols >= 50 ? "   " : " ";
+  const sub = cols >= 50 ? "       " : "   ";
+  const lines = [];
+  if (roomy){ lines.push(""); lines.push(span("", ind)+span("b","SWITCH PROGRAM")); lines.push(span("d", ind+"─".repeat(Math.min(40, cols-w(ind))))); lines.push(""); }
+  // rows for items: total minus header, two entry lines, gap(s), hint line
+  const fixed = lines.length + 2 + (roomy?2:1) + 1;
+  const avail = Math.max(2, rows - fixed);
+  const n = p => { const l=s[p]; return Array.isArray(l) ? Math.max(1,l.length) : 1; };
+  let a = Math.min(n("claude"), Math.ceil(avail/2)), b = Math.min(n("pir"), avail - a);
+  a = Math.min(n("claude"), avail - b);
+  const alloc = {claude:a, pir:b};
+  ORDER.forEach((p,i)=>{
+    const on = st.sel===p;
+    const mark = on ? "▸ " : "  ";
+    const tag = st.shown===p ? "shown now" : "";
+    const gap = Math.max(2, (cols>=50?26:18) - w(NAMES[p]));
+    lines.push(esc(ind+mark) + (on?span("b",NAMES[p]):esc(NAMES[p])) + (tag ? esc(" ".repeat(gap)) + span("d",tag) : ""));
+    itemLines(s[p], cols, alloc[p], sub).forEach(l=>lines.push(l[0]));
+    if (i===0 || roomy) lines.push("");
+  });
+  while (lines.length < rows-1) lines.push("");
+  lines.length = rows-1;
+  lines.push(span("d", (cols>=50?"   ":" ") + clip(HINT, cols-1)));
+  return lines.join("\n");
+}
+const SIZES = {big:[59,22], small:[39,12]};
+function draw(){ for (const id of ["big","small"]) document.querySelector(`#${id} pre`).innerHTML = render(state[id], ...SIZES[id]); document.getElementById("desc").textContent = SCEN[scen].desc; }
+function log(t){ const l=document.getElementById("log"); l.innerHTML = `<div>${esc(t)}</div>` + l.innerHTML.split("</div>").slice(0,3).join("</div>"); }
+for (const id of ["big","small"]) document.getElementById(id).addEventListener("keydown", e=>{
+  const st = state[id];
+  if (e.key==="ArrowUp"||e.key==="ArrowDown"){ st.sel = st.sel==="claude"?"pir":"claude"; e.preventDefault(); }
+  else if (e.key==="Enter"||e.key==="ArrowRight"){ log(st.sel===st.shown ? `${NAMES[st.sel]} is already shown: the picker just closes` : `opens ${NAMES[st.sel]}, as it was left`); e.preventDefault(); }
+  else if (e.key==="Escape"){ log("picker closes, nothing changes"); }
+  draw();
+});
+const bar = document.getElementById("scen");
+for (const k of Object.keys(SCEN)){ const b=document.createElement("button"); b.textContent=SCEN[k].label; b.onclick=()=>{scen=k; [...bar.querySelectorAll("button")].forEach(x=>x.classList.toggle("on",x===b)); draw();}; if(k===scen)b.classList.add("on"); bar.appendChild(b); }
+draw();
+</script>
