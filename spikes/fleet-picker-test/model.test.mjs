@@ -302,6 +302,18 @@ check("39x12: long unavailable text cut with …",
   plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir service not running" } })[4]),
   "   status unavailable · pir service no…");
 
+// Names and words are wire text (claude agents, pir's service): a NEWLINE would paint a second
+// terminal line out of one entry and an ESC would run as a control sequence, so each control
+// character is drawn as one space, as safeText does for the agenda and the BitBucket pane.
+{
+  const nasty = { claude: [it("run", "work\x1bing", "a\x1b[2Jb\nc\td\x9b")], pir: { unavailable: "down\r\nnow" } };
+  const lines = render(initialState("claude"), 59, 22, nasty);
+  check("wire text: no control character survives outside our own styles",
+    lines.map((l) => l.replace(/\x1b\[[0-9]+m/g, "")).filter((l) => /[\u0000-\u001f\u007f-\u009f]/.test(l)), []);
+  check("wire text: each control character is one space", plain(lines[5]), "       ◐ work ing  a [2Jb c d ");
+  check("wire text: the unavailable text too", plain(lines[8]), "       down  now");
+}
+
 // --- render: the sweep (every line within cols, exactly rows lines) ----------------
 {
   const fixtures = [

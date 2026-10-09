@@ -181,16 +181,26 @@ function clipDots(s, n) {
   return width(s) <= n ? s : [...s].slice(0, n - 1).join("") + "…";
 }
 
+// Names, words and the unavailable text are wire text (claude agents, pir's service). A NEWLINE
+// in one would paint a second terminal line out of a single entry and an ESC would run as a
+// control sequence in the pane, so every control character becomes one space where the text
+// enters the drawing, as the agenda's safeText does (this module may import nothing).
+const safe = (s) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+
 // The status DESIGN §3.3 List, normalised: omitted is still loading, anything unrecognised is
 // unavailable, and an array keeps only items it can draw (a malformed one is skipped, never a
 // blank line, §2.7).
 function normalise(list) {
   if (list === undefined || list === "loading") return "loading";
   if (Array.isArray(list)) {
-    return list.filter((i) => i && typeof i === "object" && GLYPH[i.cls] && typeof i.word === "string" &&
-      typeof i.name === "string" && i.name !== "");
+    return list
+      .filter((i) => i && typeof i === "object" && GLYPH[i.cls] && typeof i.word === "string" &&
+        typeof i.name === "string" && i.name !== "")
+      .map((i) => ({ cls: i.cls, word: safe(i.word), name: safe(i.name) }));
   }
-  if (list && typeof list === "object" && typeof list.unavailable === "string" && list.unavailable) return list;
+  if (list && typeof list === "object" && typeof list.unavailable === "string" && list.unavailable) {
+    return { unavailable: safe(list.unavailable) };
+  }
   return "unavailable";
 }
 
