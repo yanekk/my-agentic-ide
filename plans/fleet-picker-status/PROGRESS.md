@@ -29,7 +29,7 @@ done · ⛔ blocked, needs a human.
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ✅ | |
 | T05 | picker-status-drill | T04 | ✅ | |
-| T06 | docs | T05 | ⬜ | |
+| T06 | docs | T05 | ✅ | |
 
 **Review queue:** *(empty)*
 
