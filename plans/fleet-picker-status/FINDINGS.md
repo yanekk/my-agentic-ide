@@ -14,6 +14,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-09 | 📌 | T05 drill, worker-driven: 13 situations at 59x22, 39x12, 30x8 under `pty-drive.py`, every key, resize mid-load and after, a paste burst; then real Claude and pir read-only. One verb each, no overflow; real lists in 0.15-0.19s. |
+| 2026-10-09 | 🐞 | T05 drill: at 39 columns the pir-down line cut to `pir service no…`; now keeps the part after ` · ` when too wide (person chose). At 30x8 the hint clips to `enter or → open ·`; pre-existing fleet-picker behaviour, open. |
 | 2026-10-09 | 🐞 | T04 review: process.test.mjs failed once in ~40 runs, `claude-enter: the pty driver failed`; pty-drive.py hung 30s in its blocking teardown waitpid after the picker answered. Now drains and bounds at 5s. Root cause unconfirmed; open. |
 | 2026-10-09 | 📌 | T04 review sweep: `spikes/pty-inject/probe.py` close() sends SIGKILL then a blocking os.waitpid without reading the pty, the pattern that hung pty-drive.py. Not fixed: a spike, not in the test block. |
 | 2026-10-09 | 📌 | T04 review: picker driven against the real `claude agents --json --all` and the real pir service at 59x22 and 39x12, worker-driven: lists drawn, nothing past the edge, one verb. fixtures/claude and the pir stand-in hold. |
