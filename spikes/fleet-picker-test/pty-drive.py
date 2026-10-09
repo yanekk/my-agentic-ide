@@ -1,11 +1,16 @@
 """Drive bin/cockpit-fleet-picker.sh under a real pseudo-terminal (plans/fleet-picker T02).
 
-    python3 -I pty-drive.py <wrapper> <cmd-file> <shown> <cols> <rows> '<steps json>'
+    python3 -I pty-drive.py <wrapper> <cmd-file> <shown> <cols> <rows> '<steps json>' ['<env json>']
+
+The optional env is the wrapper's whole environment (plans/fleet-picker-status T04: a scratch
+HOME, PIR_HOME and a PATH with a fake `claude`, so no run reads the real machine); without it
+the wrapper inherits this process's.
 
 Spawns the wrapper as the session leader of a fresh pty of the given size, feeds its output
 to a minimal screen model, and runs the steps in order:
 
     ["wait", "<text>"]        until the screen shows <text> (5s)
+    ["wait-line", "<text>"]   until some row reads exactly <text>, trailing blanks aside (5s)
     ["send", "<bytes>"]       write <bytes> to the pty, as a key would arrive
     ["sleep", <seconds>]
     ["resize", cols, rows]    TIOCSWINSZ on the pty; the kernel signals the foreground group
@@ -124,10 +129,13 @@ def set_size(fd, cols, rows):
 def main():
     wrapper, cmd_file, shown, cols, rows, steps = sys.argv[1:7]
     cols, rows, steps = int(cols), int(rows), json.loads(steps)
+    env = json.loads(sys.argv[7]) if len(sys.argv) > 7 else None
 
     pid, fd = pty.fork()
     if pid == 0:
-        os.execvp("bash", ["bash", wrapper, cmd_file, shown])
+        if env is None:
+            os.execvp("bash", ["bash", wrapper, cmd_file, shown])
+        os.execvpe("bash", ["bash", wrapper, cmd_file, shown], env)
     set_size(fd, cols, rows)
 
     screen = Screen(cols, rows)
@@ -175,6 +183,12 @@ def main():
                     pump(0.05)
                 if not any(step[1] in line for line in screen.text()):
                     errors.append("never saw %r" % step[1])
+            elif kind == "wait-line":
+                end = time.time() + 5
+                while step[1] not in screen.text() and time.time() < end:
+                    pump(0.05)
+                if step[1] not in screen.text():
+                    errors.append("never saw the line %r" % step[1])
             elif kind == "send":
                 os.write(fd, step[1].encode())
                 pump(0.05)
@@ -208,10 +222,22 @@ def main():
             os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
+        # Reap while still reading the pty, and give up after 5s: a blocking waitpid hung
+        # this driver for its whole 30s limit once in ~40 suite runs (fleet-picker-status T04
+        # review), after the picker had already answered. A process whose last close of the
+        # tty waits on unread output would hang exactly so; draining rules that out, and the
+        # bound turns any other cause into a named error instead of a driver timeout.
+        end = time.time() + 5
+        while True:
+            try:
+                if os.waitpid(pid, os.WNOHANG) != (0, 0):
+                    break
+            except ChildProcessError:
+                break
+            if time.time() >= end:
+                errors.append("the wrapper was not reaped 5s after SIGKILL")  # result holds this list
+                break
+            pump(0.05)
         os.close(fd)
     left = subprocess.run(["/usr/bin/pgrep", "-g", str(pid)], capture_output=True, text=True).stdout.split()
     result["leftover"] = left

@@ -14,6 +14,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-09 | 🐞 | T04 review: process.test.mjs failed once in ~40 runs, `claude-enter: the pty driver failed`; pty-drive.py hung 30s in its blocking teardown waitpid after the picker answered. Now drains and bounds at 5s. Root cause unconfirmed; open. |
+| 2026-10-09 | 📌 | T04 review sweep: `spikes/pty-inject/probe.py` close() sends SIGKILL then a blocking os.waitpid without reading the pty, the pattern that hung pty-drive.py. Not fixed: a spike, not in the test block. |
+| 2026-10-09 | 📌 | T04 review: picker driven against the real `claude agents --json --all` and the real pir service at 59x22 and 39x12, worker-driven: lists drawn, nothing past the edge, one verb. fixtures/claude and the pir stand-in hold. |
 | 2026-10-09 | 📌 | T00 Q1: a background agent waiting on AskUserQuestion lists `state: "blocked"`, `status: "waiting"`, `waitingFor: "input needed"`. Its `state.json` says `state: "working"`, `tempo: "blocked"`: read the list's `state`, never the file's. |
 | 2026-10-09 | 📌 | T00 Q2 (plan-review evidence, not live): `lastTerminalAt` later than `firstTerminalAt` in six of nine `state.json` files; re-read in T00, six of seven. It moves on later finishes. |
 | 2026-10-09 | 📌 | T00 Q3: stopped agent lists `state: "stopped"`, no `pid`/`status`, stays in `--all` until `claude rm`; `state.json` kept with both terminal times. Exited ones: `done`, same shape. `failed`/`crashed` not observed. |
