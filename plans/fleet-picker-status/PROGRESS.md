@@ -14,7 +14,7 @@ walk past.
 
 **Status:** Plan written; nothing built.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T04 once T01 is ✅.
+**Next `pir-work` will:** T04, now that T01, T02 and T03 are ✅.
 
 ## Tasks
 
@@ -24,7 +24,7 @@ done · ⛔ blocked, needs a human.
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | claude-status-spike | — | ✅ | |
-| T01 | status-model | T00 | ⬜ | |
+| T01 | status-model | T00 | ✅ | |
 | T02 | status-gather | T00 | ✅ | Review: one fix, the pir stand-in served a bare array where the real `/v2/runs` answers `{ version, runs, counts }`. Probed the real claude and pir read-only; mutated the 401 split, done filter, deadline timer and usage header, each caught. Fake-claude argv and output checked against real. |
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
