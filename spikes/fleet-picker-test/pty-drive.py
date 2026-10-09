@@ -222,10 +222,22 @@ def main():
             os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
+        # Reap while still reading the pty, and give up after 5s: a blocking waitpid hung
+        # this driver for its whole 30s limit once in ~40 suite runs (fleet-picker-status T04
+        # review), after the picker had already answered. A process whose last close of the
+        # tty waits on unread output would hang exactly so; draining rules that out, and the
+        # bound turns any other cause into a named error instead of a driver timeout.
+        end = time.time() + 5
+        while True:
+            try:
+                if os.waitpid(pid, os.WNOHANG) != (0, 0):
+                    break
+            except ChildProcessError:
+                break
+            if time.time() >= end:
+                errors.append("the wrapper was not reaped 5s after SIGKILL")  # result holds this list
+                break
+            pump(0.05)
         os.close(fd)
     left = subprocess.run(["/usr/bin/pgrep", "-g", str(pid)], capture_output=True, text=True).stdout.split()
     result["leftover"] = left
