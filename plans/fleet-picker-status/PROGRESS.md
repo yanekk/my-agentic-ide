@@ -14,7 +14,7 @@ walk past.
 
 **Status:** Plan written; nothing built.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
+**Next `pir-work` will:** review T02; T04 once T01, T02 and T03 are ✅.
 
 ## Tasks
 
@@ -25,13 +25,13 @@ done · ⛔ blocked, needs a human.
 |---|---|---|---|---|
 | T00 | claude-status-spike | — | ✅ | |
 | T01 | status-model | T00 | ⬜ | |
-| T02 | status-gather | T00 | ⬜ | |
+| T02 | status-gather | T00 | 🔍 | `cockpit-fleet-status.mjs` (gatherClaude/Pir/All) and `fetchPirRuns`, sharing `findPirService`/`getJson` with `fetchPirUsage`. 59 checks in `usage-test/fleet-status.test.mjs`. Deviations: claude limit is an own timer, not execFile's, so a grandchild holding stdout cannot delay it; ids not matching a plain-name pattern are never read; gatherAll takes `claudeTimeoutMs`/`pirTimeoutMs`/`alive`. |
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 
