@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** T03 implemented, awaiting review.
+**Status:** T03 reviewed ✅.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
+**Next `pir-work` will:** T00, which T01 and T02 wait on.
 
 ## Tasks
 
@@ -26,12 +26,12 @@ done · ⛔ blocked, needs a human.
 | T00 | claude-status-spike | — | ⬜ | |
 | T01 | status-model | T00 | ⬜ | |
 | T02 | status-gather | T00 | ⬜ | |
-| T03 | picker-render | — | 🔍 | `render(state, cols, rows, lists)` draws each List under its entry; model 324 checks, suite 439. Deviations: word column sized to the items drawn, not all items; an unrecognised List value renders `status unavailable`; process tests wait on the hint, since the title is gone at 39×12. |
+| T03 | picker-render | — | ✅ | Reviewed: one fix, control characters in list text (NEWLINE, ESC) now drawn as spaces, test written red first. Seven mutations of row share, overflow, title threshold, name clipping and colour all caught; three deviations held by probe and suite. CJK width unhandled, logged. |
 | T04 | picker-wiring | T01, T02, T03 | ⬜ | |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** empty
 
 ## Blocked on the user
 
