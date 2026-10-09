@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** Plan written; nothing built.
+**Status:** T00–T04 done; T05 next.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** T00 and T03, which depend on nothing; T00 first if one at a time, since T01 and T02 wait on it.
+**Next `pir-work` will:** T05, the picker-status drill.
 
 ## Tasks
 
@@ -27,11 +27,11 @@ done · ⛔ blocked, needs a human.
 | T01 | status-model | T00 | ✅ | |
 | T02 | status-gather | T00 | ✅ | |
 | T03 | picker-render | — | ✅ | |
-| T04 | picker-wiring | T01, T02, T03 | 🔍 | Picker draws `…`, runs gatherAll once after the frame, redraws unless a verb went. Process suite: scratch HOME/PIR_HOME/PATH, fixtures/claude, pir stand-in; 54 new checks. Deviations: the models run inside the promise chain so their throw is caught too; no maxBuffer in gatherClaude, so the huge case is unparseable output, not a throw. |
+| T04 | picker-wiring | T01, T02, T03 | ✅ | Reviewed, one fix: pty-drive.py's blocking teardown waitpid hung the driver 30s once in ~40 runs after the picker answered; it now drains and gives up at 5s, cause unconfirmed. Probed the real claude and pir at 59x22 and 39x12 and a forced model throw; mutated the pir-down branch and the post-fetch redraw, both red. |
 | T05 | picker-status-drill | T04 | ⬜ | |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** T04
+**Review queue:** empty
 
 ## Blocked on the user
 
