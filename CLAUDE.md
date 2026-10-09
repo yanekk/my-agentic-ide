@@ -128,6 +128,13 @@ slot, at the list with the program's box empty, opens a small **picker** there i
 (↑↓, Enter or → opens, Esc backs out); anywhere else ← is the program's own. The
 decision is made in WezTerm at the press (`wezterm/fleet-picker.lua`), never in the
 daemon, so a forwarded ← cannot land after later keys. The plan is `plans/fleet-picker/`.
+Under each entry the picker lists what that program has going, one line per item, status
+word then name, items waiting for you first: Claude's **background** agents (`claude agents
+--json --all`) and every pir run (`GET /v2/runs`). Failures stay until dismissed in their
+program, clean finishes for an hour — Claude's from `lastTerminalAt` in its jobs folder, pir's
+not at all until pir reports an `endedAt`. A snapshot read once at open, after the frame is
+drawn; the lists never act and a source that fails is one dim `status unavailable` line. The
+plan is `plans/fleet-picker-status/`.
 The two are **parked, not killed**, like diffs, and every rebuild starts
 on `claude agents`. pir runs in `cockpit-pir.sh`, a relaunch loop, with
 `PIR_DASHBOARD_STATE` set, and reports what it has open through
@@ -220,13 +227,15 @@ bin/cockpit-usage-model.mjs   pure: normalise rate_limits + renderUsage (what th
 bin/cockpit-usage-store.mjs   reads/writes usage-cache.json (0600, per-writer temp so concurrent sessions don't tear it)
 bin/cockpit-aperture-client.mjs  the company gateway's GetMyQuotas (keyless, Tailscale identity) and the daemon's one-minute refresh of aperture-cache.json
 bin/cockpit-usage-tap.mjs     the statusline command: caches a personal session's rate_limits; --install/--uninstall register it in settings.json and chain any pre-existing statusline
-bin/cockpit-usage-pir.mjs     the pir usage feed: reads .pir/api.json, GETs pir's /v1/usage (2 s limit, redirects refused), writes the cache when newer; the daemon's 30 s poll, --status (installer) and --once (live check)
+bin/cockpit-usage-pir.mjs     the pir usage feed: reads .pir/api.json, GETs pir's /v1/usage (2 s limit, redirects refused), writes the cache when newer; fetchPirRuns, the picker's /v2/runs on the same discovery; the daemon's 30 s poll, --status (installer) and --once (live check)
 bin/cockpit-stop-notify.mjs   the Stop-hook sound: dings on every idle except a PIR worker that finished; still dings when one parks for the person; --install/--uninstall register it (superseding a plain afplay Stop hook)
 bin/cockpit-custom-prompt.mjs  the ASCII branch/SHA prompt for the "custom" diff mode
 bin/cockpit-pir-model.mjs      pure: read pir-dashboard.json, decidePir (what to follow), pirKey, startingMode, shouldReapPirKey
 bin/cockpit-pir.sh             the pir pane's program: pir in a relaunch loop with PIR_DASHBOARD_STATE set
 bin/cockpit-fleet-picker-model.mjs  pure: the fleet picker's state, key decoding, reduce, render
-bin/cockpit-fleet-picker.mjs   the picker process: raw tty, SIGWINCH, hands back fleet-claude/fleet-pir/picker-cancel
+bin/cockpit-fleet-picker.mjs   the picker process: raw tty, SIGWINCH, draws, fetches the status once, redraws; hands back fleet-claude/fleet-pir/picker-cancel
+bin/cockpit-fleet-status-model.mjs  pure: the picker's status lists — claudeItems, pirItems (class, word, the hour, order), ageLabel
+bin/cockpit-fleet-status.mjs   the status fetch: `claude agents --json --all` + jobs/{id}/state.json (3 s), pir's /v2/runs (2 s); never throws
 bin/cockpit-fleet-picker.sh    the picker pane's wrapper: picker-cancel on a crash, then never exits
 bin/cockpit-browse-verbs.hjson broot's Enter verbs: push a text file, preview the rest
 bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; reroutes a text file through cockpit-open, ignores the rest
@@ -245,7 +254,7 @@ spikes/stop-notify-test/ the Stop-hook sound decision and its settings.json merg
 spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in, the Aperture forecast (365)
 spikes/pir-pane-test/   the pir model, its purity grep, the installer's optional pir check (95)
 spikes/fleet-picker-keys-test/  the ← decision run inside `wezterm show-keys`, cockpit.lua's binding, Lua purity grep (56)
-spikes/fleet-picker-test/  the picker model, its purity grep, the picker process under a pty (381)
+spikes/fleet-picker-test/  the picker and status models, their purity greps, the status fetch against fakes, the picker process under a pty (593)
 spikes/daemon-leak-test/ the test-daemon helpers and cockpitd's owner backstop, three interrupt paths (58)
 spikes/lib/test-daemons.sh  daemon_stop/daemon_sweep/daemon_tripwire, sourced by every suite: no test cockpitd outlives its run
 spikes/pty-inject/      PTY harness used to settle how injection behaves

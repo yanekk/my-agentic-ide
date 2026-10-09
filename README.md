@@ -41,7 +41,12 @@ The layout is fixed, not a workspace you arrange:
   *uncommitted* work, so a clean tree shows an empty diff. Auto-reloads as the
   agent writes; stops the moment you start annotating.
 - **Bottom-left — the fleet.** `claude agents`. Entering one here is the only
-  navigation gesture; the other panes follow.
+  navigation gesture; the other panes follow. The slot can also hold `pir`'s
+  dashboard: plain ← at the list, with the box empty, opens a small picker of
+  the two, and under each it lists what that program has going, whatever is
+  waiting for you first, so you see where you are needed before you switch
+  (`plans/fleet-picker-status/`). Failures stay until dismissed; clean finishes
+  show for an hour, though pir's will only once pir reports when a run ended.
 - **Bottom-right — that agent's own shell**, in its worktree — a set of them,
   VSCode-style: `⌥t` new, `⌥[` / `⌥]` cycle, `⌥w` close, listed in the strip on
   the right edge.

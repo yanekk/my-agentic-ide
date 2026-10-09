@@ -1199,10 +1199,39 @@ alive, a BitBucket button closes it onto `claude agents` before it types, and te
 gestures anchor on the picker through `slotFleetPane()`. The cmd tail also watches its
 directory now: the 200ms poll was ~200 of the ~212ms the picker took to open.
 
+Under each entry the picker lists what that program has going (`plans/fleet-picker-status/`):
+one line per item, a glyph, a status word and the name, waiting first, then running, failed,
+finished. Claude Agents lists only background agents, the ones dispatched from the fleet box
+(`kind: "background"` in `claude agents --json --all`), because pir's workers are interactive
+sessions and would otherwise appear under both entries. `--all` matters: without it the list
+omits agents whose process has exited, which are exactly the recent finishes. A waiting agent
+reports `state: "blocked"` in that list (its own `state.json` still says `working`, so the list is
+read, never the file). PIR lists every run from its service's `GET /v2/runs`, found and
+authorised through the same `api.json` discovery as the usage feed (`fetchPirRuns` in
+`cockpit-usage-pir.mjs`), so the two GETs cannot disagree about whether the service is up;
+`waitingForYou` makes a run wait, `display.state` is its word, with `done/total` for a build.
+
+A failed or stopped item stays until it is dismissed in its own program. A clean finish shows for
+one hour, with its age, and needs a finish time to do so: Claude's list carries none, so it is
+`lastTerminalAt` from `~/.claude/jobs/{id}/state.json` (ISO 8601, and it moves on later
+finishes), read per finished agent. pir's would be `endedAt` on the run summary, which pir does
+not report yet (`plans/fleet-picker-status/pir-ended-at.md`), so until it does every finished
+pir run is hidden; an unknown finish time hides the item rather than listing an old one as
+recent. The lists are a snapshot: the picker draws its frame with a dim `…` under each entry
+first, fetches both sources once side by side (3s limit for Claude, 2s for pir), redraws, and
+never refreshes, so ← opens exactly as fast as before; measured, the real lists fill in within
+0.15-0.19s. A source that fails is one dim `status unavailable` line (for pir,
+`· pir service not running` when the service is down), and nothing a fetch returns or throws
+can change the verb handed back. The lists are read-only: the keys are those above, and no item
+is selectable. Deciding what shows is the pure `cockpit-fleet-status-model.mjs`; the fetch is
+`cockpit-fleet-status.mjs`, which never throws, because a picker that dies hands back
+`picker-cancel` and loses the ←.
+
 Keys pressed after ← but before the picker takes focus reach the program behind it; that
 was accepted rather than adding a second key interceptor. Tests:
 `spikes/fleet-picker-keys-test/` (the decision, inside `wezterm show-keys`, the only Lua
-here), `spikes/fleet-picker-test/` (the picker model and process under a pty) and
+here), `spikes/fleet-picker-test/` (the picker and status models, the status fetch against a fake
+`claude` and a stand-in pir service, and the process under a pty) and
 cockpit-test section 17 (the daemon side).
 
 ### The landmark moved
