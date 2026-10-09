@@ -342,13 +342,14 @@ oneVerb("Esc after the lists", await drive("esc-after-lists", "claude", 59, 22,
     [...HEAD_59, TYPICAL_59[4], "       status unavailable", "", ...TYPICAL_59.slice(9, 12), ...pad(11), HINT_59]);
 }
 
-// No api.json: the PIR entry names the usual cause, clipped with … at 39 columns.
+// No api.json: the PIR entry names the usual cause; at 39 columns only the cause, which the
+// whole line would have cut to `pir service no…` (T05 drill, person 2026-10-09).
 for (const [size, cols, rows, line] of [["59x22", 59, 22, "       status unavailable · pir service not running"],
-  ["39x12", 39, 12, "   status unavailable · pir service no…"]]) {
+  ["39x12", 39, 12, "   pir service not running"]]) {
   const r = await drive(`pir-down-${size}`, "claude", cols, rows, [READY, ["wait-line", line], ["snap", "a"]],
     world({ ...TYPICAL, pir: undefined }));
   if (r) check(`${size}: no api.json → the pir-down line, Claude still listed`,
-    r.snaps.a.filter((l) => l.includes("status unavailable") || l.includes("needs you")).length, 2);
+    r.snaps.a.filter((l) => l === line || l.includes("needs you")).length, 2);
 }
 
 // A claude whose answer cannot be read (~20 MB of non-JSON): unavailable, and keys still answered.

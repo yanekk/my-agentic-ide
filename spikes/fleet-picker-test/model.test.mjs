@@ -298,9 +298,26 @@ check("null → status unavailable", single(null), "       status unavailable");
 check("a malformed item is skipped", single([{ cls: "run", word: "working" }, it("nope", "x", "y"), null]), "       nothing running");
 check("nothing running is dim", render(initialState("claude"), 59, 22, { claude: [] })[5], "       \x1b[2mnothing running\x1b[0m");
 check("unavailable is dim", render(initialState("claude"), 59, 22, { claude: "unavailable" })[5], "       \x1b[2mstatus unavailable\x1b[0m");
-check("39x12: long unavailable text cut with …",
+// Too wide, the text keeps its cause after the last ` · ` (person, 2026-10-09), and only then
+// is cut with …; it fits whole at 59 columns, and a text with no ` · ` is simply cut.
+check("39x12: a too-wide unavailable text keeps the part after ` · `",
   plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir service not running" } })[4]),
-  "   status unavailable · pir service no…");
+  "   pir service not running");
+check("25x12: the kept cause is still cut with … when even it does not fit",
+  plain(render(initialState("claude"), 25, 12, { pir: { unavailable: "status unavailable · pir service not running" } })[4]),
+  "   pir service not runni…");
+check("39x12: an unavailable text with no ` · ` is cut with …",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable because pir is not running" } })[4]),
+  "   status unavailable because pir is n…");
+check("39x12: a too-wide text ending in ` · ` is cut whole, never a blank line",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable because the pir service · " } })[4]),
+  "   status unavailable because the pir …");
+check("one column over 39 counting the indent: keeps the cause",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir not running!" } })[4]),
+  "   pir not running!");
+check("39 columns exactly: a text that fits keeps its prefix",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir not running" } })[4]),
+  "   status unavailable · pir not running");
 
 // Names and words are wire text (claude agents, pir's service): a NEWLINE would paint a second
 // terminal line out of one entry and an ESC would run as a control sequence, so each control

@@ -331,6 +331,9 @@ prompted every time, so a script would only add a file.
   moves was read from six existing jobs, so no prompt is sent to any agent the person has, which
   would spend usage and set it working in its repo.
 - **The §5.3 bins as proposed** (person, 2026-10-09, plan review).
+- **A too-wide unavailable line keeps its cause** (person, 2026-10-09, T05 drill), over keeping
+  the cut line or shortening the wording everywhere: at 39 columns `status unavailable · pir
+  service not running` cut to `… pir service no…`, so there it reads `pir service not running`.
 - **`--all`.** Without it `claude agents --json` omits background agents whose process has exited,
   which are exactly the recent finishes (measured 2026-10-09).
 

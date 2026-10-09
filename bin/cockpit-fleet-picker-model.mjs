@@ -204,6 +204,16 @@ function normalise(list) {
   return "unavailable";
 }
 
+// An unavailable text too wide for its line keeps what follows its last ` · `, the cause the
+// person acts on: at 39 columns `status unavailable · pir service no…` lost exactly that, so
+// it reads `pir service not running` there (person, 2026-10-09, status DESIGN §7). Only then
+// is it cut with `…`. A text ending in ` · ` has no cause to keep and is cut whole, never blank.
+function unavailableText(text, sub, cols) {
+  const at = text.lastIndexOf(" · ");
+  const cause = at < 0 ? "" : text.slice(at + 3);
+  return width(sub + text) <= cols || !cause.trim() ? text : cause;
+}
+
 // How many rows an entry would like: one per item, or the single line of every other state.
 function wanted(list) {
   return Array.isArray(list) ? Math.max(1, list.length) : 1;
@@ -216,7 +226,7 @@ function listLines(list, n, sub, cols) {
   if (n <= 0) return [];
   if (list === "loading") return [dimLine(LOADING, sub, cols)];
   if (list === "unavailable") return [dimLine(UNAVAILABLE, sub, cols)];
-  if (!Array.isArray(list)) return [dimLine(list.unavailable, sub, cols)];
+  if (!Array.isArray(list)) return [dimLine(unavailableText(list.unavailable, sub, cols), sub, cols)];
   if (list.length === 0) return [dimLine(EMPTY, sub, cols)];
   const shown = list.length <= n ? list : list.slice(0, n - 1);
   const sw = Math.max(...shown.map((i) => width(i.word)), 0);
