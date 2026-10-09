@@ -309,6 +309,12 @@ check("25x12: the kept cause is still cut with … when even it does not fit",
 check("39x12: an unavailable text with no ` · ` is cut with …",
   plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable because pir is not running" } })[4]),
   "   status unavailable because pir is n…");
+check("39x12: a too-wide text ending in ` · ` is cut whole, never a blank line",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable because the pir service · " } })[4]),
+  "   status unavailable because the pir …");
+check("one column over 39 counting the indent: keeps the cause",
+  plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir not running!" } })[4]),
+  "   pir not running!");
 check("39 columns exactly: a text that fits keeps its prefix",
   plain(render(initialState("claude"), 39, 12, { pir: { unavailable: "status unavailable · pir not running" } })[4]),
   "   status unavailable · pir not running");

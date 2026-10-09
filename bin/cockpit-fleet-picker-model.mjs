@@ -207,10 +207,11 @@ function normalise(list) {
 // An unavailable text too wide for its line keeps what follows its last ` · `, the cause the
 // person acts on: at 39 columns `status unavailable · pir service no…` lost exactly that, so
 // it reads `pir service not running` there (person, 2026-10-09, status DESIGN §7). Only then
-// is it cut with `…`.
+// is it cut with `…`. A text ending in ` · ` has no cause to keep and is cut whole, never blank.
 function unavailableText(text, sub, cols) {
   const at = text.lastIndexOf(" · ");
-  return width(sub + text) <= cols || at < 0 ? text : text.slice(at + 3);
+  const cause = at < 0 ? "" : text.slice(at + 3);
+  return width(sub + text) <= cols || !cause.trim() ? text : cause;
 }
 
 // How many rows an entry would like: one per item, or the single line of every other state.
