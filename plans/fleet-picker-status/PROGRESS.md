@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** T00-T05 ✅; T06 awaiting review.
+**Status:** T00-T06 ✅. Plan complete.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** review T06.
+**Next `pir-work` will:** nothing; the plan is built.
 
 ## Tasks
 
@@ -29,9 +29,9 @@ done · ⛔ blocked, needs a human.
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ✅ | |
 | T05 | picker-status-drill | T04 | ✅ | |
-| T06 | docs | T05 | 🔍 | README, docs/cockpit.md picker section, CLAUDE.md intro, file rows, count 593. Deviation: README had no picker or pir mention to extend, so the fleet bullet gains a short one naming both. No tests; fleet-picker-test rerun green for the count. |
+| T06 | docs | T05 | ✅ | Review: one fix, README now says the picker needs pir installed. Every doc claim checked against code, spike RESULTS and FINDINGS (timeouts, `kind`/`blocked`, `--all`, strings, ordering, 0.15-0.19s); fleet-picker-test rerun, 593 checks. README-had-no-picker deviation held. No mutation: docs only. |
 
-**Review queue:** T06
+**Review queue:** empty
 
 ## Blocked on the user
 
