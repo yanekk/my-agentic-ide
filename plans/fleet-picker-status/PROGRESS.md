@@ -12,9 +12,9 @@ walk past.
 
 **Plan reviewed:** 2026-10-09 — 3 fixed, 2 decided with the user
 
-**Status:** T00–T04 ✅; T05 implemented, awaiting review.
+**Status:** T00–T05 ✅; T06 not started.
 **Last updated:** 2026-10-09
-**Next `pir-work` will:** review T05, then T06.
+**Next `pir-work` will:** T06.
 
 ## Tasks
 
@@ -28,10 +28,10 @@ done · ⛔ blocked, needs a human.
 | T02 | status-gather | T00 | ✅ | |
 | T03 | picker-render | — | ✅ | |
 | T04 | picker-wiring | T01, T02, T03 | ✅ | |
-| T05 | picker-status-drill | T04 | 🔍 | Drill run, worker-driven, screens in /tmp/t05-drill. One fix: a too-wide unavailable line keeps its cause after ` · ` (person chose, DESIGN §7); 4 model checks, process check updated. 30x8 hint clip logged, not fixed: pre-existing, outside this plan. |
+| T05 | picker-status-drill | T04 | ✅ | Drill worker-driven, 13 situations, three sizes, real env; screens /tmp/t05-drill. Review: one fix, a text ending ` · ` drew blank, now cut whole; a surviving indent-fit mutation now caught. Probed renders and the drill summary off disk; three mutations. 30x8 hint clip open. |
 | T06 | docs | T05 | ⬜ | |
 
-**Review queue:** T05
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
