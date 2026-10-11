@@ -1,39 +1,32 @@
 #!/usr/bin/env node
 //
-// The Stop-hook notification sound, made selective for PIR parallel workers.
+// The Stop-hook notification sound, silenced for every session pir runs.
 //
 // Background. Claude Code fires the `Stop` hook every time a session finishes
 // responding and goes idle. The cockpit user's own hook was an unconditional
-// `afplay .../Glass.aiff`, so every idle ding -- fine for one interactive
-// session, noise in a parallel PIR run where a dozen worker agents each go idle
-// the instant they finish their one task. This script keeps the ding for
-// everything EXCEPT a worker that stopped because it is *done*; a worker that
-// stopped because it needs a decision from the person still dings, because that
-// is exactly the moment the person has to attend to it.
+// `afplay .../Glass.aiff`: fine for one interactive session, noise once pir
+// runs plans in parallel -- planners, plan reviewers, build workers, task
+// reviewers, the coordinator agent, the finisher and end-of-run helpers each go
+// idle many times a run, and every idle dinged.
 //
-// How a worker is recognised, and how "done" is told from "needs you":
+// The rule: a session pir launched never dings; everything else does.
 //
-//   * A PIR worker runs in a worktree at
-//     `{repo}/.claude/worktrees/pir-{plan}-T{nn}/` (the pir-worker contract:
-//     the branch `pir/{plan}-T{nn}` with its slash flattened to a dash). The
-//     Stop hook input carries the session `cwd`, so that path IS the signal --
-//     no session-title parsing needed, and it cannot false-positive on an
-//     ordinary agent, whose worktree is not named `pir-*-T{nn}`.
+//   * pir starts every one of its claude sessions (Agent SDK `query()`, stdio
+//     pipes -- never a terminal) from a run process that its launcher gave
+//     `PIR_RUN=1` (pir-engine src/backend/shell/launch.mjs), and each session
+//     inherits that whole environment, as does this hook. So the variable marks
+//     "pir launched this" for every role at once, and needs no knowledge of
+//     roles, worktree names or report files.
 //
-//   * The same worker records why it parked by dropping a report file into
-//     `{repo}/plans/{plan}/.parallel/control/reports/`, whose body opens with
-//     `[pir:v1 kind=<kind> task=<Txx>]`. The `kind` is the whole answer:
-//     `implemented`/`done` are routine (silent); `question`/`decision`/`conflict`
-//     all park the worker waiting for the person (ding). We read the newest
-//     report for THIS task -- the folder holds every task's reports, so the
-//     task filter is not optional.
+//   * Silencing a pir session that is waiting on the person costs nothing: the
+//     person never answers it in a terminal, only in pir's own dashboard or web
+//     page, and pir already sends its own push alert when one needs them. An
+//     earlier version kept the ding for a build worker parked on a question by
+//     reading its report file; that recognised only build workers (by a
+//     `pir-{plan}-T{nn}` worktree), so every other role kept dinging.
 //
-// Fail-safe: anything we cannot classify falls back to the old behaviour of
-// playing the sound -- a missed ding on a routine worker stop is cheaper than a
-// silenced ding on a real one. The one deliberate exception is a *recognised*
-// worker whose report we could not read at all: it is silenced, because the
-// user's whole ask is "stop dinging every time these agents finish", and a
-// worker with no needs-person report on disk is, by default, one that finished.
+// Fail-safe: no or unreadable hook input still plays the sound -- a missed ding
+// on the person's own session is the failure worth avoiding.
 //
 // Registration mirrors cockpit-auto-name.mjs / cockpit-usage-tap.mjs: the script
 // owns its own settings.json merge (`--install`/`--check`/`--uninstall`), so the
@@ -42,7 +35,7 @@
 // one is refused rather than overwritten, every other Stop hook is left alone,
 // and the write is atomic.
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { join, dirname, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
@@ -52,97 +45,17 @@ import { spawn } from "node:child_process";
 // means. Same file the user's original unconditional hook used.
 const SOUND = "/System/Library/Sounds/Glass.aiff";
 
-// The report kinds that mean "this worker is parked waiting for the person" --
-// every one of these dings. `conflict` is included deliberately: a worker whose
-// branch conflicts is parked exactly like one asking a question, waiting for the
-// person to attach and give the resolution (pir-worker contract). The routine
-// kinds -- `implemented`, `done` -- are the ones we silence.
-const NEEDS_PERSON = new Set(["question", "decision", "conflict"]);
-
-const WORKTREES = "/.claude/worktrees/";
-
-// From a session cwd, the worker it belongs to, or null for anything that is not
-// a PIR worker. Matches the FIRST `.claude/worktrees/` segment and reads the
-// `pir-{plan}-T{nn}` folder right after it -- the worker may cd deeper, so we
-// take the folder, not the whole tail. The `-T{nn}` suffix anchors the plan, so
-// a plan slug with its own dashes (`remote-grant`) is captured whole.
-export function workerContext(cwd) {
-  if (typeof cwd !== "string" || cwd === "") return null;
-  const i = cwd.indexOf(WORKTREES);
-  if (i < 0) return null;
-  const main = cwd.slice(0, i);
-  const folder = cwd.slice(i + WORKTREES.length).split("/")[0];
-  const m = folder.match(/^pir-(.+)-T(\d+)$/);
-  if (!m) return null;
-  return { main, plan: m[1], task: `T${m[2]}` };
+// True when pir launched this session. pir's launcher sets `PIR_RUN=1`; a "0"
+// or empty value is read as unset, so a person can force the ding back on.
+export function isPirSession(env) {
+  const v = env?.PIR_RUN;
+  return typeof v === "string" && v !== "" && v !== "0";
 }
 
-// The kind out of a report body, or null. Prefer the machine header the worker
-// is contracted to write; fall back to a bare `kind:` marker in case the header
-// was malformed but the body still names it (the pir-worker escape hatch).
-export function extractKind(text) {
-  if (typeof text !== "string") return null;
-  const header = text.match(/\[pir:v1\s+kind=(\w+)/);
-  if (header) return header[1].toLowerCase();
-  const loose = text.match(/(?:^|\n)\s*kind:\s*(\w+)/i);
-  return loose ? loose[1].toLowerCase() : null;
-}
-
-const REPORT_TASK = (text, task) =>
-  typeof text === "string" && new RegExp(`\\btask=${task}\\b`).test(text);
-
-// The newest report for one task, as its kind -- or null when there is none we
-// can read. `deps` is injectable so the decision is testable without a disk.
-// Newest is decided by the report filename's leading `Date.now()` (the worker
-// writes `${ts}-${Txx}-${rand}.json`); mtime is the fallback when a name does
-// not carry a parseable timestamp.
-export function latestKind(main, plan, task, deps = { readdirSync, readFileSync, statSync }) {
-  const dir = join(main, "plans", plan, ".parallel", "control", "reports");
-  let names;
-  try {
-    names = deps.readdirSync(dir).filter((n) => n.endsWith(".json"));
-  } catch {
-    return null; // no reports dir yet
-  }
-  const rows = [];
-  for (const name of names) {
-    let text;
-    try {
-      const raw = deps.readFileSync(join(dir, name), "utf8");
-      text = JSON.parse(raw)?.text;
-    } catch {
-      continue; // a half-written or foreign file: skip, never throw
-    }
-    // The folder holds every task's reports, so filter to this one. Match the
-    // header's `task=` first; fall back to the filename's `-{Txx}-` segment.
-    if (!REPORT_TASK(text, task) && !name.includes(`-${task}-`)) continue;
-    const ts = Number.parseInt(name, 10);
-    let order = Number.isFinite(ts) ? ts : NaN;
-    if (!Number.isFinite(order)) {
-      try { order = deps.statSync(join(dir, name)).mtimeMs; } catch { order = 0; }
-    }
-    rows.push({ order, kind: extractKind(text) });
-  }
-  if (rows.length === 0) return null;
-  rows.sort((a, b) => b.order - a.order);
-  return rows[0].kind;
-}
-
-// The whole decision, pure. `readLatestKind` is injected so the branch is
-// testable; the default reads disk.
-export function decideSound(input, readLatestKind = latestKind) {
-  const ctx = workerContext(input?.cwd);
-  // Not a PIR worker -- the user's own session, or an ordinary agent. Behave
-  // exactly as the old unconditional hook did.
-  if (!ctx) return { play: true, reason: "not a pir worker" };
-
-  const kind = readLatestKind(ctx.main, ctx.plan, ctx.task);
-  if (kind && NEEDS_PERSON.has(kind)) {
-    return { play: true, reason: `worker parked for the person (kind=${kind})` };
-  }
-  // A recognised worker that is done (or whose report we could not read) is the
-  // case the user asked to silence.
-  return { play: false, reason: kind ? `worker routine (kind=${kind})` : "worker, no needs-person report" };
+// The whole decision, pure: the environment arrives as an argument.
+export function decideSound(env) {
+  if (isPirSession(env)) return { play: false, reason: "pir session" };
+  return { play: true, reason: "not a pir session" };
 }
 
 function play() {
@@ -239,16 +152,10 @@ function uninstall({ settingsPath }) {
 // ------------------------------------------------------------------ main ---
 
 function runHook() {
-  let input;
-  try {
-    input = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    // No / bad hook input: fall back to the old unconditional ding rather than
-    // swallow a notification the user was relying on.
-    play();
-    return;
-  }
-  if (decideSound(input).play) play();
+  // The decision reads only the environment; stdin is drained so Claude Code
+  // never sees a broken pipe, and its content does not matter.
+  try { readFileSync(0); } catch { /* no stdin: still decide */ }
+  if (decideSound(process.env).play) play();
 }
 
 function main() {
