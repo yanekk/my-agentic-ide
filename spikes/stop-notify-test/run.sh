@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Tests for the selective Stop-hook notification sound: cockpit-stop-notify.mjs,
-# which dings on every session stop EXCEPT a PIR worker that finished its task,
-# while still dinging on a worker parked waiting for the person.
+# which dings on every session stop EXCEPT one pir launched (PIR_RUN set).
 #
 # Nothing here needs WezTerm or a real machine -- the hook is a plain
 # stdin/stdout filter Claude Code runs, and every disk read is injected in the
@@ -47,6 +46,27 @@ for bad in 'not json' '{}' '{"cwd":123}' '[]' 'null' ''; do
   printf '%s' "$bad" | PATH="$SHIM:$PATH" node "$HOOK" >/dev/null 2>&1
   same "hook survives input: [$bad]" "$?" "0"
 done
+
+echo
+echo "== the hook end to end: pir sessions are silent, others ding =="
+# A recording afplay replaces the no-op one, so the real process is what is
+# judged: stdin, environment and the detached spawn together.
+REC="$SHIM/played"
+printf '#!/bin/sh\necho played >> "%s"\n' "$REC" > "$SHIM/afplay"
+chmod +x "$SHIM/afplay"
+played_after() { # $1 = PIR_RUN value or "unset"
+  rm -f "$REC"
+  if [ "$1" = unset ]; then
+    printf '{"cwd":"/r"}' | env -u PIR_RUN PATH="$SHIM:$PATH" node "$HOOK" >/dev/null 2>&1
+  else
+    printf '{"cwd":"/r"}' | PIR_RUN="$1" PATH="$SHIM:$PATH" node "$HOOK" >/dev/null 2>&1
+  fi
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$REC" ] && break; sleep 0.1; done
+  [ -f "$REC" ] && echo yes || echo no
+}
+same "an ordinary session plays the sound" "$(played_after unset)" "yes"
+same "a pir session (PIR_RUN=1) plays nothing" "$(played_after 1)" "no"
+same "PIR_RUN=0 plays the sound" "$(played_after 0)" "yes"
 
 echo
 echo "== the user's settings.json is never touched by a test =="
