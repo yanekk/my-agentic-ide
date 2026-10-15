@@ -49,7 +49,7 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
   15a 15b 15c 15d 15e 15f 15g 15h 15i 15j 15k 15k2 15l \
   16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o \
   17a 17b 17c 17d 17e 17f 17g 17h 17i
-chain footer 12 12b 12c 12d
+chain footer 12 12b 12c 12d 12e
 chain agenda 13 13b 13c
 chain dashboard 14 14d 14b 14c
 chain usage 15
@@ -3716,6 +3716,40 @@ same "...each borrowing focus" \
      "$(grep -cxF "ARGV: cli activate-pane --pane-id 9" "$PIN/calls.log")" "3"
 same "...and handing it straight back" \
      "$(grep -cxF "ARGV: cli activate-pane --pane-id 20" "$PIN/calls.log")" "3"
+fi
+
+if section 12e "the strip holds its width -- the shell absorbs a drag, not the strip"; then
+# WezTerm hands every resize of the shell's region to the rightmost pane, the strip
+# (12 -> 1 col on a 30-col drag, measured): it must pin itself back to STRIP_COLS
+# (20), shrinking with Right and growing with Left, bounded like the footer. Alone
+# in a tab it is parked and must not touch focus at all.
+# Its own state dir: the chains run concurrently, and $SD's terminals.json is the
+# main chain's daemon's to write.
+SP="$T/strippin"; mkdir -p "$SP/state"
+printf '{"agent":"test agent","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' > "$SP/state/terminals.json"
+strippin() {  # <cols> <panestate> -> runs the strip for one settle + three ticks
+  printf "$2" > "$SP/panes"; echo 20 > "$SP/active"; : > "$SP/calls.log"
+  ( CALLS="$SP/calls.log" PANESTATE="$SP/panes" ACTIVE="$SP/active" WEZTERM_PANE=9 COLUMNS="$1" \
+    COCKPIT_DIR="$SP/state" node "$ROOT/bin/cockpit-strip.mjs" > "$SP/out" 2>&1 ) &
+  SPP=$!
+}
+sadj() { grep -cxF "ARGV: cli adjust-pane-size --pane-id 9 --amount $1" "$SP/calls.log"; }
+strippin 31 '9 0 sh\n20 0 sh\n'
+wide3() { [ "$(sadj '11 Right')" -ge 3 ]; }
+waituntil 12 "three shrink attempts" wide3
+sleep 2.6; kill "$SPP" 2>/dev/null; wait "$SPP" 2>/dev/null
+same "a strip widened to 31 is shrunk by 11 three times, then left"  "$(sadj '11 Right')" "3"
+same "...each borrowing focus and handing it straight back" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 20" "$SP/calls.log")" "3"
+strippin 1 '9 0 sh\n20 0 sh\n'
+narrow() { [ "$(sadj '19 Left')" -ge 1 ]; }
+waituntil 6 "a grow attempt" narrow
+kill "$SPP" 2>/dev/null; wait "$SPP" 2>/dev/null
+same "a strip squashed to one column grows back by 19"  "$(sadj '19 Left')" "1"
+strippin 31 '9 1 sh\n20 0 sh\n'
+sleep 2.8; kill "$SPP" 2>/dev/null; wait "$SPP" 2>/dev/null
+same "a parked strip (alone in its tab) never resizes"   "$(grep -c 'adjust-pane-size' "$SP/calls.log")" "0"
+same "...and never takes focus"                         "$(grep -c 'activate-pane' "$SP/calls.log")" "0"
 fi
 
 }  # run_footer

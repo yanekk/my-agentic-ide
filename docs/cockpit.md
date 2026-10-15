@@ -224,11 +224,28 @@ SIGWINCH (`process.stdout.rows`), debounced 250ms so a window drag is corrected
 once at the size it settles at, and each drift height is attempted **once**:
 focus is borrowed for ~100ms per attempt, so a drift that cannot be fixed (no
 `wezterm` on PATH, a pane already at its minimum) must not be retried on every
-tick. Measured settling time from a 9-row drift back to 1: ~300ms.
+tick. Measured settling time from a 9-row drift back to 1: ~300ms. (Since
+raised to three tries per height; see the comment at `PIN_TRIES`.)
 
 Pane swaps were ruled out as a cause first: parking and restoring the diff pane,
 the terminal, and a full diff-slot rebuild all leave the footer's height exactly
 where it was (`spikes/pane-swap/RESULTS.md`).
+
+#### The strip holds its width the same way
+
+The strip is split off the shell, so the two share one region, and WezTerm gives
+the **whole** of any resize of that region to its rightmost pane. Measured
+2026-10-15 on 20240203: dragging the Claude|terminal border 30 columns right took
+the strip from 12 columns to 1 — off the screen — and 20 columns left took it to
+32; the shell stayed 47 both times. So the strip is split `--cells 20`
+(`STRIP_COLS`) in the layout script and both daemon re-splits, and
+`cockpit-strip.mjs` pins itself back with the footer's focus-and-adjust (`Right`
+to shrink, `Left` to grow), which moves only its **left** border: the shell
+absorbs the drag. A deliberate drag of the shell|strip border is undone the same
+way. Two details: squashed to one column the pty reports `columns` **0**, which
+must read as tiny rather than unknown, or the strip stays hidden; and a strip
+alone in its tab is parked (an empty-diff-slot rebuild), where it neither resizes
+nor takes focus, since activating it would pull the GUI onto the parked tab.
 
 ## Notes
 
@@ -1674,5 +1691,5 @@ one**, the daemon leaves the panes where they are rather than guessing.
   reflects the shell's prompt string (usually the cwd), which makes a useless
   name. The strip resolves the process from the tty (`ps -t`) on every repaint,
   so the label tracks the running command live. Two terminals running the same
-  program are told apart by their number. The strip is ~12 columns, so a long
+  program are told apart by their number. The strip is 20 columns, so a long
   process name is clipped.

@@ -1421,7 +1421,7 @@ function insertIntoSlot(anchor, spec, cockpitTab) {
     out = wez(["split-pane", "--right", "--percent", "50", "--pane-id", String(slotFleetPane()), ...tail]);
     const gap = Number.parseInt((out ?? "").trim(), 10);
     if (strip !== undefined && Number.isInteger(gap)) {
-      wez(["split-pane", "--right", "--percent", "20", "--pane-id", String(gap), "--move-pane-id", String(strip)]);
+      wez(["split-pane", "--right", "--cells", "20", "--pane-id", String(gap), "--move-pane-id", String(strip)]);
     }
   }
   const id = Number.parseInt((out ?? "").trim(), 10);
@@ -1899,7 +1899,7 @@ function rebuildDiffSlot(cockpitTab) {
          "--pane-id", String(slotFleetPane()), "--move-pane-id", String(term)]);
   }
   if (strip !== undefined) {
-    wez(["split-pane", "--right", "--percent", "20",
+    wez(["split-pane", "--right", "--cells", "20",
          "--pane-id", String(term ?? slotFleetPane()), "--move-pane-id", String(strip)]);
   }
   const id = Number.parseInt((out ?? "").trim(), 10);

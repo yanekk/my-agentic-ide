@@ -11,7 +11,8 @@
 //
 // Both are PURE DISPLAY: they never run a shell command and never move a pane, so
 // cockpitd can own them as fixed panes it never parks. The one thing the footer
-// does touch is its OWN height -- see pinHeight() -- and nothing else's.
+// does touch is its OWN height, and the strip its OWN width -- see pin() -- and
+// nothing else's.
 //
 // The daemon writes ~/.claude/cockpit/terminals.json on every change (which
 // agent, which terminals, which is active); both modes repaint from it. The
@@ -131,7 +132,8 @@ function wez(args) {
   } catch { return null; }
 }
 
-// The row count of the last correction we tried, and how many tries it has had.
+// The offset (rows or columns from the right size) of the last correction we
+// tried, and how many tries it has had.
 // Focus is borrowed for ~100ms per attempt, so a drift that cannot be fixed (no
 // wezterm cli, a pane at its minimum) must not be retried on every tick. But ONE
 // try per height was too few: attaching an agent re-splits the slots, the footer
@@ -144,13 +146,33 @@ const PIN_TRIES = 3;
 let pinned = 0;
 let pinTries = 0;
 
-function pinHeight() {
-  // LINES, like COLUMNS for the width: the seam a piped test render (no TTY) uses
-  // to stand in for an oversized pane.
-  const rows = process.stdout.rows || Number(process.env.LINES) || 1;
-  if (rows <= 1) { pinned = 0; pinTries = 0; return; }   // right size: arm for the next drift
+// The strip has the same problem sideways, and worse. It is split off the shell,
+// so the shell and the strip share one region, and when that region is resized
+// -- the person dragging the Claude|terminal border, or the window -- WezTerm takes
+// or gives the WHOLE change at the rightmost pane: dragged 30 columns right the
+// strip went 12 -> 1 and vanished, dragged 20 left it went 12 -> 32, the shell
+// staying 47 both times (measured on 20240203, 2026-10-15). So the strip holds
+// itself at STRIP_COLS by the same focus-and-adjust, which moves only its LEFT
+// border: the shell absorbs the drag, as the person meant it to.
+const STRIP_COLS = 20;
+
+function pin() {
+  // LINES/COLUMNS: the seams a piped test render (no TTY) uses to stand in for a
+  // pane of the wrong size.
+  let off, dir;
+  if (FOOTER) {
+    const rows = process.stdout.rows || Number(process.env.LINES) || 1;
+    off = rows - 1; dir = "Down";
+  } else {
+    // Squashed to one column the pty reports 0, which `||` would read as unknown
+    // and leave the strip invisible for ever (measured): on a TTY, 0 is tiny.
+    const cols = process.stdout.isTTY ? Math.max(1, process.stdout.columns || 0)
+      : Number(process.env.COLUMNS) || STRIP_COLS;
+    off = cols - STRIP_COLS; dir = off > 0 ? "Right" : "Left";
+  }
+  if (off === 0) { pinned = 0; pinTries = 0; return; }  // right size: arm for the next drift
   if (!Number.isInteger(SELF)) return;
-  if (rows !== pinned) { pinned = rows; pinTries = 0; }
+  if (off !== pinned) { pinned = off; pinTries = 0; }
   if (pinTries >= PIN_TRIES) return;
   pinTries++;
 
@@ -160,12 +182,16 @@ function pinHeight() {
   try { table = JSON.parse(out); } catch { return; }
   const me = table.find((p) => p.pane_id === SELF);
   if (!me) return;
+  // Alone in a tab means PARKED (the daemon parks the strip while it rebuilds an
+  // empty diff slot): a lone pane cannot be resized, and activating it would pull
+  // the GUI onto that parked tab.
+  if (!table.some((p) => p.tab_id === me.tab_id && p.pane_id !== SELF)) return;
   // WezTerm reports one active pane per TAB, so only this tab's counts.
   const active = table.find((p) => p.tab_id === me.tab_id && p.is_active);
 
   const borrow = active !== undefined && active.pane_id !== SELF;
   if (borrow) wez(["activate-pane", "--pane-id", String(SELF)]);
-  wez(["adjust-pane-size", "--pane-id", String(SELF), "--amount", String(rows - 1), "Down"]);
+  wez(["adjust-pane-size", "--pane-id", String(SELF), "--amount", String(Math.abs(off)), dir]);
   if (borrow) wez(["activate-pane", "--pane-id", String(active.pane_id)]);
   render();                                     // repaint over anything echoed
 }
@@ -173,9 +199,8 @@ function pinHeight() {
 // A window drag fires a resize per frame; correct the size it settles at.
 let pinTimer = null;
 function schedulePin() {
-  if (!FOOTER) return;
   clearTimeout(pinTimer);
-  pinTimer = setTimeout(pinHeight, 250);
+  pinTimer = setTimeout(pin, 250);
 }
 
 // The visible column span of each diff-mode label as last drawn, so a click in
@@ -347,7 +372,7 @@ function renderFooter() {
 
   // With a usage segment present it must survive to the far right on ONE row: the
   // footer already runs ~150 cols before usage, so on a narrow window the whole
-  // line would wrap and break pinHeight's one-row invariant. Drop parts in this
+  // line would wrap and break pin()'s one-row invariant. Drop parts in this
   // order (DESIGN 2.2) -- the dim secondary key hints, then the primary key hints,
   // then the agent name -- never the usage readout or the diff labels. Pick the
   // widest level that fits; a minimum one-space spacer keeps diff and usage apart.
@@ -474,9 +499,9 @@ const ADD = "[+ add]";                                // open-another-terminal b
 
 // --- the strip: a vertical list of the agent's terminals --------------------
 function renderStrip() {
-  const cols = process.stdout.columns || 12;
+  const cols = process.stdout.columns || STRIP_COLS;
   const { terminals } = read();
-  const rule = "─".repeat(Math.min(cols, 12));
+  const rule = "─".repeat(Math.min(cols, STRIP_COLS));
   const clip = (s) => (s.length > cols ? s.slice(0, cols) : s);
   const row = (s, active) => `${active ? `${ESC}7m` : ""}${clip(s)}${ESC}0m${ESC}K\r\n`;
 
@@ -496,7 +521,7 @@ function renderStrip() {
     for (const t of terminals) {
       const base = `${t.active ? "▶" : " "}${t.n} ${procOf(t.tty) ?? "sh"}`;
       if (showClose) {
-        // Right-align [x] at the pane's edge; the strip is narrow (~12 cols), so
+        // Right-align [x] at the pane's edge; the strip is narrow (STRIP_COLS), so
         // clip the process name rather than let a long one push [x] off-screen.
         const budget = cols - CLOSE.length - 1;
         const label = base.length > budget ? base.slice(0, budget) : base;

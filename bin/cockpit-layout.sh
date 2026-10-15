@@ -162,7 +162,10 @@ SHELL_PANE=$(wezterm cli split-pane --right --percent 50 --pane-id "$FLEET" --cw
 # and this renders it -- so the daemon never parks it. Run through a login shell
 # so it inherits Homebrew's PATH and finds node; exec so no shell lingers under
 # it. If node is missing the pane just shows the error, which is fine.
-STRIP=$(wezterm cli split-pane --right --percent 20 --pane-id "$SHELL_PANE" --cwd "$REPO" \
+# Sized in CELLS, like the footer, and held there by cockpit-strip.mjs: WezTerm
+# gives every resize of the shell's region to this rightmost pane, so a drag of
+# the Claude|terminal border would otherwise squash the strip off the screen.
+STRIP=$(wezterm cli split-pane --right --cells 20 --pane-id "$SHELL_PANE" --cwd "$REPO" \
        -- "$LOGIN_SHELL" -lc "exec node '$HERE/cockpit-strip.mjs'")
 
 # split-pane prints the new pane id; anything else means the layout is not what
