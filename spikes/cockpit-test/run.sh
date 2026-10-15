@@ -252,15 +252,18 @@ case "$sub" in
     # $PANECWD (lines "<pane> <file-url>") overrides a pane's reported cwd, so a
     # test can model a shell that stayed put while its agent moved on; default is
     # file:///tmp. tty_name is emitted for the idle check (which shells out to the
-    # `ps` stub below).
+    # `ps` stub below). $PANEGEOM (lines "<pane> <left_col> <top_row> <cols>") adds
+    # a pane's position, for the strip's off-screen check; without it none is sent.
     awk 'BEGIN{ printf "["
                 while ((getline l < ENVIRON["TITLELAG"]) > 0) lag[l] = 1
                 while ((getline a < ENVIRON["ACTIVE"]) > 0) active = a
-                while ((getline c < ENVIRON["PANECWD"]) > 0) { n = split(c, kv, " "); if (n >= 2) cwd[kv[1]] = kv[2] } }
+                while ((getline c < ENVIRON["PANECWD"]) > 0) { n = split(c, kv, " "); if (n >= 2) cwd[kv[1]] = kv[2] }
+                while ((getline g < ENVIRON["PANEGEOM"]) > 0) { n = split(g, gv, " "); if (n >= 4) geom[gv[1]] = sprintf(",\"left_col\":%s,\"top_row\":%s", gv[2], gv[3]); if (n >= 4) gcols[gv[1]] = gv[4] } }
          { t = ($1 in lag) ? "sh" : $3
            act = ($1 == active) ? "true" : "false"
            u = ($1 in cwd) ? cwd[$1] : "file:///tmp"
-           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":40},\"title\":\"%s\",\"tty_name\":\"/dev/ttys%s\",\"cwd\":\"%s\",\"is_active\":%s}", (NR>1 ? "," : ""), $2, $1, t, $1, u, act }
+           cols = ($1 in gcols) ? gcols[$1] : 40
+           printf "%s{\"window_id\":0,\"tab_id\":%s,\"pane_id\":%s,\"workspace\":\"default\",\"size\":{\"rows\":10,\"cols\":%s},\"title\":\"%s\",\"tty_name\":\"/dev/ttys%s\",\"cwd\":\"%s\",\"is_active\":%s%s}", (NR>1 ? "," : ""), $2, $1, cols, t, $1, u, act, geom[$1] }
          END{printf "]\n"}' "$PANESTATE"
     ;;
   split-pane)
@@ -356,6 +359,7 @@ if [ -s "$PSBUSY" ]; then printf 'R+ %s\n' "$(cat "$PSBUSY")"; else printf 'Ss+ 
 PS
 chmod +x "$T/bin/ps"
 export PANECWD="$T/panecwd"; : > "$PANECWD"
+export PANEGEOM="${PANEGEOM:-/dev/null}"
 export PSBUSY="$T/psbusy"; : > "$PSBUSY"
 export PSFG="$T/psfg"; : > "$PSFG"
 export PSTTY="$T/pstty"; : > "$PSTTY"
@@ -3729,7 +3733,7 @@ SP="$T/strippin"; mkdir -p "$SP/state"
 printf '{"agent":"test agent","diffMode":"uncommitted","customRef":null,"terminals":[{"n":1,"active":true,"tty":null}]}\n' > "$SP/state/terminals.json"
 strippin() {  # <cols> <panestate> -> runs the strip for one settle + three ticks
   printf "$2" > "$SP/panes"; echo 20 > "$SP/active"; : > "$SP/calls.log"
-  ( CALLS="$SP/calls.log" PANESTATE="$SP/panes" ACTIVE="$SP/active" WEZTERM_PANE=9 COLUMNS="$1" \
+  ( CALLS="$SP/calls.log" PANESTATE="$SP/panes" ACTIVE="$SP/active" WEZTERM_PANE=9 COLUMNS="$1" PANEGEOM="${PANEGEOM:-/dev/null}" \
     COCKPIT_DIR="$SP/state" node "$ROOT/bin/cockpit-strip.mjs" > "$SP/out" 2>&1 ) &
   SPP=$!
 }
@@ -3750,6 +3754,20 @@ strippin 31 '9 1 sh\n20 0 sh\n'
 sleep 2.8; kill "$SPP" 2>/dev/null; wait "$SPP" 2>/dev/null
 same "a parked strip (alone in its tab) never resizes"   "$(grep -c 'adjust-pane-size' "$SP/calls.log")" "0"
 same "...and never takes focus"                         "$(grep -c 'activate-pane' "$SP/calls.log")" "0"
+# Dragged past the window edge: the fleet slot (7) holds all but a column and the
+# shell (8) and strip (9) sit beyond it, the strip reading its full 20 columns. The
+# strip must pull the fleet pane's border back by the overflow (9 @139+20 in a
+# 120-col tab: 39), borrowing the fleet pane's focus, not its own.
+printf '1 0 0 120\n7 0 10 118\n8 119 10 20\n9 139 10 20\n' > "$SP/geom"
+PANEGEOM="$SP/geom" strippin 20 '1 0 sh\n7 0 sh\n8 0 sh\n9 0 sh\n20 0 sh\n'
+overed() { [ "$(grep -cxF "ARGV: cli adjust-pane-size --pane-id 7 --amount 39 Left" "$SP/calls.log")" -ge 1 ]; }
+waituntil 6 "an overflow pull-back" overed
+kill "$SPP" 2>/dev/null; wait "$SPP" 2>/dev/null
+same "a strip past the window edge pulls the fleet pane back by the overflow" \
+     "$(grep -cxF "ARGV: cli adjust-pane-size --pane-id 7 --amount 39 Left" "$SP/calls.log")" "1"
+same "...focusing the fleet pane for it, not the strip" \
+     "$(grep -cxF "ARGV: cli activate-pane --pane-id 7" "$SP/calls.log")" "1"
+same "...and its own width, which looked right, is not touched" "$(grep -c -- '--pane-id 9 --amount' "$SP/calls.log")" "0"
 fi
 
 }  # run_footer

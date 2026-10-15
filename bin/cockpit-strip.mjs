@@ -143,7 +143,7 @@ function wez(args) {
 // tried again (seen 2026-10-01: stuck at two rows for the life of the attach). So
 // a height gets PIN_TRIES goes, one per 2s tick, which is after the swap settles.
 const PIN_TRIES = 3;
-let pinned = 0;
+let pinned = null;
 let pinTries = 0;
 
 // The strip has the same problem sideways, and worse. It is split off the shell,
@@ -156,30 +156,62 @@ let pinTries = 0;
 // border: the shell absorbs the drag, as the person meant it to.
 const STRIP_COLS = 20;
 
+// Dragged PAST the window edge it is worse again: WezTerm gives the Claude pane
+// all but a column and keeps the shell and the strip at their old widths, laid
+// out beyond the edge (measured: fleet @0+118, shell @119+47, strip @167+1 in a
+// 120-col tab). The strip's own width can then look right while nothing of it
+// is on screen, and growing it only takes from an off-screen shell. So the
+// strip first checks its right edge against the tab's and, past it, pulls the
+// pane on the left of its row (the fleet slot) back by the overflow; the width
+// pin then finishes on the next tick.
+function overflowFix(table, me) {
+  const row = table.filter((p) => p.tab_id === me.tab_id);
+  if (!Number.isInteger(me.left_col)) return null;
+  // The footer (and the diff pane) span the tab, so the widest pane at column 0
+  // is the tab's width; the fleet slot is the column-0 pane on the strip's row.
+  const width = Math.max(...row.filter((p) => p.left_col === 0).map((p) => p.size.cols));
+  const over = me.left_col + me.size.cols - width;
+  if (!(over > 0)) return null;
+  const left = row.find((p) => p.left_col === 0 && p.top_row === me.top_row && p.pane_id !== SELF);
+  return left ? { pane: left.pane_id, amount: over, dir: "Left", key: `over ${over}` } : null;
+}
+
 function pin() {
+  if (!Number.isInteger(SELF) && !FOOTER) return;
   // LINES/COLUMNS: the seams a piped test render (no TTY) uses to stand in for a
   // pane of the wrong size.
-  let off, dir;
+  let fix = null;
+  let table = null;
   if (FOOTER) {
     const rows = process.stdout.rows || Number(process.env.LINES) || 1;
-    off = rows - 1; dir = "Down";
+    if (rows > 1) fix = { pane: SELF, amount: rows - 1, dir: "Down", key: `rows ${rows}` };
   } else {
-    // Squashed to one column the pty reports 0, which `||` would read as unknown
-    // and leave the strip invisible for ever (measured): on a TTY, 0 is tiny.
-    const cols = process.stdout.isTTY ? Math.max(1, process.stdout.columns || 0)
-      : Number(process.env.COLUMNS) || STRIP_COLS;
-    off = cols - STRIP_COLS; dir = off > 0 ? "Right" : "Left";
+    // The overflow check needs the pane table on every tick: a strip pushed off
+    // screen gets no resize of its own to wake it.
+    const out = wez(["list", "--format", "json"]);
+    try { table = out === null ? null : JSON.parse(out); } catch { table = null; }
+    const me = table?.find((p) => p.pane_id === SELF);
+    if (me) fix = overflowFix(table, me);
+    if (!fix) {
+      // Squashed to one column the pty reports 0, which `||` would read as unknown
+      // and leave the strip invisible for ever (measured): on a TTY, 0 is tiny.
+      const cols = process.stdout.isTTY ? Math.max(1, process.stdout.columns || 0)
+        : Number(process.env.COLUMNS) || STRIP_COLS;
+      const off = cols - STRIP_COLS;
+      if (off !== 0) fix = { pane: SELF, amount: Math.abs(off), dir: off > 0 ? "Right" : "Left", key: `cols ${cols}` };
+    }
   }
-  if (off === 0) { pinned = 0; pinTries = 0; return; }  // right size: arm for the next drift
+  if (!fix) { pinned = null; pinTries = 0; return; }  // right size: arm for the next drift
   if (!Number.isInteger(SELF)) return;
-  if (off !== pinned) { pinned = off; pinTries = 0; }
+  if (fix.key !== pinned) { pinned = fix.key; pinTries = 0; }
   if (pinTries >= PIN_TRIES) return;
   pinTries++;
 
-  const out = wez(["list", "--format", "json"]);
-  if (out === null) return;
-  let table;
-  try { table = JSON.parse(out); } catch { return; }
+  if (table === null) {
+    const out = wez(["list", "--format", "json"]);
+    if (out === null) return;
+    try { table = JSON.parse(out); } catch { return; }
+  }
   const me = table.find((p) => p.pane_id === SELF);
   if (!me) return;
   // Alone in a tab means PARKED (the daemon parks the strip while it rebuilds an
@@ -189,9 +221,11 @@ function pin() {
   // WezTerm reports one active pane per TAB, so only this tab's counts.
   const active = table.find((p) => p.tab_id === me.tab_id && p.is_active);
 
-  const borrow = active !== undefined && active.pane_id !== SELF;
-  if (borrow) wez(["activate-pane", "--pane-id", String(SELF)]);
-  wez(["adjust-pane-size", "--pane-id", String(SELF), "--amount", String(Math.abs(off)), dir]);
+  // adjust-pane-size resizes the ACTIVE pane whatever --pane-id says, so the pane
+  // being moved is focused for the call and focus handed straight back.
+  const borrow = active !== undefined && active.pane_id !== fix.pane;
+  if (borrow) wez(["activate-pane", "--pane-id", String(fix.pane)]);
+  wez(["adjust-pane-size", "--pane-id", String(fix.pane), "--amount", String(fix.amount), fix.dir]);
   if (borrow) wez(["activate-pane", "--pane-id", String(active.pane_id)]);
   render();                                     // repaint over anything echoed
 }

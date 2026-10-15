@@ -247,6 +247,16 @@ must read as tiny rather than unknown, or the strip stays hidden; and a strip
 alone in its tab is parked (an empty-diff-slot rebuild), where it neither resizes
 nor takes focus, since activating it would pull the GUI onto the parked tab.
 
+Dragged **past** the window edge it is a different state: WezTerm gives the
+Claude pane all but a column and keeps the shell and strip at their old widths,
+laid out beyond the edge (fleet `@0+118`, shell `@119+47`, strip `@167+1` in a
+120-column tab). The strip's width may read correctly while none of it is on
+screen. So on every tick the strip reads `left_col` from `wezterm cli list`
+and, when its right edge is past the tab's (the widest column-0 pane, the
+footer), focuses the column-0 pane on its own row and adjusts it `Left` by the
+overflow; the width pin finishes on the next tick. A 30-column drag already
+reaches this state, so before this check the "recovered" strip was off screen.
+
 ## Notes
 
 The fleet view's top pane is a 75/25 split: the [BitBucket
