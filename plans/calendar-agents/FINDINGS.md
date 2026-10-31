@@ -8,6 +8,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 🐞 | T01 review: two more cockpit-test races. A healthy pir poll past the 2 s limit broke exact `usage: pir service` counts; section 13 cleared `GHITS` after `makestale`. Both reproduced and fixed; two full `ALL PASS`. |
 | 2026-10-31 | 🐞 | Section 15 flake was section 12b's Bedrock setting in a run-wide file, plus a poll miscount. After the fix `ONLY=12b,15` passed 22 of 22; two full runs printed `ALL PASS` (934). Before: 6 of 8 failed. |
 | 2026-10-31 | 📌 | Plan review session had no Google Calendar tools after the owner authenticated the connector mid-session. Whether a later worker gets them is unmeasured; T06 checks first. |
 | 2026-10-31 | 🐞 | `spikes/cockpit-test` section 15 failed 2 of 4 fresh-copy runs at plan review: `5h 97%`, `7d 77%` absent from the footer. Passed twice with 934 checks. Pre-existing on `main`; cause not found. |

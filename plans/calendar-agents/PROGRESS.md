@@ -19,7 +19,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | long-command-spike | — | ⬜ | |
-| T01 | cockpit-suite-flake | — | 🔍 | Two test races fixed in `run.sh`: footer chain has its own settings file; hung polls are stamped. No check added, count stays 934. Deviation: repeated `ONLY=12b,15`, since `ONLY=15` alone never fails and `stress.sh` unsets `ONLY`. Two full runs, approved in session. |
+| T01 | cockpit-suite-flake | — | ✅ | Reviewed: builder's two fixes held by mutation. Review fixed two more races: exact log-line counts in section 15, `GHITS` cleared after `makestale` in section 13, both reproduced. `ONLY=12b,15` 20 of 20 loaded; two full `ALL PASS` (934) after the fixes. |
 | T02 | job-decisions | T00 | ⬜ | |
 | T03 | jobs-calendar | — | ⬜ | |
 | T04 | job-starter | T02, T03 | ⬜ | |
@@ -28,7 +28,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** T01
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
