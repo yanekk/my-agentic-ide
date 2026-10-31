@@ -8,9 +8,9 @@
 
 **Plan reviewed:** 2026-10-31 — 15 fixed, 7 decided with the user
 
-**Status:** T00 implemented, awaiting review.
+**Status:** T00 reviewed. T01 to T06 not started.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** review T00; T02 waits on it.
+**Next `pir-work` will:** T02, now unblocked, with its preamble taken from T00's FINDINGS row. T01 and T03 can run beside it.
 
 ## Tasks
 
@@ -18,7 +18,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | long-command-spike | — | 🔍 | Spike done, four answers in FINDINGS. Suite passed in 75m08s; §2.5 wording holds. Deviation: first run started at `origin/main`, so owner set `worktree.baseRef: head` globally and it reran. Scripts, agents, worktree removed. |
+| T00 | long-command-spike | — | ✅ | Suite passed 75m08s; §2.5 wording holds; worktree base now `worktree.baseRef: head` by owner's choice, set globally. Review clean, no fix commit: all claims checked against both spike transcripts, poll log, `~/.claude/settings.json`, `superfrog-re` worktree and branch lists. Notes only, no mutation. |
 | T01 | cockpit-suite-flake | — | ⬜ | |
 | T02 | job-decisions | T00 | ⬜ | |
 | T03 | jobs-calendar | — | ⬜ | |
@@ -28,7 +28,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** T00
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
