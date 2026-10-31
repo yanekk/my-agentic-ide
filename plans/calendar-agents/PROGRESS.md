@@ -8,9 +8,9 @@
 
 **Plan reviewed:** 2026-10-31 — 15 fixed, 7 decided with the user
 
-**Status:** T00 reviewed. T01 to T06 not started.
+**Status:** T00, T01, T03 reviewed. T02, T04, T05, T06 not started.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T02, now unblocked, with its preamble taken from T00's FINDINGS row. T01 and T03 can run beside it.
+**Next `pir-work` will:** T02, now unblocked, with its preamble taken from T00's FINDINGS row.
 
 ## Tasks
 
@@ -19,9 +19,9 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | long-command-spike | — | ✅ | Suite passed 75m08s; §2.5 wording holds; worktree base now `worktree.baseRef: head` by owner's choice, set globally. Review clean, no fix commit: all claims checked against both spike transcripts, poll log, `~/.claude/settings.json`, `superfrog-re` worktree and branch lists. Notes only, no mutation. |
-| T01 | cockpit-suite-flake | — | ⬜ | |
+| T01 | cockpit-suite-flake | — | ✅ | |
 | T02 | job-decisions | T00 | ⬜ | |
-| T03 | jobs-calendar | — | ⬜ | |
+| T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ⬜ | |
 | T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
 | T06 | live-check | T00, T05 | ⬜ | |

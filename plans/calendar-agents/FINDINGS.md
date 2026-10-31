@@ -15,6 +15,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 | 2026-10-31 | 📌 | §2.5 long-command wording confirmed by T00: "Run long commands in the background with the longest time limit allowed and do not end your turn until they have finished." The agent's parked turn did no harm. |
 | 2026-10-31 | 📌 | `claude agents --json` showed `busy`/`working` on all 71 polls, parked turn included, then `idle`/`done`, listed without `--all`. An agent reporting it ran nothing ended `idle`/`blocked`, so `blocked` can mean a finished report. |
 | 2026-10-31 | 📌 | Guards seen in T00: a worktree session refused a compound git command ("too complex to verify"); the auto-mode classifier refused `start.sh` inside a compound command and allowed it alone. |
+| 2026-10-31 | 🐞 | T01 review: two more cockpit-test races. A healthy pir poll past the 2 s limit broke exact `usage: pir service` counts; section 13 cleared `GHITS` after `makestale`. Both reproduced and fixed; two full `ALL PASS`. |
+| 2026-10-31 | 🐞 | Section 15 flake was section 12b's Bedrock setting in a run-wide file, plus a poll miscount. After the fix `ONLY=12b,15` passed 22 of 22; two full runs printed `ALL PASS` (934). Before: 6 of 8 failed. |
+| 2026-10-31 | 🔄 | Owner decided: a calendar another slug holds as jobs is refused by `add --jobs` and `jobs on`, since the ledger keys on slug. A refused `add --jobs` keeps a new sign-in, despite the T03 doc's "nothing is written". |
+| 2026-10-31 | 📌 | `spikes/agenda-test` now has more checks than the `CLAUDE.md` count (637); not changed in T03. |
 | 2026-10-31 | 📌 | Plan review session had no Google Calendar tools after the owner authenticated the connector mid-session. Whether a later worker gets them is unmeasured; T06 checks first. |
 | 2026-10-31 | 🐞 | `spikes/cockpit-test` section 15 failed 2 of 4 fresh-copy runs at plan review: `5h 97%`, `7d 77%` absent from the footer. Passed twice with 934 checks. Pre-existing on `main`; cause not found. |
 | 2026-10-31 | 📌 | `superfrog-re` `HEAD` is `63726e85`, `origin/main` is `2140433c`, and untracked `engine/` sits in the checkout. T00 records which a `-w` worktree starts from. |

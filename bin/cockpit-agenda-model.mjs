@@ -179,8 +179,13 @@ function findSelf(attendees, selfEmail) {
  * `tz` places an all-day event's boundaries, and stands in for a timed event
  * whose stamp carries neither an offset nor a `timeZone` of its own. A timed
  * stamp with an offset needs neither and ignores both.
+ *
+ * `jobs` adds `description` (raw, "" when absent) and `creatorOwn`. Only a jobs
+ * calendar asks for them, so other calendars' meeting text is not stored in a second
+ * form. Without it the event carries neither field, and the absent `creatorOwn` is
+ * how the job tick tells a fetch that lacks them (calendar-agents DESIGN 2.3).
  */
-export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
+export function normaliseEvent(raw, { slug, tz, selfEmail, jobs } = {}) {
   if (!raw || typeof raw !== "object") return null;
 
   // A tombstone, not an event: cancelled entries stay in the response and are not
@@ -231,7 +236,7 @@ export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
 
   const title = String(raw.summary ?? "").trim() || NO_TITLE;
 
-  return {
+  const event = {
     id: raw.id ?? `${slug ?? ""}-${start}`,
     title,
     start,
@@ -239,6 +244,14 @@ export function normaliseEvent(raw, { slug, tz, selfEmail } = {}) {
     allDay,
     reply,
     slug,
+  };
+  if (!jobs) return event;
+  // The selfEmail guard is a security rule: with no account known and no creator
+  // address, a bare comparison is undefined === undefined and reads as "mine".
+  return {
+    ...event,
+    description: typeof raw.description === "string" ? raw.description : "",
+    creatorOwn: raw.creator?.self === true || (Boolean(selfEmail) && raw.creator?.email === selfEmail),
   };
 }
 
