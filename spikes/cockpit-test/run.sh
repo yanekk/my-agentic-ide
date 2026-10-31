@@ -50,7 +50,7 @@ chain main 1 2 3 3b 4 4b 4c 4d 5 5b "5b'" 5c "5c'" "5c''" 5d "5d'" "5d''" 5e "5e
   16a 16b 16c 16d 16e 16f 16g 16h 16i 16i2 16j 16k 16l 16m 16m3 16m2 16n 16o 16p 15m 15n 15o \
   17a 17b 17c 17d 17e 17f 17g 17h 17i
 chain footer 12 12b 12c 12d 12e
-chain agenda 13 13b 13c
+chain agenda 13 13b 13j 13c
 chain dashboard 14 14d 14b 14c
 chain usage 15
 
@@ -127,12 +127,12 @@ export COCKPIT_CLAUDE_SETTINGS="$T/claude-settings.json"
 # $T for any cockpitd a section launched without a pid variable here
 # (plans/test-daemon-leaks/DESIGN.md §2.3).
 . "$ROOT/spikes/lib/test-daemons.sh"
-DPID=""; D2PID=""; D3PID=""; GPID=""; D4PID=""; D5PID=""; D6PID=""; D7PID=""; BBPID=""
+DPID=""; D2PID=""; D3PID=""; GPID=""; D4PID=""; D5PID=""; D6PID=""; D7PID=""; DJPID=""; BBPID=""
 DUPID=""; USPID=""   # the usage chain's daemon and pir stand-in (section 15)
 # SIDE_PIDS: the side-chain subshells (T08). Stopped as a tree, so a run killed
 # while they are mid-chain takes their sleeps, stubs and daemons down with them.
 SIDE_PIDS=""
-trap 'daemon_stop $SIDE_PIDS $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $BBPID $DUPID $USPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
+trap 'daemon_stop $SIDE_PIDS $DPID $D2PID $D3PID $GPID $D4PID $D5PID $D6PID $D7PID $DJPID $BBPID $DUPID $USPID; daemon_sweep "$T"; rm -rf "$T"' EXIT
 
 # The reader's launch line, in ONE place: the scheme name is asserted in four
 # sections (the browse launch, two heals and the worktree rebuild) and a change of
@@ -454,7 +454,16 @@ SIDE_AGENTS="$T/agents-side.json"; cp "$AGENTS_JSON" "$SIDE_AGENTS"
 
 cat > "$T/bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
-[ "$1" = "agents" ] && cat "$AGENTS_JSON"
+case "$1" in
+  agents) cat "$AGENTS_JSON" ;;
+  # A calendar agent's start: one line per call, then what the real one prints.
+  --bg)
+    line="$({ printf 'cwd=%s' "$PWD"; printf ' [%s]' "$@"; } | tr '\n' ' ')"
+    printf '%s\n' "$line" >> "${CLAUDE_BG_LOG:-/dev/null}"
+    echo "backgrounded · jj11kk22 · calendar agent"
+    ;;
+  *) exit 1 ;;
+esac
 CLAUDE
 chmod +x "$T/bin/claude"
 
@@ -3864,6 +3873,8 @@ const EVENTS = {
   timeZone: "Europe/Warsaw",
   items: [{
     id: "ev1", status: "confirmed", summary: "SECRET-MEETING-TITLE",
+    // A calendar that is not a jobs calendar must not store these (calendar-agents 3.4).
+    description: "SECRET-MEETING-TEXT", creator: { self: true },
     start: { dateTime: "2026-08-29T10:00:00+02:00" },
     end:   { dateTime: "2026-08-29T11:00:00+02:00" },
   }],
@@ -3882,6 +3893,12 @@ const server = http.createServer((req, res) => {
   if (m === "gone") return json(res, 404, { error: { message: "Not Found" } });
   if (m === "one-bad" && cal === "bad-cal") return json(res, 404, { error: { message: "Not Found" } });
   if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), SLOW);
+  // Tomorrow, so fetching it starts nothing: section 13j seeds its due entries itself.
+  if (cal === "jobs-cal") return json(res, 200, { timeZone: "Europe/Warsaw", items: [{
+    id: "later", status: "confirmed", summary: "proj", description: "LATER-TEXT", creator: { self: true },
+    start: { dateTime: new Date(Date.now() + 86400000).toISOString() },
+    end:   { dateTime: new Date(Date.now() + 90000000).toISOString() },
+  }] });
   json(res, 200, EVENTS);
 });
 server.listen(0, "127.0.0.1", () => console.log(`PORT ${server.address().port}`));
@@ -4119,6 +4136,127 @@ waituntil 10 "two of D3's fleet polls after the return" polls_past $((POLLN + 1)
 same "...while a return with nothing stale fetches nothing" "$(grep -c '/events' "$GHITS")" "0"
 fi
 
+if section 13j "calendar agents: the daemon fetches, ticks and recovers"; then
+# calendar-agents T05. DJ is its own daemon on its own state, like D2 and D3, with a
+# fast jobs tick. Its agenda staleness is long, so the only events that appear are the
+# one first fetch and what jseed writes.
+AJ="$T/agendaj"; SJ="$AJ/state"; JROOT="$AJ/projects"; JBG="$AJ/claude-bg.log"
+mkdir -p "$AJ" "$SJ" "$JROOT/proj/.git"
+: > "$JBG"
+echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$JROOT"'"}' > "$SJ/panes.json"
+: > "$SJ/fleet.log"
+printf '10 0 sh\n20 0 sh\n30 0 sh\n' > "$AJ/panestate"
+echo 31 > "$AJ/nextpane"; echo 1 > "$AJ/nexttab"
+echo list > "$AJ/fleetstate"
+for f in editing titlelag active panecwd psbusy calls.log; do : > "$AJ/$f"; done
+jenv() {
+  HOME="$T/home" SHELL=/bin/zsh TZ=Europe/Warsaw COCKPIT_OWNER_PID="$$" \
+  COCKPIT_DIR="$SJ" COCKPIT_REAP_MS="$REAP_MS" COCKPIT_TIME_SCALE="$SPEED" \
+  CALLS="$AJ/calls.log" FLEETSTATE="$AJ/fleetstate" PANESTATE="$AJ/panestate" \
+  NEXTPANE="$AJ/nextpane" NEXTTAB="$AJ/nexttab" EDITING="$AJ/editing" \
+  TITLELAG="$AJ/titlelag" ACTIVE="$AJ/active" PANECWD="$AJ/panecwd" \
+  PSBUSY="$AJ/psbusy" AGENTS_JSON="$SIDE_AGENTS" CLAUDE_BG_LOG="$JBG" \
+  AGENDA_ORIGIN="$ORIGIN" COCKPIT_AGENDA_TICK_MS="$AGENDA_TICK_MS" COCKPIT_AGENDA_STALE_MS="$AGENDA_STALE_MS" \
+  COCKPIT_JOBS_TICK_MS="$AGENDA_TICK_MS" "$@"
+}
+djstart() {
+  jenv node "$ROOT/bin/cockpitd.mjs" >> "$AJ/daemon.log" 2>&1 &
+  DJPID=$!
+}
+# jseed <id>...: these entries on the jobs calendar, due now, as a fresh fetch left them.
+jseed() {
+  jenv node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{const n=Date.now();s.putCacheEntry("nightly",{fetchedAt:n,error:null,events:process.argv.slice(2).map(id=>({id,title:"proj",start:n-60000,end:n+3600000,allDay:false,reply:"n/a",slug:"nightly",description:"JOB-TEXT-"+id,creatorOwn:true}))});});' "$ROOT" "$@"
+}
+bgcount() { grep -cF -- "$1" "$JBG"; }
+bgatleast() { [ "$(bgcount "$1")" -ge "$2" ]; }
+# lq <expression over l>: one value out of the ledger.
+lq() { node -e 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(eval(process.argv[2])));' "$SJ/calendar-jobs.json" "$1"; }
+
+djstart
+jenv node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.writeClient({clientId:"cid",clientSecret:"csec"});s.putAccount("me@x.test","REFRESH-TOKEN",1);s.putCalendar({slug:"plain",account:"me@x.test",calendarId:"plain-cal",title:"Plain",colour:1},1);});' "$ROOT"
+JWINDOW="$(TZ=Europe/Warsaw node -e 'import(process.argv[1]+"/bin/cockpit-agenda-model.mjs").then(m=>{const b=m.dayBounds(Date.now(),{tz:"Europe/Warsaw"});process.stdout.write(new Date(b.todayStart).toISOString()+" "+new Date(b.todayStart-7*864e5).toISOString());});' "$ROOT")"
+# `start` or `tick`, whichever pass found it first.
+waitfor ": plain ok" "$AJ/daemon.log" 10 "the plain calendar's fetch"
+same "a non-jobs calendar still asks from the start of today" \
+     "$(grep -F /calendars/plain-cal/events "$GHITS" | grep -cF "timeMin=${JWINDOW%% *}")" "1"
+same "...and stores neither job field" \
+     "$(cq "$SJ" '["description","creatorOwn"].filter(k=>k in c.calendars.plain.events[0]).length')" "0"
+refute "...so its meeting text is not on disk" "SECRET-MEETING-TEXT" "$SJ/agenda-cache.json"
+nap 2   # window: 2.5 jobs ticks
+same "no jobs calendar: no ledger is written" "$([ -e "$SJ/calendar-jobs.json" ] && echo yes || echo no)" "no"
+
+jenv node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{s.putCalendar({slug:"nightly",account:"me@x.test",calendarId:"jobs-cal",title:"Nightly",colour:2,jobs:true,jobsSince:1},1);});' "$ROOT"
+waitfor "agenda tick: nightly ok" "$AJ/daemon.log" 10 "the jobs calendar's fetch"
+same "a jobs calendar asks from seven days back" \
+     "$(grep -F /calendars/jobs-cal/events "$GHITS" | grep -cF "timeMin=${JWINDOW##* }")" "1"
+same "...and caches the description" "$(cq "$SJ" 'c.calendars.nightly.events[0].description')" "LATER-TEXT"
+same "...and creatorOwn"             "$(cq "$SJ" 'c.calendars.nightly.events[0].creatorOwn')" "true"
+same "an entry not yet due starts nothing" "$(wc -l < "$JBG" | tr -d ' ')" "0"
+
+# Attached to an agent: the fleet box is not even on screen.
+echo "test agent" > "$AJ/fleetstate"
+waitfor "enter abc12345" "$AJ/daemon.log" 10 "DJ to attach the agent"
+jseed a
+waituntil 10 "the attached start" bgatleast "JOB-TEXT-a" 1
+# The tail of the path: macOS answers /private/var for mktemp's /var.
+check "it starts in the entry's project" "/agendaj/projects/proj [--bg]" "$JBG"
+check "...with bypass permissions" "[--permission-mode] [bypassPermissions]" "$JBG"
+check "...in a worktree, with no question tool" "[--disallowedTools] [AskUserQuestion]" "$JBG"
+waituntil 10 "the ledger to say started" sh -c 'grep -q "\"started\"" "$1"' _ "$SJ/calendar-jobs.json"
+same "...and the ledger keeps the agent's id" "$(lq 'l.entries["nightly/a"].agentId')" "jj11kk22"
+
+# With `claude agents` parked: pir holds its slot.
+echo list > "$AJ/fleetstate"
+waitfor '"agent":"repo"' "$SJ/terminals.json" 10 "the return to the list"
+waitfor '"switchable":true' "$SJ/terminals.json" 10 "the switch to go clickable"
+echo fleet-pir >> "$SJ/cmd"
+waitfor '"program":"pir"' "$SJ/terminals.json" 10 "pir to take the slot"
+jseed a b
+waituntil 10 "the start with claude parked" bgatleast "JOB-TEXT-b" 1
+same "...while the first entry does not start again" "$(bgcount "JOB-TEXT-a")" "1"
+refute "no pane was typed the instructions" "JOB-TEXT-" "$AJ/calls.log"
+refute "...or the command"                  "permission-mode" "$AJ/calls.log"
+same "...and the fleet box got no keystroke at all" \
+     "$(grep -c 'send-text.*--pane-id 20' "$AJ/calls.log")" "0"
+echo fleet-claude >> "$SJ/cmd"
+waitfor '"program":"claude"' "$SJ/terminals.json" 10 "claude to come back"
+
+# A restart: both are still due and on the calendar. The new one proves the ticks ran.
+daemon_stop $DJPID; DJPID=""
+jseed a b c
+djstart
+waituntil 10 "the first start after a restart" bgatleast "JOB-TEXT-c" 1
+same "restarting does not start an entry again" "$(bgcount "JOB-TEXT-a") $(bgcount "JOB-TEXT-b")" "1 1"
+
+# A crash between the ledger write and the start.
+daemon_stop $DJPID; DJPID=""
+node -e 'const fs=require("fs"),p=process.argv[1];const l=JSON.parse(fs.readFileSync(p,"utf8"));l.entries["nightly/d"]={state:"starting",at:Date.now(),project:"proj"};fs.writeFileSync(p,JSON.stringify(l));' "$SJ/calendar-jobs.json"
+jseed a b c d
+djstart
+waitfor "jobs: nightly proj unknown" "$AJ/daemon.log" 10 "the leftover start's recovery"
+same "a leftover starting becomes unknown" "$(lq 'l.entries["nightly/d"].state')" "unknown"
+check "...with a note" "may not have started" "$SJ/notes.json"
+check "...signed by the calendar" '"calendar"' "$SJ/notes.json"
+nap 2   # window: 2.5 jobs ticks, each free to wrongly start it
+same "...and it is never retried" "$(bgcount "JOB-TEXT-d")" "0"
+
+# A tick that fails on every pass must cost nothing else.
+daemon_stop $DJPID; DJPID=""
+rm "$SJ/calendar-jobs.json"; mkdir "$SJ/calendar-jobs.json"
+: > "$AJ/daemon.log"
+djstart
+waitfor "jobs: recovery failed" "$AJ/daemon.log" 10 "the failed recovery to be logged"
+waitfor "jobs: tick failed" "$AJ/daemon.log" 10 "the failed tick to be logged"
+waitmore "jobs: tick failed" "$AJ/daemon.log" 1 10 "a second failed tick"
+GT0="$(grep -cxF "ARGV: cli get-text --pane-id 20" "$AJ/calls.log")"
+jpolls() { [ "$(grep -cxF "ARGV: cli get-text --pane-id 20" "$AJ/calls.log")" -gt "$GT0" ]; }
+waituntil 10 "the fleet poll to carry on" jpolls
+okline "a failing tick is logged and the daemon keeps polling"
+same "...and nothing started from an unreadable ledger" "$(bgcount "JOB-TEXT-a")" "1"
+refute "no instructions reach the daemon's log" "JOB-TEXT-" "$AJ/daemon.log"
+daemon_stop $DJPID; DJPID=""
+fi
+
 if section 13c "the new seams are fenced"; then
 # FINDINGS 2026-08-28: every test seam gets a guard, or a later edit points the
 # real daemon at the real Google and the suite still passes on a connected
@@ -4132,6 +4270,7 @@ same "no line in this suite names a real Google host" \
 # DESIGN 2.5 states -- so the defaults are asserted in the source, not trusted.
 same "the tick defaults to 60s"        "$(grep -c 'COCKPIT_AGENDA_TICK_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
 same "staleness defaults to one minute" "$(grep -c 'COCKPIT_AGENDA_STALE_MS) || 60_000' "$ROOT/bin/cockpitd.mjs")" "1"
+same "the jobs tick defaults to 30s"    "$(grep -c 'COCKPIT_JOBS_TICK_MS) || 30_000' "$ROOT/bin/cockpitd.mjs")" "1"
 
 daemon_stop $D3PID; D3PID=""
 kill $GPID 2>/dev/null;  GPID=""

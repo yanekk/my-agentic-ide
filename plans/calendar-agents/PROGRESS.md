@@ -23,12 +23,12 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T02 | job-decisions | T00 | ✅ | |
 | T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ✅ | |
-| T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
+| T05 | daemon-wiring | T01, T03, T04 | 🔍 | Fetch window, job fields, tick and recovery in `cockpitd`. Section 13j adds 25 checks; docs updated. Deviation: whole suite not run, per the parallel-worker rule; CLAUDE.md count 959 is arithmetic. Parked case uses pir in the slot. |
 | T06 | live-check | T00, T05 | ⬜ | |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** *(empty)*
+**Review queue:** T05
 
 ## Blocked on the user
 
