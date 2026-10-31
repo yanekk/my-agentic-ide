@@ -8,6 +8,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 📌 | T02 review, for T04: a NUL byte in a description makes `execFile` throw `ERR_INVALID_ARG_VALUE` synchronously, measured. T04's tick must catch it after writing `starting`, and record `failed`. |
+| 2026-10-31 | 📌 | T02 review: in `plainText` a bare `<a>` or `<b>` in plain-text instructions is still dropped; it cannot be told from HTML. `sort <a >b` now survives. |
+| 2026-10-31 | 📌 | T02: per DESIGN §2.2 `plainText` drops links, so `<a href="u">text</a>` gives the agent only `text` and loses a URL whose label differs. Google's autolinks are unaffected. Left as designed. |
 | 2026-10-31 | 🔄 | `-w` starts at `origin/main` by default: `2140433c`, 2077 commits behind, no suite. Owner chose `worktree.baseRef: head` in `~/.claude/settings.json` for every agent; the rerun started at `63726e85`. Delete the key to undo. |
 | 2026-10-31 | 📌 | Nothing writes that setting: `bin/install.sh` does not, and no task covers it. On another machine calendar agents would start at `origin/main`. |
 | 2026-10-31 | 📌 | T00: real suite ran to its end, exit 0, 4508s (75m08s) on `63726e85`, setup 6s. Agent reported pass, summary line and duration. Clean worktree. |
