@@ -8,6 +8,13 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 🔄 | `-w` starts at `origin/main` by default: `2140433c`, 2077 commits behind, no suite. Owner chose `worktree.baseRef: head` in `~/.claude/settings.json` for every agent; the rerun started at `63726e85`. Delete the key to undo. |
+| 2026-10-31 | 📌 | Nothing writes that setting: `bin/install.sh` does not, and no task covers it. On another machine calendar agents would start at `origin/main`. |
+| 2026-10-31 | 📌 | T00: real suite ran to its end, exit 0, 4508s (75m08s) on `63726e85`, setup 6s. Agent reported pass, summary line and duration. Clean worktree. |
+| 2026-10-31 | 📌 | T00: foreground Bash hit its 600s limit and moved to the background; the agent ended its turn at 10 minutes, a task notification woke it 65 minutes later, and it reported. |
+| 2026-10-31 | 📌 | §2.5 long-command wording confirmed by T00: "Run long commands in the background with the longest time limit allowed and do not end your turn until they have finished." The agent's parked turn did no harm. |
+| 2026-10-31 | 📌 | `claude agents --json` showed `busy`/`working` on all 71 polls, parked turn included, then `idle`/`done`, listed without `--all`. An agent reporting it ran nothing ended `idle`/`blocked`, so `blocked` can mean a finished report. |
+| 2026-10-31 | 📌 | Guards seen in T00: a worktree session refused a compound git command ("too complex to verify"); the auto-mode classifier refused `start.sh` inside a compound command and allowed it alone. |
 | 2026-10-31 | 📌 | Plan review session had no Google Calendar tools after the owner authenticated the connector mid-session. Whether a later worker gets them is unmeasured; T06 checks first. |
 | 2026-10-31 | 🐞 | `spikes/cockpit-test` section 15 failed 2 of 4 fresh-copy runs at plan review: `5h 97%`, `7d 77%` absent from the footer. Passed twice with 934 checks. Pre-existing on `main`; cause not found. |
 | 2026-10-31 | 📌 | `superfrog-re` `HEAD` is `63726e85`, `origin/main` is `2140433c`, and untracked `engine/` sits in the checkout. T00 records which a `-w` worktree starts from. |

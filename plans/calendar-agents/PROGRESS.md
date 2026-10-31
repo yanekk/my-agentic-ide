@@ -8,9 +8,9 @@
 
 **Plan reviewed:** 2026-10-31 — 15 fixed, 7 decided with the user
 
-**Status:** Plan reviewed. Nothing built.
+**Status:** T00 implemented, awaiting review.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
+**Next `pir-work` will:** review T00; T02 waits on it.
 
 ## Tasks
 
@@ -18,7 +18,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | long-command-spike | — | ⬜ | |
+| T00 | long-command-spike | — | 🔍 | Spike done, four answers in FINDINGS. Suite passed in 75m08s; §2.5 wording holds. Deviation: first run started at `origin/main`, so owner set `worktree.baseRef: head` globally and it reran. Scripts, agents, worktree removed. |
 | T01 | cockpit-suite-flake | — | ⬜ | |
 | T02 | job-decisions | T00 | ⬜ | |
 | T03 | jobs-calendar | — | ⬜ | |
@@ -28,7 +28,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** *(empty)*
+**Review queue:** T00
 
 ## Blocked on the user
 
