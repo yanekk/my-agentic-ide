@@ -8,6 +8,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 📌 | T04, for T05: `jobsTick` never rejects; it logs `jobs: tick failed`. Plant a failure by making `calendar-jobs.json` a directory. Its dry run prints argv only through a `print` argument, since daemon stdout is `daemon.log`. |
+| 2026-10-31 | 📌 | T04: `live-check.sh` keeps only the test calendar in its scratch copy. A real jobs calendar kept there would run its entries twice, against a ledger that has never seen them. |
 | 2026-10-31 | 📌 | T02 review, for T04: a NUL byte in a description makes `execFile` throw `ERR_INVALID_ARG_VALUE` synchronously, measured. T04's tick must catch it after writing `starting`, and record `failed`. |
 | 2026-10-31 | 📌 | T02 review: in `plainText` a bare `<a>` or `<b>` in plain-text instructions is still dropped; it cannot be told from HTML. `sort <a >b` now survives. |
 | 2026-10-31 | 📌 | T02: per DESIGN §2.2 `plainText` drops links, so `<a href="u">text</a>` gives the agent only `text` and loses a URL whose label differs. Google's autolinks are unaffected. Left as designed. |
