@@ -457,7 +457,8 @@ async function add(slug, { jobs = false } = {}) {
   const chosen = items[askNumber(fd, items.length, "calendar number: ") - 1];
   if (jobs) {
     const why = jobsRefusal(chosen, account);
-    if (why) die(`${wire(chosen.summary)} cannot be a jobs calendar: ${why}\n      Nothing was attached.`);
+    const taken = why || jobsTaken(readState().calendars, chosen.id, slug);
+    if (taken) die(`${wire(chosen.summary)} cannot be a jobs calendar: ${taken}\n      Nothing was attached.`);
   }
 
   // No two configured calendars share a colour while a free one remains. The model
@@ -717,6 +718,16 @@ function jobsRefusal(listed, account) {
   return null;
 }
 
+/**
+ * Why another slug stops this calendar being a jobs one, or null. The job ledger keys
+ * on slug and event, so one calendar on two jobs slugs would start each entry twice.
+ * Attaching it plainly under a second slug starts nothing, so that stays allowed.
+ */
+function jobsTaken(calendars, calendarId, slug) {
+  const other = calendars.find((c) => c.jobs && c.calendarId === calendarId && c.slug !== slug);
+  return other ? `\`${other.slug}\` is already this calendar's jobs slug, and each entry would start twice.` : null;
+}
+
 async function jobsCommand(slug, setting) {
   refuseIfAgent("jobs");
   if (!slug || !["on", "off"].includes(setting)) die("usage: `agenda jobs <slug> on|off`.");
@@ -739,6 +750,8 @@ async function jobsCommand(slug, setting) {
   // Decided before the network, so this answer does not depend on being online.
   const refused = (why) => die(`${slug} cannot be a jobs calendar: ${why}\n      Nothing was changed.`);
   if (cal.calendarId === cal.account) refused(jobsRefusal({ id: cal.calendarId }, cal.account));
+  const taken = jobsTaken(readState().calendars, cal.calendarId, slug);
+  if (taken) refused(taken);
 
   // The row does not store the role and a shared calendar's role can change, so ask.
   // Not being able to find out refuses: the flag lets entries start agents.

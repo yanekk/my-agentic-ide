@@ -981,6 +981,7 @@ const JOB_LIST = [
   { id: "me@corp.com", summary: "Jan", primary: true, accessRole: "owner" },
   { id: JOBS_ID, summary: "Night jobs", accessRole: "owner" },
   { id: "team@group.calendar.google.com", summary: "Team", accessRole: "writer" },
+  { id: "jobs2@group.calendar.google.com", summary: "More jobs", accessRole: "owner" },
 ];
 const listIs = (items) => (req) => (req.path.endsWith("/users/me/calendarList")
   ? { status: 200, body: { items } } : defaultReply(req));
@@ -1019,7 +1020,7 @@ async function attached(name) {
   const ls = await run(["ls"], { dir });
   ok("`agenda ls` marks it", /night.*\[jobs\]/.test(ls.out), ls.out);
 
-  const flagged = await run(["add", "--jobs", "other"], { dir, tty: writeTty(dir, "1", "2") });
+  const flagged = await run(["add", "--jobs", "other"], { dir, tty: writeTty(dir, "1", "4") });
   eq("the flag works before the slug too", [flagged.status, rowOf(dir, "other")?.jobs], [0, true]);
   eq("...and `--jobs` is never taken for a slug", rowOf(dir, "--jobs"), undefined);
 
@@ -1124,6 +1125,30 @@ async function attached(name) {
   const next = await run(["jobs", "night", "on"], { dir });
   eq("off then on works", next.status, 0);
   ok("...and records a new time", rowOf(dir, "night").jobsSince > 1000);
+}
+
+{
+  // The ledger keys on slug and event, so one calendar on two jobs slugs starts each entry twice.
+  const dir = freshDir("jobs-twin");
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  eq("(jobs-twin) set up", (await run(["add", "a", "--jobs"], { dir, tty: writeTty(dir, "2") })).status, 0);
+  const was = bytes(dir);
+  const twin = await run(["add", "b", "--jobs"], { dir, tty: writeTty(dir, "1", "2") });
+  eq("`add --jobs` refuses a calendar another slug already has as jobs", [twin.status, bytes(dir)], [1, was]);
+  ok("...naming that slug", /\ba\b.*already/.test(twin.all), twin.all);
+
+  const plain = await run(["add", "b"], { dir, tty: writeTty(dir, "1", "2") });
+  eq("...it still attaches plainly", [plain.status, Boolean(rowOf(dir, "b").jobs)], [0, false]);
+  const plainWas = bytes(dir);
+  stub.log.length = 0;
+  const on = await run(["jobs", "b", "on"], { dir, env: CLOSED });
+  eq("`jobs on` refuses it too, offline", [on.status, bytes(dir)], [1, plainWas]);
+  ok("...naming that slug", /\ba\b.*already/.test(on.all), on.all);
+  eq("`jobs on` again on the holder is fine", (await run(["jobs", "a", "on"], { dir })).status, 0);
+
+  eq("once the holder is off", (await run(["jobs", "a", "off"], { dir, env: CLOSED })).status, 0);
+  eq("...the other can take it", (await run(["jobs", "b", "on"], { dir })).status, 0);
 }
 
 {
