@@ -10,7 +10,7 @@
 
 **Status:** Plan reviewed. Nothing built.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
+**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer.
 
 ## Tasks
 
