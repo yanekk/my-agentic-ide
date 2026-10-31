@@ -3964,8 +3964,8 @@ d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{
 # Let the new calendar's first fetch land (its cache entry is written before the
 # log line), so the pass after makestale is the one being asserted on.
 waitfor "agenda tick: home ok" "$A2/daemon.log" 10 "the first tick to fetch home"
+: > "$GHITS"                  # cleared FIRST: a tick can fetch the moment these go stale
 makestale "$S2" work home
-: > "$GHITS"
 waituntil 10 "one pass to request both work and home" \
     ghits_ge 1 /calendars/work-cal/events /calendars/home-cal/events
 check "two calendars are both refreshed in one pass" "/calendars/work-cal/events" "$GHITS"
@@ -4793,6 +4793,16 @@ uhung_ge() { [ "$(grep -c . "$UHITS.hung" 2>/dev/null)" -ge "$1" ]; }
 ulines() { grep -cxE '.* usage: pir service '"$1" "$ULOG"; }
 ulines_ge() { [ "$(ulines "$1")" -ge "$2" ]; }   # a poll condition: re-counted every try
 ucache_at() { [ "$(ucq 'c&&c.writtenAt')" = "$1" ]; }
+ustates() { sed -n 's/.* usage: pir service //p' "$ULOG"; }
+ulast_is() { [ "$(ustates | tail -1)" = "$1" ]; }
+# The promise is one line per change of state, not one line per run: on a loaded
+# machine a healthy poll can pass the 2 s limit, and that really is unreachable
+# then ok again (T01 review, reproduced by a stand-in answering one poll late). So
+# the state must appear, and no state may be logged twice running.
+uonce() {  # uonce <state>: "once", or what was wrong
+  [ "$(ulines "$1")" -ge 1 ] || { echo "never logged"; return; }
+  ustates | awk 'NR>1 && $0==p { print "repeated: " $0; bad=1; exit } { p=$0 } END { if (!bad) print "once" }'
+}
 
 uenv() {
   HOME="$T/home" PIR_HOME="$UPH" SHELL=/bin/zsh COCKPIT_OWNER_PID="$$" \
@@ -4839,13 +4849,13 @@ uapi $$
 waituntil 10 "the daemon to write the stand-in's reading" ucache_at "$R1"
 same "the cache holds the reading at writtenAt = observed_at" "$(ucq 'c.writtenAt')" "$R1"
 same "...with its numbers"                        "$(ucq 'c.fiveHour.usedPct+"/"+c.sevenDay.usedPct')" "50/60"
-same "...and the log says ok once"                "$(ulines ok)" "1"
+same "...and the log says ok once"                "$(uonce ok)" "once"
 
 # The same reading three more ticks: polled, never rewritten, never re-logged.
 ST=$(ustat); H=$(uhits)
 waituntil 10 "three more polls of the same reading" uhits_ge $(( H + 3 ))
 same "the same reading leaves the file alone (inode, mtime)" "$(ustat)" "$ST"
-same "...still one ok line"                       "$(ulines ok)" "1"
+same "...still one ok line"                       "$(uonce ok)" "once"
 
 # A newer tap write survives the older pir reading (newest wins, DESIGN 2.3).
 printf '{"writtenAt":%s,"fiveHour":{"usedPct":11,"resetsAt":%s},"sevenDay":{"usedPct":22,"resetsAt":%s}}\n' \
@@ -4871,14 +4881,14 @@ refute "...with no as-of stamp"                   "as of" "$UPLAIN"
 ST=$(ustat); H=$(uhits)
 echo 500 > "$UMODE"
 waituntil 10 "three polls answered 500" uhits_ge $(( H + 3 ))
-same "a 500 logs http 500 once"                   "$(ulines 'http 500')" "1"
+same "a 500 logs http 500 once"                   "$(uonce 'http 500')" "once"
 same "...and leaves the cache alone"              "$(ustat)" "$ST"
 
 # The stand-in stops: unreachable, once.
 daemon_stop $USPID; USPID=""
-waituntil 10 "the daemon to log unreachable" grep -qF 'usage: pir service unreachable' "$ULOG"
+waituntil 10 "the daemon to log unreachable" ulast_is unreachable
 nap 2
-same "a stopped service logs unreachable once"    "$(ulines unreachable)" "1"
+same "a stopped service logs unreachable once"    "$(uonce unreachable)" "once"
 
 # A stale api.json naming a dead pid: no request at all.
 ustub_start
@@ -4888,7 +4898,7 @@ H=$(uhits)
 uapi "$DEADPID"
 waituntil 10 "the daemon to log dead" grep -qF 'usage: pir service dead' "$ULOG"
 nap 2
-same "a dead pid logs dead once"                  "$(ulines dead)" "1"
+same "a dead pid logs dead once"                  "$(uonce dead)" "once"
 same "...and sends nothing to the port"           "$(uhits)" "$H"
 
 # Service up with nothing to report: empty, cache untouched.
@@ -4897,14 +4907,14 @@ echo nulls > "$UMODE"
 uapi $$
 waituntil 10 "the daemon to log empty" grep -qF 'usage: pir service empty' "$ULOG"
 H=$(uhits); waituntil 10 "two more polls of the nulls" uhits_ge $(( H + 2 ))
-same "a nulls body logs empty once"               "$(ulines empty)" "1"
+same "a nulls body logs empty once"               "$(uonce empty)" "once"
 same "...and leaves the cache alone"              "$(ustat)" "$ST"
 
 # Back to a reading: the feed's return is logged too.
 echo ok > "$UMODE"
 waituntil 10 "the daemon to log ok again" ulines_ge ok 2
 H=$(uhits); waituntil 10 "two more polls" uhits_ge $(( H + 2 ))
-same "the feed coming back logs one more ok"      "$(ulines ok)" "2"
+same "the feed coming back logs one more ok"      "$(uonce ok)" "once"
 
 # A service that never answers holds neither the daemon nor the next poll.
 echo hang > "$UMODE"
@@ -4919,8 +4929,8 @@ waituntil 10 "the next tick to poll again after the 2 s limit" uhung_ge 2
 # whenever a loaded machine ran past the limit. Unguarded polls come a tick apart.
 UGAP=$(( $(sed -n 2p "$UHITS.hung") - $(sed -n 1p "$UHITS.hung") ))
 same "...one poll in flight, not one per tick"    "$([ "$UGAP" -ge 1500 ] && echo held || echo "next poll after ${UGAP}ms")" "held"
-waituntil 5 "the limit to log unreachable" ulines_ge unreachable 2
-same "the limit reads as unreachable"             "$(ulines unreachable)" "2"
+waituntil 5 "the limit to log unreachable" ulast_is unreachable
+same "the limit reads as unreachable"             "$(ustates | tail -1)" "unreachable"
 
 # End to end, stale: a reading 20 minutes old into an empty cache draws dim.
 OLD=$(( $(node -e 'process.stdout.write(String(Date.now()))') - 1200000 ))
