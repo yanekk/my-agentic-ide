@@ -118,7 +118,9 @@ section() {
 
 T="$(mktemp -d)"
 # Every footer reads ~/.claude/settings.json for the Bedrock gate; point them all at
-# a scratch file (absent unless a check writes it) so the real one cannot hide usage.
+# a scratch file so the real one cannot hide usage. It stays absent: chains run at
+# once, so a check that wrote it would hide usage from every other chain's footer.
+# Section 12b turns Bedrock on in a file of its own chain's (run_footer).
 export COCKPIT_CLAUDE_SETTINGS="$T/claude-settings.json"
 # ONE EXIT trap, set here and never replaced: bash keeps only the last one set.
 # It stops every daemon/stub pid the sections below may leave set, then sweeps by
@@ -3247,6 +3249,9 @@ run_footer() {
 # what a section sees never depends on which sections ran before it
 # (plans/test-suite-speed DESIGN 4.1). Nothing here starts a process.
 SD="$T/strip"
+# This chain's own Bedrock gate. 12b turns it on for several renders while section
+# 15 draws its footer; sharing the run-wide file hid usage there (T01: 6 of 8 runs).
+local -x COCKPIT_CLAUDE_SETTINGS="$T/footer-claude-settings.json"
 # The capture goes OUTSIDE the state dir: the renderer watches that directory, so a
 # capture file written into it makes the renderer repaint on its own output for ever.
 RAW="$T/strip-cap"; PLAIN="$T/strip-plain"
@@ -3478,7 +3483,7 @@ refute "...role colour suppressed (crit not red)"  "$(printf '\033[31m')" "$RAW"
 # CLAUDE_CODE_USE_BEDROCK on in ~/.claude/settings.json hides the segment even
 # with a fresh cache; "0" counts as off, as the tap reads it.
 useed "{\"writtenAt\":$NOW_MS,\"fiveHour\":{\"usedPct\":45,\"resetsAt\":$R5},\"sevenDay\":{\"usedPct\":61,\"resetsAt\":$R7}}"
-printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}' > "$T/claude-settings.json"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"1"}}' > "$COCKPIT_CLAUDE_SETTINGS"
 footer uncommitted
 refute "Bedrock in settings.json hides the usage"  "5h 45%" "$PLAIN"
 check  "...and the footer keeps today's full legend" "drag copy" "$PLAIN"
@@ -3506,10 +3511,10 @@ printf '{"writtenAt":%s,"usedPct":36}' "$STALE_MS" > "$SD/aperture-cache.json"
 footer uncommitted
 check  "a stale Aperture reading is dimmed and stamped" "$(printf '\033[2maperture 36%% · as of ')" "$RAW"
 rm -f "$SD/aperture-cache.json"
-printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}' > "$T/claude-settings.json"
+printf '{"env":{"CLAUDE_CODE_USE_BEDROCK":"0"}}' > "$COCKPIT_CLAUDE_SETTINGS"
 footer uncommitted
 check  "CLAUDE_CODE_USE_BEDROCK=0 still shows it"  "5h 45% ↺" "$PLAIN"
-rm -f "$T/claude-settings.json"
+rm -f "$COCKPIT_CLAUDE_SETTINGS"
 
 # An absent cache: no usage segment, and the rest of the footer is today's -- the
 # full legend (incl. the dim secondary hints) is kept, proving nothing was trimmed.
@@ -3959,8 +3964,8 @@ d2env node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{
 # Let the new calendar's first fetch land (its cache entry is written before the
 # log line), so the pass after makestale is the one being asserted on.
 waitfor "agenda tick: home ok" "$A2/daemon.log" 10 "the first tick to fetch home"
+: > "$GHITS"                  # cleared FIRST: a tick can fetch the moment these go stale
 makestale "$S2" work home
-: > "$GHITS"
 waituntil 10 "one pass to request both work and home" \
     ghits_ge 1 /calendars/work-cal/events /calendars/home-cal/events
 check "two calendars are both refreshed in one pass" "/calendars/work-cal/events" "$GHITS"
@@ -4749,7 +4754,9 @@ const mode = () => { try { return fs.readFileSync(MODE, "utf8").trim(); } catch 
 const server = http.createServer((req, res) => {
   fs.appendFileSync(HITS, `${req.method} ${req.url}\n`);
   const m = mode();
-  if (m === "hang") return;                       // never answers: the 2 s limit's case
+  // Never answers: the 2 s limit's case. Stamped, because a total of hits cannot
+  // say which poll hung: one answered just before the mode changed counts as well.
+  if (m === "hang") return fs.appendFileSync(HITS + ".hung", `${Date.now()}\n`);
   res.setHeader("content-type", "application/json");
   if (m === "500") { res.statusCode = 500; return res.end('{"error":"boom"}'); }
   if (m === "nulls") return res.end('{"version":1,"observed_at":null,"rate_limits":null}');
@@ -4782,9 +4789,20 @@ ucq() {
 ustat() { node -e 'try{const s=require("fs").statSync(process.argv[1]);process.stdout.write(s.ino+" "+s.mtimeMs)}catch{process.stdout.write("none")}' "$US/usage-cache.json"; }
 uhits() { grep -c . "$UHITS"; }
 uhits_ge() { [ "$(uhits)" -ge "$1" ]; }
+uhung_ge() { [ "$(grep -c . "$UHITS.hung" 2>/dev/null)" -ge "$1" ]; }
 ulines() { grep -cxE '.* usage: pir service '"$1" "$ULOG"; }
 ulines_ge() { [ "$(ulines "$1")" -ge "$2" ]; }   # a poll condition: re-counted every try
 ucache_at() { [ "$(ucq 'c&&c.writtenAt')" = "$1" ]; }
+ustates() { sed -n 's/.* usage: pir service //p' "$ULOG"; }
+ulast_is() { [ "$(ustates | tail -1)" = "$1" ]; }
+# The promise is one line per change of state, not one line per run: on a loaded
+# machine a healthy poll can pass the 2 s limit, and that really is unreachable
+# then ok again (T01 review, reproduced by a stand-in answering one poll late). So
+# the state must appear, and no state may be logged twice running.
+uonce() {  # uonce <state>: "once", or what was wrong
+  [ "$(ulines "$1")" -ge 1 ] || { echo "never logged"; return; }
+  ustates | awk 'NR>1 && $0==p { print "repeated: " $0; bad=1; exit } { p=$0 } END { if (!bad) print "once" }'
+}
 
 uenv() {
   HOME="$T/home" PIR_HOME="$UPH" SHELL=/bin/zsh COCKPIT_OWNER_PID="$$" \
@@ -4831,13 +4849,13 @@ uapi $$
 waituntil 10 "the daemon to write the stand-in's reading" ucache_at "$R1"
 same "the cache holds the reading at writtenAt = observed_at" "$(ucq 'c.writtenAt')" "$R1"
 same "...with its numbers"                        "$(ucq 'c.fiveHour.usedPct+"/"+c.sevenDay.usedPct')" "50/60"
-same "...and the log says ok once"                "$(ulines ok)" "1"
+same "...and the log says ok once"                "$(uonce ok)" "once"
 
 # The same reading three more ticks: polled, never rewritten, never re-logged.
 ST=$(ustat); H=$(uhits)
 waituntil 10 "three more polls of the same reading" uhits_ge $(( H + 3 ))
 same "the same reading leaves the file alone (inode, mtime)" "$(ustat)" "$ST"
-same "...still one ok line"                       "$(ulines ok)" "1"
+same "...still one ok line"                       "$(uonce ok)" "once"
 
 # A newer tap write survives the older pir reading (newest wins, DESIGN 2.3).
 printf '{"writtenAt":%s,"fiveHour":{"usedPct":11,"resetsAt":%s},"sevenDay":{"usedPct":22,"resetsAt":%s}}\n' \
@@ -4863,14 +4881,14 @@ refute "...with no as-of stamp"                   "as of" "$UPLAIN"
 ST=$(ustat); H=$(uhits)
 echo 500 > "$UMODE"
 waituntil 10 "three polls answered 500" uhits_ge $(( H + 3 ))
-same "a 500 logs http 500 once"                   "$(ulines 'http 500')" "1"
+same "a 500 logs http 500 once"                   "$(uonce 'http 500')" "once"
 same "...and leaves the cache alone"              "$(ustat)" "$ST"
 
 # The stand-in stops: unreachable, once.
 daemon_stop $USPID; USPID=""
-waituntil 10 "the daemon to log unreachable" grep -qF 'usage: pir service unreachable' "$ULOG"
+waituntil 10 "the daemon to log unreachable" ulast_is unreachable
 nap 2
-same "a stopped service logs unreachable once"    "$(ulines unreachable)" "1"
+same "a stopped service logs unreachable once"    "$(uonce unreachable)" "once"
 
 # A stale api.json naming a dead pid: no request at all.
 ustub_start
@@ -4880,7 +4898,7 @@ H=$(uhits)
 uapi "$DEADPID"
 waituntil 10 "the daemon to log dead" grep -qF 'usage: pir service dead' "$ULOG"
 nap 2
-same "a dead pid logs dead once"                  "$(ulines dead)" "1"
+same "a dead pid logs dead once"                  "$(uonce dead)" "once"
 same "...and sends nothing to the port"           "$(uhits)" "$H"
 
 # Service up with nothing to report: empty, cache untouched.
@@ -4889,28 +4907,30 @@ echo nulls > "$UMODE"
 uapi $$
 waituntil 10 "the daemon to log empty" grep -qF 'usage: pir service empty' "$ULOG"
 H=$(uhits); waituntil 10 "two more polls of the nulls" uhits_ge $(( H + 2 ))
-same "a nulls body logs empty once"               "$(ulines empty)" "1"
+same "a nulls body logs empty once"               "$(uonce empty)" "once"
 same "...and leaves the cache alone"              "$(ustat)" "$ST"
 
 # Back to a reading: the feed's return is logged too.
 echo ok > "$UMODE"
 waituntil 10 "the daemon to log ok again" ulines_ge ok 2
 H=$(uhits); waituntil 10 "two more polls" uhits_ge $(( H + 2 ))
-same "the feed coming back logs one more ok"      "$(ulines ok)" "2"
+same "the feed coming back logs one more ok"      "$(uonce ok)" "once"
 
 # A service that never answers holds neither the daemon nor the next poll.
 echo hang > "$UMODE"
-H=$(uhits)
-waituntil 10 "the hung request to arrive" uhits_ge $(( H + 1 ))
+waituntil 10 "the hung request to arrive" uhung_ge 1
 C=$(countof "ARGV:" "$U/calls.log")
 # One unscaled second: the reader's 2 s limit is fixed, so the window that proves
 # no second request is sent must sit inside it at any SPEED.
 sleep 1
 grew "the daemon keeps reconciling while a poll hangs" "ARGV:" "$U/calls.log" "$C"
-same "...one poll in flight, not one per tick"    "$(uhits)" "$(( H + 1 ))"
-waituntil 10 "the next tick to poll again after the 2 s limit" uhits_ge $(( H + 2 ))
-waituntil 5 "the limit to log unreachable" ulines_ge unreachable 2
-same "the limit reads as unreachable"             "$(ulines unreachable)" "2"
+waituntil 10 "the next tick to poll again after the 2 s limit" uhung_ge 2
+# The gap between the two, stamped by the stand-in: a wall-clock window here failed
+# whenever a loaded machine ran past the limit. Unguarded polls come a tick apart.
+UGAP=$(( $(sed -n 2p "$UHITS.hung") - $(sed -n 1p "$UHITS.hung") ))
+same "...one poll in flight, not one per tick"    "$([ "$UGAP" -ge 1500 ] && echo held || echo "next poll after ${UGAP}ms")" "held"
+waituntil 5 "the limit to log unreachable" ulast_is unreachable
+same "the limit reads as unreachable"             "$(ustates | tail -1)" "unreachable"
 
 # End to end, stale: a reading 20 minutes old into an empty cache draws dim.
 OLD=$(( $(node -e 'process.stdout.write(String(Date.now()))') - 1200000 ))
