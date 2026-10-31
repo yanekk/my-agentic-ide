@@ -10,7 +10,7 @@
 
 **Status:** Plan reviewed. Nothing built.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
+**Next `pir-work` will:** review T02, then T04.
 
 ## Tasks
 
@@ -20,7 +20,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 |---|---|---|---|---|
 | T00 | long-command-spike | — | ✅ | |
 | T01 | cockpit-suite-flake | — | ✅ | |
-| T02 | job-decisions | T00 | ⬜ | |
+| T02 | job-decisions | T00 | 🔍 | Pure model, 167 node checks plus purity grep. Deviations: plainText strips known HTML tags only, keeping `<branch>`; adds `</li>` newlines, `&nbsp;`, numeric apostrophes. Model omits `starting`; tick writes it. Note wording mine, in `noteText`, with auth, gone, corrupt kinds for T04. |
 | T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ⬜ | |
 | T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
@@ -28,7 +28,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 
