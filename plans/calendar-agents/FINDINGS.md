@@ -8,6 +8,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 🐞 | T04 review sweep, not fixed: `bin/cockpitd.mjs:2451` `execFileAsync("claude", ["agents", "--json"])` has a SIGTERM-only limit, so a child ignoring SIGTERM never settles. |
+| 2026-10-31 | 🐞 | T04 review sweep, not fixed: `bin/cockpitd.mjs:3780` `execFileAsync("wezterm", get-text)` has the same SIGTERM-only limit. |
+| 2026-10-31 | 📌 | T04 review: real start line measured in a session transcript: `backgrounded · cdb302ae · superfrog-re / cal spike`, matching fake-claude. macOS `mktemp -d` with no template ignores `TMPDIR`. |
 | 2026-10-31 | 📌 | T04, for T05: `jobsTick` never rejects; it logs `jobs: tick failed`. Plant a failure by making `calendar-jobs.json` a directory. Its dry run prints argv only through a `print` argument, since daemon stdout is `daemon.log`. |
 | 2026-10-31 | 📌 | T04: `live-check.sh` keeps only the test calendar in its scratch copy. A real jobs calendar kept there would run its entries twice, against a ledger that has never seen them. |
 | 2026-10-31 | 📌 | T02 review, for T04: a NUL byte in a description makes `execFile` throw `ERR_INVALID_ARG_VALUE` synchronously, measured. T04's tick must catch it after writing `starting`, and record `failed`. |

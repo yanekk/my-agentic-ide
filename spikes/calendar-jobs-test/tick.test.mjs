@@ -212,7 +212,10 @@ section("a tick overlapping a running tick");
   for (let i = 0; i < 400 && calls().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
   eq("the first tick reached claude", calls().length, 1);
   const before = fs.statSync(LEDGER_FILE).mtimeMs;
-  await tick();
+  // A new entry, or the ledger alone would stop this one and the guard goes untested.
+  // Raced, because without the guard this tick would hold on the fake too.
+  cached([ev(), ev({ id: "evt2", title: "proj2" })]);
+  await Promise.race([tick(), new Promise((r) => setTimeout(r, 500))]);
   eq("the second does nothing", calls().length, 1);
   eq("...and wrote nothing", fs.statSync(LEDGER_FILE).mtimeMs, before);
   fs.writeFileSync(release, "");
