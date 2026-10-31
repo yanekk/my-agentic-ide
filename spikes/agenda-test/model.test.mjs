@@ -287,4 +287,36 @@ eq("...and the calendar's zone stands in when the event names none",
 eq("an offset in the stamp wins over the timeZone beside it",
   one("events-shapes", "s-offset-wins", WORK).start, at("2026-08-26T19:00:00Z"));
 
+// ---------------------------------------------------------------------------
+section("10a. a jobs calendar's events carry their instructions and creator");
+
+const JOB_RAW = {
+  id: "j1", summary: "superfrog-re", description: "<b>run</b> the tests",
+  creator: { email: "me@corp.com" },
+  start: { dateTime: "2026-08-26T20:00:00Z" }, end: { dateTime: "2026-08-26T23:00:00Z" },
+};
+const plainEvent = normaliseEvent(JOB_RAW, WORK);
+const { description, creatorOwn, ...rest } = normaliseEvent(JOB_RAW, { ...WORK, jobs: true });
+eq("without jobs, the event is exactly what it always was", plainEvent, {
+  id: "j1", title: "superfrog-re", start: at("2026-08-26T20:00:00Z"), end: at("2026-08-26T23:00:00Z"),
+  allDay: false, reply: "n/a", slug: "work",
+});
+eq("...jobs: false likewise", normaliseEvent(JOB_RAW, { ...WORK, jobs: false }), plainEvent);
+eq("with jobs, everything else is unchanged", rest, plainEvent);
+eq("...the description is raw, HTML included", description, "<b>run</b> the tests");
+eq("...and the creator's address equal to the account is own", creatorOwn, true);
+
+const withCreator = (creator, opts = WORK) => normaliseEvent({ ...JOB_RAW, creator }, { ...opts, jobs: true }).creatorOwn;
+eq("creator.self counts as own", withCreator({ self: true, email: "alias@corp.com" }), true);
+eq("somebody else's event is not own", withCreator({ email: "them@corp.com" }), false);
+eq("no creator is not own", withCreator(undefined), false);
+eq("a null creator is not own", withCreator(null), false);
+eq("self must be exactly true", withCreator({ self: "true" }), false);
+eq("no creator address and no known account is not own", withCreator({}, { slug: "work", tz: TZ }), false);
+eq("no creator at all and no known account is not own", withCreator(undefined, { slug: "work", tz: TZ }), false);
+
+const descOf = (d) => normaliseEvent({ ...JOB_RAW, description: d }, { ...WORK, jobs: true }).description;
+eq("no description is the empty string", descOf(undefined), "");
+eq("a description that is not text is the empty string", descOf(7), "");
+
 done();
