@@ -19,7 +19,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | long-command-spike | — | ⬜ | |
-| T01 | cockpit-suite-flake | — | ⬜ | |
+| T01 | cockpit-suite-flake | — | 🔍 | Two test races fixed in `run.sh`: footer chain has its own settings file; hung polls are stamped. No check added, count stays 934. Deviation: repeated `ONLY=12b,15`, since `ONLY=15` alone never fails and `stress.sh` unsets `ONLY`. Two full runs, approved in session. |
 | T02 | job-decisions | T00 | ⬜ | |
 | T03 | jobs-calendar | — | ⬜ | |
 | T04 | job-starter | T02, T03 | ⬜ | |
@@ -28,7 +28,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 

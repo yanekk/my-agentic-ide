@@ -8,6 +8,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 🐞 | Section 15 flake was section 12b's Bedrock setting in a run-wide file, plus a poll miscount. After the fix `ONLY=12b,15` passed 22 of 22; two full runs printed `ALL PASS` (934). Before: 6 of 8 failed. |
 | 2026-10-31 | 📌 | Plan review session had no Google Calendar tools after the owner authenticated the connector mid-session. Whether a later worker gets them is unmeasured; T06 checks first. |
 | 2026-10-31 | 🐞 | `spikes/cockpit-test` section 15 failed 2 of 4 fresh-copy runs at plan review: `5h 97%`, `7d 77%` absent from the footer. Passed twice with 934 checks. Pre-existing on `main`; cause not found. |
 | 2026-10-31 | 📌 | `superfrog-re` `HEAD` is `63726e85`, `origin/main` is `2140433c`, and untracked `engine/` sits in the checkout. T00 records which a `-w` worktree starts from. |
