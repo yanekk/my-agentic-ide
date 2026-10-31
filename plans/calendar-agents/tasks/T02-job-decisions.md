@@ -1,4 +1,4 @@
-# T01 — job-decisions
+# T02 — job-decisions
 
 **Phase:** 1 · **Depends on:** T00 · **Weight:** heavy
 
@@ -35,20 +35,22 @@ buildClaudeArgs({ event, project, instructions, zone }) -> string[]
 noteText(kind, detail) -> string
 ```
 
-The name and worktree use the event's start in the machine zone passed as `zone`; `id4` is the last four alphanumerics of the event id.
+The name and worktree use the event's start in the machine zone passed as `zone`; `id4` is four hex characters of a hash of the event id (`node:crypto` is allowed by the purity grep; DESIGN §2.4).
 
 ## Tests
 
 - [ ] Starts at `now === start`; not at `start - 1`; starts late inside the entry; at `now === end` is `missed`.
 - [ ] A decided key never appears in `start` again, in every state.
 - [ ] Recurring instances with distinct ids each start; a moved, already-decided entry does not.
+- [ ] An event without `creatorOwn` on a fresh fetch: no decision, not a refusal (DESIGN §2.3).
 - [ ] Stale fetch (over 5 minutes), or `error` set: no decision at all, not even `missed`.
 - [ ] Non-jobs calendar is ignored; an entry that ended before `jobsSince` is ignored silently.
+- [ ] A faulty entry before its start: no note, no ledger change; corrected in time, it starts. Ended and faulty: `missed`.
 - [ ] Refusals: all-day, empty after `plainText`, not the owner's, unknown project; titles `..`, `a/b`, `../x`, with spaces, empty.
 - [ ] An entry that started before `ledger.notBefore` is ignored silently.
 - [ ] Overlapping entries all start.
 - [ ] `plainText`: `<br>`, `<p>`, links, `&amp;`, already-plain text, a literal `<` in code.
-- [ ] Args: instructions beginning with `-`, quotes or newlines remain one array element; name is unique for two entries in one minute.
+- [ ] Args: instructions beginning with `-`, quotes or newlines remain one array element; the prompt element never begins with `-`; name and worktree are unique for two entries in one minute, including recurring instances `abc_20261101T200000Z` and `def_20261101T200000Z`.
 - [ ] Preamble states the deadline, never-ask, worktree-only, no push or merge, and T00's confirmed wording.
 - [ ] A DST day: name and deadline use the zone passed.
 - [ ] Purity grep of DESIGN §3.1 fails on a planted `Date.now`.

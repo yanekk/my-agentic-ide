@@ -31,6 +31,7 @@ No automated tests; the output is an answer. Record each of:
 
 - [ ] `FINDINGS.md` has the four answers, dated, whatever the suite's own pass or fail was.
 - [ ] DESIGN §2.5's wording is confirmed in a finding, or the failure has been raised with the owner.
+- [ ] If the worktree started anywhere but the checkout's `HEAD`, that is raised with the owner: here `HEAD` and `origin/main` differ today, so an agent could test other code than expected.
 - [ ] The spike's scripts are deleted and its agent and worktree removed.
 
 ## Outside actions

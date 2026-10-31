@@ -8,6 +8,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 📌 | Plan review session had no Google Calendar tools after the owner authenticated the connector mid-session. Whether a later worker gets them is unmeasured; T06 checks first. |
+| 2026-10-31 | 🐞 | `spikes/cockpit-test` section 15 failed 2 of 4 fresh-copy runs at plan review: `5h 97%`, `7d 77%` absent from the footer. Passed twice with 934 checks. Pre-existing on `main`; cause not found. |
+| 2026-10-31 | 📌 | `superfrog-re` `HEAD` is `63726e85`, `origin/main` is `2140433c`, and untracked `engine/` sits in the checkout. T00 records which a `-w` worktree starts from. |
+| 2026-10-31 | 📌 | `claude rm --help` documents `--discard-unpushed`: removal also stops at unpushed commits, read from help, not yet run. T06 measures it. |
 | 2026-10-31 | 📌 | `claude rm` refuses a session whose worktree has uncommitted changes and keeps it; the branch `worktree-{name}` goes with a clean removal. Claude 2.1.316. |
 | 2026-10-31 | 📌 | An environment variable set on `claude --bg` read back `<unset>` inside the session. Nothing here may mark an agent by environment; `PIR_RUN`-style silencing would not work. |
 | 2026-10-31 | 📌 | `claude --bg` in an untrusted folder exits 1: `Workspace not trusted. Run claude in {dir} once…`. Trust is per folder and a parent's does not carry. `superfrog-re`, `agentic-ide` are trusted. |

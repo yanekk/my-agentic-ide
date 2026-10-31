@@ -6,11 +6,11 @@
 
 **Sixty words to a Notes cell, counted.** Flat prose, no bold-per-clause, no aphorism. The cell is an index for the next session; the account is the commit message. **Whoever writes a cell also fixes the over-budget cell they walk past.**
 
-**Plan reviewed:** not yet — the plan reviewer marks it before the build starts
+**Plan reviewed:** 2026-10-31 — 15 fixed, 7 decided with the user
 
-**Status:** Plan written, not yet reviewed. Nothing built.
+**Status:** Plan reviewed. Nothing built.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T02 can run beside it.
+**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
 
 ## Tasks
 
@@ -19,11 +19,12 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | long-command-spike | — | ⬜ | |
-| T01 | job-decisions | T00 | ⬜ | |
-| T02 | jobs-calendar | — | ⬜ | |
-| T03 | job-starter | T01 | ⬜ | |
-| T04 | daemon-wiring | T02, T03 | ⬜ | |
-| T05 | live-check | T00, T04 | ⬜ | |
+| T01 | cockpit-suite-flake | — | ⬜ | |
+| T02 | job-decisions | T00 | ⬜ | |
+| T03 | jobs-calendar | — | ⬜ | |
+| T04 | job-starter | T02, T03 | ⬜ | |
+| T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
+| T06 | live-check | T00, T05 | ⬜ | |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 

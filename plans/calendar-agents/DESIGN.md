@@ -33,7 +33,7 @@ The calendar is the only interface: no new screen, no job file, no command to qu
 
 One or more attached calendars carry `jobs: true` in `agenda.json`, and every entry on them is a job. A dedicated calendar was chosen over a title marker or saved recipes because invitations land on the primary calendar, so they cannot reach it, and instructions stay editable on the entry itself (user, 2026-10-31).
 
-`agenda add <slug> --jobs` and `agenda jobs <slug> on|off` set the flag. Both refuse a primary calendar (`chosen.primary` in `add`; `calendarId === account` in `jobs`, since a primary calendar's id is the account address), because invitations arrive there. `add --jobs` also refuses a calendar whose `accessRole` is not `owner`, because others control a calendar shared to you. Both inherit `refuseIfAgent`, so an agent cannot promote a calendar. Setting the flag records `jobsSince` (epoch ms); entries that ended before it are ignored, so attaching a calendar does not report its history as missed.
+`agenda add <slug> --jobs` and `agenda jobs <slug> on|off` set the flag. Both refuse a primary calendar (`chosen.primary` in `add`; `calendarId === account` in `jobs`, since a primary calendar's id is the account address), because invitations arrive there. `add --jobs` and `jobs on` also refuse a calendar whose `accessRole` is not `owner`, because others control a calendar shared to you. `jobs on` asks Google through `listCalendars`, since the row does not store the role, and refuses when it cannot find out; `off` never asks (user, 2026-10-31). Both inherit `refuseIfAgent`, so an agent cannot promote a calendar. Turning the flag on records `jobsSince` (epoch ms) and `off` clears it; entries that ended before it are ignored, so attaching a calendar, or turning it back on after a week, does not report its history as missed. `add --jobs` on a slug that already exists refuses and names `agenda jobs`, because `add` there means repair.
 
 A jobs calendar still draws in the agenda column like any other, because it is a real part of the day and hiding it would need a new rule nobody asked for.
 
@@ -41,7 +41,7 @@ A jobs calendar still draws in the agenda column like any other, because it is a
 
 The title, trimmed, is the project: a folder name matching `^[A-Za-z0-9._-]+$`, not `.` or `..`, such that `{projects root}/{title}/.git` exists. The projects root is `panes.repo` (`start_dir`). The name pattern stops a title from walking out of the root. The description, converted to plain text, is the instructions. Google returns descriptions as HTML when they are formatted in its editor, so `<br>`, `</p>` and `</div>` become newlines, other tags are dropped, and the five basic entities are decoded.
 
-An entry is refused, with a note, when: the project is invalid or missing; the description is empty; it is all-day, because it has no start time and is probably a mistake (user, 2026-10-31); or it was not created by the account owner (`creator.self`, or `creator.email` equal to the account), as a second defence if the calendar is ever shared (user, 2026-10-31).
+An entry is judged at its start time, not before, so a mistake can be corrected until then and the owner hears of it at that moment, not on sight (user, 2026-10-31). An entry that has ended is skipped whatever else is wrong with it. An entry is refused, with a note, when: the project is invalid or missing; the description is empty; it is all-day, because it has no start time and is probably a mistake (user, 2026-10-31); or it was not created by the account owner (`creator.self`, or `creator.email` equal to the account), as a second defence if the calendar is ever shared (user, 2026-10-31).
 
 ### 2.3 When it starts
 
@@ -49,7 +49,7 @@ An undecided entry starts when `start <= now < end`. So a start missed because t
 
 Each entry is decided once, keyed by calendar slug and event id. Google's expanded recurring instances have their own ids, so a repeating entry runs once per occurrence. Consequence: moving an entry that has already been decided does not run it again; the owner makes a new entry (user, 2026-10-31). Edits or deletion before the decision take effect, because decisions read the current fetch. Edits after it change nothing.
 
-Decisions are made only on a calendar's fresh, successful fetch (`error` null, `fetchedAt` within 5 minutes). A stale cache could still hold a deleted entry, and starting it is worse than starting late.
+Decisions are made only on a calendar's fresh, successful fetch (`error` null, `fetchedAt` within 5 minutes). A stale cache could still hold a deleted entry, and starting it is worse than starting late. An event with no `creatorOwn` field is left undecided: the `agenda` command's own fetch, or a fetch from before the flag was set, caches fresh events without the job fields, and reading those as empty would refuse every entry for good.
 
 ### 2.4 Starting the agent
 
@@ -61,7 +61,7 @@ claude --bg -n "{project} / cal {MM-DD HH:MM} {id4}" --permission-mode bypassPer
   --append-system-prompt "{preamble}" "{prompt}"
 ```
 
-It does not use `spawnAgent`, which types into the fleet box and so works only with `claude agents` shown and nothing attached, and cannot pass flags (measured need; see §7). The name has a date and id so it is unique, because the daemon cannot resolve duplicate agent names (`CLAUDE.md § Known limits`).
+It does not use `spawnAgent`, which types into the fleet box and so works only with `claude agents` shown and nothing attached, and cannot pass flags (measured need; see §7). The name has a date and id so it is unique, because the daemon cannot resolve duplicate agent names (`CLAUDE.md § Known limits`). `{id4}` is four hex characters of a hash of the event id, not its tail, because recurring instances' ids end in a shared timestamp such as `_20261101T200000Z`. `{prompt}` is `Instructions from the calendar entry:` then a newline then the description, so it never begins with `-`, which Claude's own option parser would read as a flag whatever `execFile` does. `--disallowedTools` takes several values, so a flag must always follow it.
 
 `--bg` keeps the session listed when it finishes, which is the report path the owner chose (user, 2026-10-31). `bypassPermissions` is because a permission prompt would stall the agent until morning. `--disallowedTools AskUserQuestion` removes the question tool (measured: it is absent from the agent's tools).
 
@@ -75,7 +75,7 @@ The deadline is told and not enforced. A stuck agent can spend until the usage l
 
 ### 2.6 Telling the owner
 
-Problems go to the notes list through `addNote(panes.repo, text, "calendar")`, so they carry an author and do not read as the owner's own. One note per event: refused (with the reason), skipped because it ended, failed to start (with the first line of Claude's error), and possibly-not-started. A jobs calendar's fetch failing with `auth` adds one note per episode, cleared on the next success, because otherwise the first sign of a lost sign-in is a morning with no run. Network failures add no note: they are usually brief, and an entry they cost is already reported as skipped.
+Problems go to the notes list through `addNote(panes.repo, text, "calendar")`, so they carry an author and do not read as the owner's own. One note per event: refused (with the reason), skipped because it ended, failed to start (with the first line of Claude's error), and possibly-not-started. A jobs calendar's fetch failing with `auth` or `gone` adds one note per episode, cleared on the next success, because otherwise the first sign of a lost sign-in or calendar is a morning with no run. `network` and `unknown` failures add no note: they are usually brief, and an entry they cost is already reported as skipped.
 
 A successful start adds no note, because the agent list already shows it (user, 2026-10-31).
 
@@ -84,7 +84,7 @@ A successful start adds no note, because the agent list already shows it (user, 
 - **Crash around the start.** The ledger records `starting` before `claude --bg` runs. On the next daemon start a leftover `starting` becomes `unknown` with a note and is never retried. A rare missed run is preferred to any chance of a second run (user, 2026-10-31).
 - **Untrusted project.** `claude --bg` exits 1 with `Workspace not trusted. Run claude in {dir} once…` (measured). It becomes a failed-to-start note carrying that line, and is not retried.
 - **Cockpit closed.** Nothing runs; §2.3 applies on reopening. The window must stay open overnight (user, 2026-10-31).
-- **Closed across midnight.** The agenda fetch starts at today's midnight, so an entry that ended before it would vanish without a note. Jobs calendars therefore fetch from 7 days back. The pane's own filter must still show only what is left of today; T02 tests it.
+- **Closed across midnight.** The agenda fetch starts at today's midnight, so an entry that ended before it would vanish without a note. Jobs calendars therefore fetch from 7 days back. The pane's own filter must still show only what is left of today; T03 tests it.
 - **Corrupt ledger.** Moved aside as `calendar-jobs.json.corrupt-{ts}`, then one note, and a fresh ledger with `notBefore` set to now. Entries that started before `notBefore` are ignored, because an empty ledger would otherwise re-run every entry still inside its window. A rare lost run is preferred, as in the crash case.
 - **Two daemons.** Not guarded beyond the existing rebuild kill, which is how the agenda and BitBucket refreshes already stand.
 
@@ -106,7 +106,7 @@ The model reads no clock, file, environment or network. A grep in `spikes/calend
 
 - `cockpit-jobs-model.mjs`: `plainText`, `parseJob`, `decideJobs`, `buildPreamble`, `buildClaudeArgs`, `noteText`.
 - `cockpit-jobs-store.mjs`: read and write `calendar-jobs.json`.
-- `cockpit-jobs.mjs`: `jobsTick`, `recoverStarting`, the `--once` entry point. Depends on the three above, the agenda store and `cockpit-notes.mjs`.
+- `cockpit-jobs.mjs`: `jobsTick`, `recoverStarting`, the `--once` entry point. Depends on the two above, the agenda store and `cockpit-notes.mjs`.
 - `cockpit-agenda-model.mjs`: `normaliseEvent` gains a `jobs` option.
 - `cockpit-agenda-store.mjs`, `cockpit-agenda.mjs`: the flag and its commands.
 - `cockpitd.mjs`: the wider fetch, the tick, the recovery at start.
@@ -125,7 +125,7 @@ The model reads no clock, file, environment or network. A grep in `spikes/calend
 
 ```
 { version: 1, notBefore?: epochMs, entries: { "{slug}/{eventId}": { state, at, agentId?, reason? } },
-  authNoted: { "{slug}": true } }
+  authNoted: { "{slug}": true } }   // any noted auth or gone episode
 ```
 
 `state` is `starting | started | refused | missed | failed | unknown`. Entries older than 30 days are pruned, which is safe because fetches reach back only 7. A crash mid-write leaves the previous file.
@@ -134,7 +134,7 @@ The model reads no clock, file, environment or network. A grep in `spikes/calend
 
 ## 4. Testing
 
-`spikes/calendar-jobs-test/run.sh` holds the pure model tests, the store tests and the tick against a fake `claude` on `PATH` in a throwaway `COCKPIT_DIR`. `spikes/agenda-test` covers the flag, the commands and the normalised fields. `spikes/cockpit-test` covers the daemon wiring against its WezTerm stub. None of them can prove that Google's real events carry the fields as assumed, or that the real Claude behaves as it did at plan time; that is T00 and T05.
+`spikes/calendar-jobs-test/run.sh` holds the pure model tests, the store tests and the tick against a fake `claude` on `PATH` in a throwaway `COCKPIT_DIR`. `spikes/agenda-test` covers the flag, the commands and the normalised fields. `spikes/cockpit-test` covers the daemon wiring against its WezTerm stub. None of them can prove that Google's real events carry the fields as assumed, or that the real Claude behaves as it did at plan time; that is T00 and T06.
 
 There is no new surface: the agent list, notes column and agenda column are unchanged, so no rig or drill is planned. `agenda` output is tested through `spikes/agenda-test/cli.test.mjs`.
 
@@ -149,7 +149,7 @@ There is no new surface: the agent list, notes column and agenda column are unch
 | Claude Code | 2.1.316, `Claude Max` account here. `skipDangerousModePermissionPrompt: true` in `~/.claude/settings.json` |
 | **Deliberately absent** | `timeout` (GNU coreutils) is not installed; no new always-on service |
 
-**The test command.** The `test` lines of the block on top. Measured 2026-10-31 in a fresh worktree: agenda, notes and cockpit (934 checks, rc 0) pass, and the tree stays clean. The calendar-jobs line is guarded until T01 creates that suite, after the `pir-pane` precedent. Setup is `none`: the repo has no packages. New suites print one summary line on pass and full failures, no colour, in the manner of `spikes/agenda-test`. Nothing here forces colour (`env | grep -i color` shows only `COLORTERM`). `spikes/cockpit-test` prints daemon log lines on a pass; that is existing behaviour and stays out of scope.
+**The test command.** The `test` lines of the block on top. Measured 2026-10-31 in a fresh worktree: agenda and notes pass, the tree stays clean, and cockpit (934 checks) passed 2 of 4 runs; T01 fixes that flake. The calendar-jobs line is guarded until T02 creates that suite, after the `pir-pane` precedent. Setup is `none`: the repo has no packages. New suites print one summary line on pass and full failures, no colour, in the manner of `spikes/agenda-test`. Nothing here forces colour (`env | grep -i color` shows only `COLORTERM`). `spikes/cockpit-test` prints daemon log lines on a pass; that is existing behaviour and stays out of scope.
 
 Environment settings passed to `claude --bg` do not reach the session (measured: a variable read back `<unset>`), so nothing in this feature may depend on one. The worktree folder name is the only marker available.
 
@@ -159,8 +159,8 @@ Environment settings passed to `claude --bg` do not reach the session (measured:
 
 | Cannot be tested automatically | Why it needs a person |
 |---|---|
-| Creating the jobs calendar and adding a real entry | Google sign-in in a browser; the app's scope is read-only so no worker can write an entry |
-| A full real night through the live daemon | The live daemon runs from the main checkout, so it only has this code after the merge and a window reopen |
+| Attaching the real jobs calendar with `agenda add --jobs` | Interactive picker, possibly a Google sign-in, refused to agents. The owner's first step after the merge; no task owns it. T06 attaches its test calendar in a scratch copy instead |
+| A full real night through the live daemon | The live daemon runs from the main checkout, so it only has this code after the merge and a window reopen. No task owns it: it is the owner's first use after merging |
 
 ### 5.2 Seatbelts
 
@@ -185,9 +185,12 @@ Never point a test tick at the real jobs calendar without the dry run, because a
 |---|---|---|---|---|---|---|
 | Spike agent on `superfrog-re` tests | `bash spikes/calendar-jobs-spike/start.sh` | worker | Owner asked for this run; own worktree, no push | `claude rm {id}` | ~70 min, modest usage | `claude agents --json` |
 | Remove the spike agent | `bash spikes/calendar-jobs-spike/clean.sh {id}` | worker | Removes only the spike's own worktree | none needed; the report is in FINDINGS first | none | `claude agents --json` |
-| Live one-shot check | `bash spikes/calendar-jobs-test/live-check.sh` | worker | Starts one agent from the owner's own test entry, in a project they name | `claude rm {id}` | tiny, entry names the work | `node bin/cockpit-agenda.mjs ls` |
-| Sign in and attach the jobs calendar | `node bin/cockpit-agenda.mjs add agents --jobs` | person | Browser login | `agenda rm agents` | none | none |
-| Create the calendar and test entry | Google Calendar | person | App scope is read-only | delete it | none | none |
+| Remove the live check's test agent | `claude rm {id}`, with the `--discard-unpushed` value it reports | ask | Discards the test commit for good | none once discarded | none | `claude agents --json` |
+| Live one-shot check | `bash spikes/calendar-jobs-test/live-check.sh {calendarId} {account}` | worker | Starts one agent from the owner's own test entry, in a project they name | `claude rm {id}` | tiny, entry names the work | `node bin/cockpit-agenda.mjs ls` |
+| Attach the test calendar | `live-check.sh`'s scratch `agenda.json` only | worker | Owner chose it, 2026-10-31. Real configuration untouched, so `refuseIfAgent` stands | scratch is deleted | none | `node bin/cockpit-agenda.mjs ls` |
+| Attach the real jobs calendar, after the merge | `agenda add <slug> --jobs` | person | Picker, browser login, and the §2.1 rule that an agent cannot promote a calendar | `agenda rm <slug>` | none | none |
+| Create the test calendar and entries | claude.ai Google Calendar connector; tool names measured in T06, so no `permissions.json` rule; if blocked, the worker uses `request_rule` for the measured name | worker | Exception by the owner, 2026-10-31: they want agents doing this alone. Writes to their real account, test items only | delete them | none | connector lists calendars |
+| Delete the test calendar and entries | the same connector | worker | Exception by the owner, 2026-10-31: they want agents doing this alone. A delete in the real account, only of what T06 created, identified by the ids it recorded at creation | none once deleted, and they are throwaway | none | connector lists calendars |
 
 Credentials measured here 2026-10-31: `agenda-client.json` and `agenda.json` exist, with one account and one calendar (`home`); Claude is signed in (the probes ran). `permissions.allow` already holds `Bash(claude --bg:*)` for this repo.
 
@@ -195,7 +198,7 @@ Credentials measured here 2026-10-31: `agenda-client.json` and `agenda.json` exi
 
 ## 6. Recovery
 
-To stop everything starting: `agenda jobs {slug} off`, or close the cockpit window. To stop one running agent: `claude stop {id}`. To remove it and its worktree: `claude rm {id}`, which refuses while there is uncommitted work (measured). No agent can push, by instruction, so `main` and the remote are unchanged until the owner merges a branch by hand.
+To stop everything starting: `agenda jobs {slug} off`, or close the cockpit window. To stop one running agent: `claude stop {id}`. To remove it and its worktree: `claude rm {id}`, which refuses while there is uncommitted work (measured). Per `claude rm --help` it also stops at unpushed commits, which is every agent that committed here, and reports a `--discard-unpushed` value to pass; merge first, or discard knowingly. T06 measures this. No agent can push, by instruction, so `main` and the remote are unchanged until the owner merges a branch by hand.
 
 ---
 
@@ -208,6 +211,8 @@ To stop everything starting: `agenda jobs {slug} off`, or close the cockpit wind
 - **Deadline told, not enforced** (user, 2026-10-31, against the planner's recommendation of a hard stop).
 - **Not the "finished" ding** (user, 2026-10-31): a separate task to silence these agents was proposed and removed, so they ding on the Stop hook like any session, also at night.
 - **Survey.** Extended: `refreshAgenda`, `normaliseEvent`, `agenda`, `addNote`. Not extended: `spawnAgent` (§2.4). Not used: `pir` single runs, whose planner talks to a person; cloud routines (`/schedule`), which cannot reach this machine.
+- **The final message is judged by the worker** in T06, not the owner, and the worker attaches the test calendar in a scratch copy, so T06 needs no person (user, 2026-10-31).
+- **Test calendar and entries come from the connector** in T06, and its reviewer confirms them independently (user, 2026-10-31). Cost: an entry made by hand, the owner's nightly path, is first seen on the first real night.
 - **T00 uses the real `superfrog-re` suite**, not a stand-in sleep (user, 2026-10-31).
 - No mock: there is no new screen.
 

@@ -1,6 +1,6 @@
-# T03 — job-starter
+# T04 — job-starter
 
-**Phase:** 2 · **Depends on:** T01 · **Weight:** medium
+**Phase:** 2 · **Depends on:** T02, T03 · **Weight:** medium
 
 ## Goal
 
@@ -28,15 +28,17 @@ recoverStarting({ now, notesRepo, log })   // starting -> unknown, one note each
 ```
 
 ```
-node bin/cockpit-jobs.mjs --once [--fetch]
+node bin/cockpit-jobs.mjs --once [--fetch] [--root DIR]
   # one tick outside the daemon. --fetch first fetches jobs calendars itself into
   # COCKPIT_DIR's cache, reusing the agenda's google client.
+  # --root is the projects root and notes key, default `repo` from panes.json in COCKPIT_DIR;
+  # a scratch directory has no panes.json, so live-check.sh passes it.
   # COCKPIT_JOBS_DRY_RUN=1 prints decisions and argv only.
 ```
 
-`jobsTick` writes `starting` before it runs Claude, `started` with the id parsed from `backgrounded · {id} · {name}` on exit 0, and `failed` with the first line of output otherwise. It uses `execFile` with a 60 s limit and no shell, and has an in-flight guard. Instructions never reach a log line, because they may hold anything; only slug, project and state do.
+`jobsTick` writes `starting` before it runs Claude, `started` with the id parsed from `backgrounded · {id} · {name}` on exit 0, and `failed` with the first line of output otherwise. It uses `execFile` with a 60 s limit and no shell, and has an in-flight guard. It reads calendars with `readState({ rescue: false })`, because a timer must not quarantine a corrupt `agenda.json` with nobody to tell (`CLAUDE.md`, the resting-pane row). Instructions never reach a log line, because they may hold anything; only slug, project and state do.
 
-`live-check.sh` copies `agenda.json` and `agenda-client.json` to a `0600` scratch `COCKPIT_DIR`, runs `--once --fetch` first in dry run, then for real, then for real again to show the same entry does not start twice, prints each result, and always deletes the scratch directory. The scratch is needed because the live daemon runs older code and overwrites the real cache without descriptions.
+`live-check.sh <calendarId> <account>` copies `agenda.json` and `agenda-client.json` to a `0600` scratch `COCKPIT_DIR`, adds to the scratch copy a calendar row `agents` with that id and account, `jobs: true` and `jobsSince` now, refuses if the account has no sign-in there, runs `--once --fetch` first in dry run, then for real, then for real again to show the same entry does not start twice, prints each result and the scratch notes, because those die with the directory, and always deletes the scratch directory. The scratch is needed because the live daemon runs older code and overwrites the real cache without descriptions.
 
 ## Tests
 
@@ -46,7 +48,8 @@ node bin/cockpit-jobs.mjs --once [--fetch]
 - [ ] Two ticks, one start. A tick overlapping a running tick does nothing.
 - [ ] `recoverStarting`: `unknown`, one note, never restarted.
 - [ ] Corrupt ledger: moved aside, one note, `notBefore` set so nothing re-runs (DESIGN §2.7).
-- [ ] Auth error on a jobs calendar: one note across many ticks; a new note after a success and a second failure.
+- [ ] Auth or gone error on a jobs calendar: one note across many ticks; a new note after a success and a second failure. Network error: no note.
+- [ ] A corrupt `agenda.json` is left in place by a tick.
 - [ ] Notes carry author `calendar` and are visible through `readNotes(notesRepo)`.
 - [ ] Dry run: no fake invocation, no ledger write, no note.
 - [ ] Hostile instructions (`$(touch x)`, quotes, newlines) reach the fake byte-exact and run nothing; they appear in no log.
@@ -56,4 +59,4 @@ node bin/cockpit-jobs.mjs --once [--fetch]
 
 - [ ] `bash spikes/calendar-jobs-test/run.sh` passes.
 - [ ] `COCKPIT_JOBS_DRY_RUN=1 node bin/cockpit-jobs.mjs --once` against a fixture prints the expected argv.
-- [ ] No change to `cockpitd.mjs`; T04 owns that.
+- [ ] No change to `cockpitd.mjs`; T05 owns that.

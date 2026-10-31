@@ -1,6 +1,6 @@
-# T04 — daemon-wiring
+# T05 — daemon-wiring
 
-**Phase:** 2 · **Depends on:** T02, T03 · **Weight:** medium
+**Phase:** 2 · **Depends on:** T01, T03, T04 · **Weight:** medium
 
 ## Goal
 
@@ -29,11 +29,12 @@ The tick's promise is never awaited on the reconcile path and any rejection is c
 
 ## Tests
 
-In `spikes/cockpit-test`, with the fake `claude` on `PATH` and a stubbed agenda origin:
+In `spikes/cockpit-test`, extending that suite's `claude` stub and its fake Google (sections 13) rather than adding second ones:
 
 - [ ] A due entry on a jobs calendar in the cache starts one agent within a tick, with `claude agents` parked and with an agent attached: no pane is typed into.
 - [ ] Restarting the daemon does not start it again.
 - [ ] A leftover `starting` becomes a note at daemon start.
+- [ ] A jobs calendar's fetch asks from 7 days back and caches `description` and `creatorOwn`.
 - [ ] A non-jobs calendar's fetch keeps its `timeMin` and event shape; no job calendar means no `calendar-jobs.json` written.
 - [ ] A throwing tick is logged and the daemon keeps running.
 

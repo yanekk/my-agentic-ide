@@ -1,0 +1,12 @@
+{
+  "allow": [
+    "Bash(bash spikes/calendar-jobs-spike/start.sh)",
+    "Bash(bash spikes/calendar-jobs-spike/clean.sh:*)",
+    "Bash(bash spikes/calendar-jobs-test/live-check.sh:*)",
+    "Bash(claude agents --json)",
+    "Bash(node bin/cockpit-agenda.mjs ls)"
+  ],
+  "ask": [
+    "Bash(claude rm:*)"
+  ]
+}

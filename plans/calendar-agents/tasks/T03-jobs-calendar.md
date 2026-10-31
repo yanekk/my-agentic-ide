@@ -1,4 +1,4 @@
-# T02 — jobs-calendar
+# T03 — jobs-calendar
 
 **Phase:** 1 · **Depends on:** — · **Weight:** medium
 
@@ -26,7 +26,7 @@ setJobs(slug, on, now)                     // store
 readState()                                // its row map must also keep jobs and jobsSince, or the flag reads as off
 putCalendar({ ..., jobs, jobsSince }, now) // today it rebuilds the row and would drop both
 normaliseEvent(raw, { slug, tz, selfEmail, jobs })
-  // jobs true adds: description (raw string), creatorOwn (boolean)
+  // jobs true adds: description (raw string, "" when absent), creatorOwn (boolean)
 ```
 
 `creatorOwn` is `raw.creator.self === true || raw.creator.email === selfEmail`. Without `jobs`, the event is unchanged and carries neither field. `agenda ls` marks a jobs calendar.
@@ -34,9 +34,10 @@ normaliseEvent(raw, { slug, tz, selfEmail, jobs })
 ## Tests
 
 - [ ] `add --jobs` refuses a primary calendar, and a calendar whose `accessRole` is not `owner`; nothing is written.
-- [ ] `jobs <slug> on` refuses when `calendarId === account`; `off` always works; an unknown slug errors.
+- [ ] `jobs <slug> on` refuses when `calendarId === account`, when `accessRole` is not `owner`, and when Google cannot be reached, writing nothing; `off` always works, offline too; an unknown slug errors.
 - [ ] An agent environment is refused (`refuseIfAgent`).
-- [ ] `jobs` and `jobsSince` survive repair `agenda add`, `setColour`, and a re-read; turning on twice keeps the first `jobsSince`.
+- [ ] `jobs` and `jobsSince` survive repair `agenda add`, `setColour`, and a re-read; turning on twice keeps the first `jobsSince`; `off` then `on` records a new one.
+- [ ] `add <existing slug> --jobs` refuses, names `agenda jobs`, opens nothing.
 - [ ] A row with no flag reads as not jobs, so existing `agenda.json` files still work.
 - [ ] `normaliseEvent` without `jobs` deep-equals today's output; with `jobs`, the two fields appear; `creator` absent gives `creatorOwn` false.
 - [ ] The pane draws an event from 3 days ago in the cache as nothing (DESIGN §2.7 wider fetch).
@@ -46,4 +47,4 @@ normaliseEvent(raw, { slug, tz, selfEmail, jobs })
 
 - [ ] `bash spikes/agenda-test/run.sh` and `bash spikes/notes-test/run.sh` pass.
 - [ ] `agenda help` documents both forms.
-- [ ] No fetch window or daemon change is made here; T04 owns those.
+- [ ] No fetch window or daemon change is made here; T05 owns those.
