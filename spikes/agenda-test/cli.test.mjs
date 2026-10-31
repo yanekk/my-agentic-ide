@@ -1147,10 +1147,26 @@ async function attached(name) {
     eq(`\`agenda ${args.join(" ")}\` is a usage error`, [bad.status, bytes(dir)], [1, was]);
   }
 
+  // Google's own flag decides, not only the id: a primary calendar listed under an
+  // address other than the signed-in one (an alias) is still where invitations land.
+  const aliased = JOB_LIST.map((c) => (c.primary ? { ...c, id: "alias@corp.com" } : c));
+  stub.set(listIs(aliased));
+  const aliasAdd = await run(["add", "bad", "--jobs"], { dir, tty: writeTty(dir, "1", "1") });
+  eq("`add --jobs` refuses a primary calendar whose id is not the account", [aliasAdd.status, bytes(dir)], [1, was]);
+  const aliasPlain = await run(["add", "aka"], { dir, tty: writeTty(dir, "1", "1") });
+  eq("...which attaches plainly", aliasPlain.status, 0);
+  const aliasWas = bytes(dir);
+  const aliasOn = await run(["jobs", "aka", "on"], { dir });
+  eq("...and `jobs on` refuses it too", [aliasOn.status, bytes(dir)], [1, aliasWas]);
+  ok("...saying why", /primary/.test(aliasOn.all), aliasOn.all);
+  await run(["rm", "aka"], { dir });
+  stub.set(listIs(JOB_LIST));
+  const wasBeforeAgent = bytes(dir);
+
   // An agent must not be able to promote a calendar, or demote one.
   for (const args of [["jobs", "own", "on"], ["jobs", "own", "off"], ["add", "z", "--jobs"]]) {
     const a = await run(args, { dir, env: { CLAUDECODE: "1" } });
-    eq(`\`agenda ${args.join(" ")}\` is refused to an agent`, [a.status, bytes(dir)], [1, was]);
+    eq(`\`agenda ${args.join(" ")}\` is refused to an agent`, [a.status, bytes(dir)], [1, wasBeforeAgent]);
     ok("...saying so", /not available to an agent/.test(a.all), a.all);
   }
 }
