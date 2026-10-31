@@ -8,6 +8,13 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-10-31 | 🔄 | `-w` starts at `origin/main` by default: `2140433c`, 2077 commits behind, no suite. Owner chose `worktree.baseRef: head` in `~/.claude/settings.json` for every agent; the rerun started at `63726e85`. Delete the key to undo. |
+| 2026-10-31 | 📌 | Nothing writes that setting: `bin/install.sh` does not, and no task covers it. On another machine calendar agents would start at `origin/main`. |
+| 2026-10-31 | 📌 | T00: real suite ran to its end, exit 0, 4508s (75m08s) on `63726e85`, setup 6s. Agent reported pass, summary line and duration. Clean worktree. |
+| 2026-10-31 | 📌 | T00: foreground Bash hit its 600s limit and moved to the background; the agent ended its turn at 10 minutes, a task notification woke it 65 minutes later, and it reported. |
+| 2026-10-31 | 📌 | §2.5 long-command wording confirmed by T00: "Run long commands in the background with the longest time limit allowed and do not end your turn until they have finished." The agent's parked turn did no harm. |
+| 2026-10-31 | 📌 | `claude agents --json` showed `busy`/`working` on all 71 polls, parked turn included, then `idle`/`done`, listed without `--all`. An agent reporting it ran nothing ended `idle`/`blocked`, so `blocked` can mean a finished report. |
+| 2026-10-31 | 📌 | Guards seen in T00: a worktree session refused a compound git command ("too complex to verify"); the auto-mode classifier refused `start.sh` inside a compound command and allowed it alone. |
 | 2026-10-31 | 🐞 | T01 review: two more cockpit-test races. A healthy pir poll past the 2 s limit broke exact `usage: pir service` counts; section 13 cleared `GHITS` after `makestale`. Both reproduced and fixed; two full `ALL PASS`. |
 | 2026-10-31 | 🐞 | Section 15 flake was section 12b's Bedrock setting in a run-wide file, plus a poll miscount. After the fix `ONLY=12b,15` passed 22 of 22; two full runs printed `ALL PASS` (934). Before: 6 of 8 failed. |
 | 2026-10-31 | 🔄 | Owner decided: a calendar another slug holds as jobs is refused by `add --jobs` and `jobs on`, since the ledger keys on slug. A refused `add --jobs` keeps a new sign-in, despite the T03 doc's "nothing is written". |
