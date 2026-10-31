@@ -105,6 +105,13 @@ ok("no cache entry for the calendar: nothing",
   nothing(decideJobs({ calendars: [CAL], cache: { calendars: {} }, ledger: { entries: {} }, now: START,
     projectsRoot: ROOT, zone: ZONE, projectExists: () => true })));
 
+{
+  const bad = [null, ev({ id: "a", end: undefined }), ev({ id: "b", start: "soon" })];
+  const d = decide({ events: [...bad, ev()] });
+  eq("a damaged row costs the others nothing", d.start.map((s) => s.key), ["night/evt1"]);
+  eq("...and is itself left undecided", d.ledgerChanges, []);
+}
+
 section("2.1 which calendars and entries count");
 ok("a calendar without the flag is ignored", nothing(decide({ calendars: [{ slug: "night", account: "me@x.y" }] })));
 ok("ended before jobsSince: ignored silently",
@@ -182,6 +189,11 @@ for (const [name, input, want] of [
   ["a literal < in code", "if a < b && c > d then", "if a < b && c > d then"],
   ["shell redirects survive", "cat <in >out", "cat <in >out"],
   ["a placeholder survives", "checkout <branch> and List<T>", "checkout <branch> and List<T>"],
+  ["a redirect from a file named like a tag", "sort <a >b", "sort <a >b"],
+  ["a comparison starting with a tag name", "if x <b and c> d", "if x <b and c> d"],
+  ["unquoted attributes", "<a href=x target=_blank>t</a>", "t"],
+  ["space before the close", '<span style="a" >s</span>', "s"],
+  ["self-closed with a space", "a<hr />b", "ab"],
   ["outer whitespace goes", "\n  hi  \n", "hi"],
   ["null", null, ""],
 ]) eq(`plainText: ${name}`, plainText(input), want);

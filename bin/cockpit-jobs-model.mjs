@@ -21,7 +21,10 @@ const FRESH_MS = 5 * 60 * 1000;   // DESIGN 2.3
 // surviving as text is harmless; a lost shell redirect is not.
 const HTML_TAGS = "a|abbr|b|big|blockquote|br|center|code|del|div|em|font|h[1-6]|hr|html-blob|html|body|head|i|ins|li|ol|p|pre|s|small|span|strike|strong|sub|sup|table|tbody|td|th|thead|tr|tt|u|ul";
 // Quoted attributes are consumed whole, because a URL can legally hold a ">".
-const TAG = new RegExp(`</?(?:${HTML_TAGS})(?:\\s(?:"[^"]*"|'[^']*'|[^'"<>])*)?/?>`, "gi");
+// After a tag name only name=value counts as an attribute: single letters are tag
+// names too, so anything looser reads `sort <a >b` and `x <b and c> d` as tags.
+const ATTR = `\\s+[^\\s"'<>/=]+\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s"'<>]+)`;
+const TAG = new RegExp(`</?(?:${HTML_TAGS})(?:(?:${ATTR})+\\s*)?(?:\\s*/)?>`, "gi");
 const LINE_BREAK = /<br\s*\/?>|<\/(?:p|div|li)\s*>/gi;
 
 // &nbsp; and the numeric apostrophes are beyond DESIGN 2.2's five names: Google's
@@ -211,6 +214,10 @@ export function decideJobs({ calendars, cache, ledger, now, projectsRoot, zone, 
     if (!entry || entry.error != null || !(now - entry.fetchedAt <= FRESH_MS)) continue;
 
     for (const event of Array.isArray(entry.events) ? entry.events : []) {
+      // A row with no usable times cannot be judged, and formatting one would throw
+      // and cost every other entry its start. normaliseEvent never writes one, so
+      // this only meets a damaged cache, and the next fetch replaces that.
+      if (!Number.isFinite(event?.start) || !Number.isFinite(event?.end)) continue;
       const key = `${cal.slug}/${event.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
