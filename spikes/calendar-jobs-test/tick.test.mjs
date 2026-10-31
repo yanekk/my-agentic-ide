@@ -157,6 +157,26 @@ section("failed");
   ok("...saying so", /no answer from claude/.test(entry().reason), entry().reason);
 }
 {
+  // Reproduced at review: execFile's limit only sends SIGTERM, and its callback waits
+  // for the exit, so this held the tick's guard up and stopped every later start.
+  reset({ mode: "stubborn" });
+  cached([ev({ start: Date.now() - 1000, end: Date.now() + 60000 })], { fetchedAt: Date.now() });
+  execFileSync("node", [JOBS_BIN, "--once", "--root", ROOT], {
+    env: { ...process.env, COCKPIT_JOBS_START_LIMIT_MS: "1500" }, stdio: "ignore", timeout: 15000,
+  });
+  eq("a claude that ignores SIGTERM is still `failed`", entry().state, "failed");
+  ok("...saying so", /no answer from claude/.test(entry().reason), entry().reason);
+}
+{
+  // Notes are keyed by this string, and the column reads the absolute one.
+  reset({ mode: "trust" });
+  cached([ev({ start: Date.now() - 1000, end: Date.now() + 60000 })], { fetchedAt: Date.now() });
+  execFileSync("node", [JOBS_BIN, "--once", "--root", path.basename(ROOT)], { cwd: SCRATCH, stdio: "ignore" });
+  const repos = Object.keys(JSON.parse(fs.readFileSync(NOTES_FILE, "utf8")).repos);
+  eq("a relative --root files its note", repos.length, 1);
+  ok("...under the absolute path", path.isAbsolute(repos[0]), repos[0]);
+}
+{
   reset();
   cached([], { error: { kind: "auth", since: NOW } });
   fs.mkdirSync(LEDGER_FILE);
@@ -542,7 +562,11 @@ section("live-check.sh");
     calendars: [{ slug: "realjobs", account: "me@x.y", calendarId: "realjobs-id", title: "r", colour: null, addedAt: 1, jobs: true, jobsSince: 1 }],
   });
   fs.writeFileSync(path.join(real, "agenda.json"), realState);
-  const env = { LIVE_COCKPIT_DIR: real, LIVE_ROOT: ROOT, TMPDIR: tmp, FAKE_CLAUDE_MODE: "" };
+  // macOS mktemp ignores TMPDIR with no template, so a shim puts the scratch where the
+  // listings below can see it; without it they are empty whatever happened.
+  const shim = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-shim-"));
+  fs.writeFileSync(path.join(shim, "mktemp"), `#!/bin/sh\nexec /usr/bin/mktemp -d "${tmp}/s.XXXXXX"\n`, { mode: 0o755 });
+  const env = { LIVE_COCKPIT_DIR: real, LIVE_ROOT: ROOT, PATH: `${shim}:${process.env.PATH}`, FAKE_CLAUDE_MODE: "" };
   eventQueries.length = 0;
   const r = await liveCheck(["test-cal", "me@x.y"], env);
   eq("exits 0", r.code, 0);
@@ -552,7 +576,9 @@ section("live-check.sh");
   ok("the second pass starts nothing", /"state": "started"/.test(parts.find((p) => p.startsWith("second"))), r.stdout);
   ok("the notes are printed", parts.find((p) => p.startsWith("scratch notes")).includes("(none)"), r.stdout);
   ok("the token is never printed", !r.stdout.includes("REFRESHTOKEN") && !r.stderr.includes("REFRESHTOKEN"));
-  eq("the scratch directory is gone", fs.readdirSync(tmp), []);
+  ok("it ran in the scratch directory", path.dirname(calls()[0].dir) === tmp, calls()[0].dir);
+  ok("the scratch directory is gone", !fs.existsSync(calls()[0].dir), calls()[0].dir);
+  eq("...and nothing is left beside it", fs.readdirSync(tmp), []);
   eq("the real file is untouched", fs.readFileSync(path.join(real, "agenda.json"), "utf8"), realState);
   eq("nothing else appeared beside it", fs.readdirSync(real).sort(), ["agenda-client.json", "agenda.json"]);
   ok("only the named calendar is read", eventQueries.length === 3, String(eventQueries.length));
@@ -565,6 +591,7 @@ section("live-check.sh");
   eq("...and the scratch directory is gone", fs.readdirSync(tmp), []);
 
   eq("no arguments is a usage error", (await liveCheck([], env)).code, 2);
+  fs.rmSync(shim, { recursive: true });
   fs.rmSync(real, { recursive: true });
   fs.rmSync(tmp, { recursive: true });
 }

@@ -27,6 +27,7 @@ import { addNote } from "./cockpit-notes.mjs";
 
 const NOTE_AUTHOR = "calendar";
 const START_LIMIT_MS = Number(process.env.COCKPIT_JOBS_START_LIMIT_MS) || 60_000;
+const KILL_GRACE_MS = 2000;
 const FETCH_BACK_MS = 7 * 24 * 60 * 60 * 1000;   // a bound, so a DST day does not matter
 
 const dryRun = () => process.env.COCKPIT_JOBS_DRY_RUN === "1";
@@ -75,7 +76,9 @@ function failureLine(err, stdout, stderr) {
  */
 function runClaude(job) {
   return new Promise((resolve) => {
+    let hardStop;
     const finish = (err, stdout = "", stderr = "") => {
+      clearTimeout(hardStop);
       if (err) return resolve({ ok: false, line: failureLine(err, stdout, stderr) });
       const m = /backgrounded\s*·\s*([A-Za-z0-9_-]+)\s*·/.exec(`${stdout}\n${stderr}`);
       resolve({ ok: true, agentId: m ? m[1] : undefined });
@@ -86,6 +89,9 @@ function runClaude(job) {
       // ever write to it.
       child.stdin?.on("error", () => {});
       child.stdin?.end();
+      // execFile's limit only sends SIGTERM and its callback waits for the exit, so a
+      // claude that ignores it would hold the tick's guard up and stop every later start.
+      hardStop = setTimeout(() => child.kill("SIGKILL"), START_LIMIT_MS + KILL_GRACE_MS);
     } catch (e) {
       finish(e);
     }
@@ -299,7 +305,9 @@ async function main(argv) {
     else { console.error(USAGE); return 2; }
   }
   if (!once) { console.error(USAGE); return 2; }
-  root = (root ?? panesRoot())?.replace(/\/+$/, "");
+  root = root ?? panesRoot();
+  // Notes are keyed by this string, and the column reads the absolute one.
+  root = root && path.resolve(root);
   if (!root) { console.error("no projects root: pass --root, or run where panes.json exists"); return 2; }
 
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
