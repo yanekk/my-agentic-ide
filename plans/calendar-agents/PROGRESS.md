@@ -10,7 +10,7 @@
 
 **Status:** Plan reviewed. Nothing built.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** review T03; T00 and T01 are unaffected.
+**Next `pir-work` will:** T00, then T02; T01 can run beside it. T04 now has T03 done.
 
 ## Tasks
 
@@ -21,14 +21,14 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T00 | long-command-spike | — | ⬜ | |
 | T01 | cockpit-suite-flake | — | ⬜ | |
 | T02 | job-decisions | T00 | ⬜ | |
-| T03 | jobs-calendar | — | 🔍 | Flag, both commands, event fields built; about 60 tests. Deviations: pane test in render.test.mjs, its natural home; a fresh sign-in survives a refused add --jobs, since tokens are costly; AGENDA_DRY_RUN also binds agenda jobs; help reads add <slug> [--jobs], because run.sh counts that line. |
+| T03 | jobs-calendar | — | ✅ | Reviewed; fixed: one calendar could be jobs under two slugs, starting entries twice (owner decided refuse); primary-flag test was missing. Five mutations run, one survived then tested. Owner accepted: refused add --jobs keeps a new sign-in. Google's real fields read-only here; T06. |
 | T04 | job-starter | T02, T03 | ⬜ | |
 | T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
 | T06 | live-check | T00, T05 | ⬜ | |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** T03
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
