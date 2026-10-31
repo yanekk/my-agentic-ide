@@ -18,7 +18,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | long-command-spike | — | ⬜ | |
+| T00 | long-command-spike | — | ✅ | |
 | T01 | cockpit-suite-flake | — | ✅ | |
 | T02 | job-decisions | T00 | ⬜ | |
 | T03 | jobs-calendar | — | ✅ | |
