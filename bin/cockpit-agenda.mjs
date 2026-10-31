@@ -10,6 +10,8 @@
 //   agenda                  the day, as the column shows it, then per-calendar state
 //   agenda ls               the configured calendars, one per line
 //   agenda add <slug>       sign in if needed, pick one of the account's calendars
+//   agenda add <slug> --jobs   the same, and every entry on it starts an agent
+//   agenda jobs <slug> on|off  turn that on or off for an attached calendar
 //   agenda rm <slug>        detach it (EXACT slug, no prefixes)
 //   agenda color <slug>     reroll its colour, preferring an unused one
 //   agenda setup [path]     read the client JSON Google gave you
@@ -46,7 +48,7 @@ import {
 } from "./cockpit-agenda-model.mjs";
 import {
   CLIENT_FILE, STATE_FILE, putAccount, putCacheEntry, putCalendar, pruneCache,
-  readCache, readClient, readState, removeCalendar, setColour, withLock, writeClient,
+  readCache, readClient, readState, removeCalendar, setColour, setJobs, withLock, writeClient,
 } from "./cockpit-agenda-store.mjs";
 import { accessToken, describeError, fetchEvents, listCalendars, signIn } from "./cockpit-agenda-google.mjs";
 
@@ -77,7 +79,8 @@ const USAGE = `agenda -- today's calendars, in the cockpit's fleet view.
 
   agenda                 the day, then the state of every calendar
   agenda ls              the configured calendars, one per line
-  agenda add <slug>      connect one Google calendar and call it <slug>
+  agenda add <slug> [--jobs]   connect one Google calendar and call it <slug>
+  agenda jobs <slug> on|off    every entry on this calendar starts an agent, or stops
   agenda rm <slug>       detach it (the slug in full -- no prefixes)
   agenda color <slug>    give it a different colour
   agenda setup [path]    read the client JSON downloaded from Google
@@ -88,7 +91,11 @@ events. Sign-in is per Google account, so a second calendar from an account you
 have already connected does not open a browser again.
 
 State lives in ~/.claude/cockpit/agenda*.json, mode 0600, never in a repo.
-AGENDA_DRY_RUN=1 makes \`agenda add\` print the sign-in URL and stop.`;
+Only a calendar you own and that is not your primary one can start agents, because
+invitations land on your primary calendar and others control one shared to you.
+
+AGENDA_DRY_RUN=1 makes \`agenda add\` print the sign-in URL and stop, and
+\`agenda jobs\` change nothing.`;
 
 // `agenda help` must answer even where the command should not work at all -- with
 // no registration, outside a cockpit, or run by an agent. Refusing to explain
@@ -309,7 +316,7 @@ function ls() {
   const acctW = Math.max(7, ...calendars.map((c) => (c.account || "").length));
   for (const c of calendars) {
     say(`${swatch(c.colour)} ${c.slug.padEnd(slugW)}  ${wire(c.colour || "").padEnd(colW)}  ` +
-        `${wire(c.account || "").padEnd(acctW)}  ${wire(c.title || "")}`);
+        `${wire(c.account || "").padEnd(acctW)}  ${wire(c.title || "")}${c.jobs ? "  [jobs]" : ""}`);
   }
 }
 
@@ -370,7 +377,7 @@ async function fetchOnce(cal, client, refreshToken) {
 // command DESIGN 6 sends you to when the column looks wrong.
 const badSlug = (s) => !s || s === "__proto__" || /[\s\p{Cc}]/u.test(s);
 
-async function add(slug) {
+async function add(slug, { jobs = false } = {}) {
   refuseIfAgent("add");
   if (!slug) die("`agenda add <slug>` needs a name for the calendar, e.g. `agenda add work`.");
   if (badSlug(slug)) {
@@ -380,7 +387,12 @@ async function add(slug) {
 
   const state = readState();
   const existing = state.calendars.find((c) => c.slug === slug);
-  if (existing) return repair(existing, state);
+  if (existing) {
+    // On an existing slug `add` means repair, which would open a browser and leave
+    // the flag exactly as it was, so it refuses rather than seem to have set it.
+    if (jobs) die(`\`${slug}\` is already connected. \`agenda jobs ${slug} on\` makes it a jobs calendar.`);
+    return repair(existing, state);
+  }
 
   let client = readClient();
 
@@ -443,12 +455,19 @@ async function add(slug) {
         (c.accessRole === "freeBusyReader" ? dim("  (free/busy only)") : ""));
   });
   const chosen = items[askNumber(fd, items.length, "calendar number: ") - 1];
+  if (jobs) {
+    const why = jobsRefusal(chosen, account);
+    if (why) die(`${wire(chosen.summary)} cannot be a jobs calendar: ${why}\n      Nothing was attached.`);
+  }
 
   // No two configured calendars share a colour while a free one remains. The model
   // owns the palette; the randomness is produced HERE, because a model that reaches
   // for a random number is exactly as impure as one that reads a clock (DESIGN 3.1).
   const colour = pickColour(readState().calendars.map((c) => c.colour), randomInt(0, 1 << 30));
-  const cal = { slug, account, calendarId: chosen.id, title: chosen.summary, colour };
+  const cal = {
+    slug, account, calendarId: chosen.id, title: chosen.summary, colour,
+    ...(jobs ? { jobs: true, jobsSince: NOW } : {}),
+  };
   putCalendar(cal, NOW);
 
   say();
@@ -684,6 +703,63 @@ function color(slug) {
   say(`${swatch(colour)} ${bold(slug)}  ${dim(colour)}`);
 }
 
+// --- jobs: the calendar whose entries start agents -------------------------
+
+/**
+ * Why this calendar may not start agents, or null. `listed` is listCalendars' row.
+ * Both rules are about who can put an entry there: invitations land on a primary
+ * calendar, and others control one that is merely shared to you (calendar-agents
+ * DESIGN 2.1). A primary calendar's id is the account address, hence the second test.
+ */
+function jobsRefusal(listed, account) {
+  if (listed.primary || listed.id === account) return "it is your primary calendar, where invitations land.";
+  if (listed.accessRole !== "owner") return "you do not own it, so others control what is on it.";
+  return null;
+}
+
+async function jobsCommand(slug, setting) {
+  refuseIfAgent("jobs");
+  if (!slug || !["on", "off"].includes(setting)) die("usage: `agenda jobs <slug> on|off`.");
+  const cal = readState().calendars.find((c) => c.slug === slug);
+  if (!cal) die(`no calendar called \`${slug}\`. \`agenda ls\` lists them.`);
+
+  if (DRY_RUN) {
+    say(dim(`AGENDA_DRY_RUN=1 -- nothing asked, nothing written. This would turn jobs ${setting} for ${slug}.`));
+    return;
+  }
+
+  // `off` never asks Google: it is how you stop agents starting, so it has to work
+  // offline and with a dead sign-in (calendar-agents DESIGN 6).
+  if (setting === "off") {
+    setJobs(slug, false, NOW);
+    say(`${swatch(cal.colour)} ${bold(slug)}  ${dim("jobs off: its entries no longer start agents.")}`);
+    return;
+  }
+
+  // Decided before the network, so this answer does not depend on being online.
+  const refused = (why) => die(`${slug} cannot be a jobs calendar: ${why}\n      Nothing was changed.`);
+  if (cal.calendarId === cal.account) refused(jobsRefusal({ id: cal.calendarId }, cal.account));
+
+  // The row does not store the role and a shared calendar's role can change, so ask.
+  // Not being able to find out refuses: the flag lets entries start agents.
+  const client = readClient();
+  const refreshToken = readState().accounts[cal.account]?.refreshToken;
+  if (!client || !refreshToken) refused(`no sign-in to ask Google with. \`agenda add ${slug}\` signs in again.`);
+  let listed;
+  try {
+    const { token } = await accessToken({ ...client, refreshToken, origin: ORIGIN, now: NOW });
+    listed = (await listCalendars({ token, origin: ORIGIN })).find((c) => c.id === cal.calendarId);
+  } catch (e) {
+    refused(`Google could not be asked who owns it (${wire(e && e.message ? e.message : String(e))}).`);
+  }
+  if (!listed) refused(`${wire(cal.account)} no longer lists it.`);
+  const why = jobsRefusal(listed, cal.account);
+  if (why) refused(why);
+
+  if (!setJobs(slug, true, NOW)) die(`no calendar called \`${slug}\`. \`agenda ls\` lists them.`);
+  say(`${swatch(cal.colour)} ${bold(slug)}  ${dim("jobs on: every entry on it now starts an agent at its start time.")}`);
+}
+
 // --- dispatch --------------------------------------------------------------
 
 // A corrupt agenda.json is moved aside rather than silently replaced -- it holds
@@ -702,7 +778,13 @@ try {
   switch (verb) {
     case undefined:                 day(); break;
     case "ls": case "list":         ls(); break;
-    case "add":                     await add(rest[0]); break;
+    case "add": {
+      // Either side of the slug; `agenda add --jobs work` must not attach "--jobs".
+      const words = rest.filter((w) => w !== "--jobs");
+      await add(words[0], { jobs: words.length !== rest.length });
+      break;
+    }
+    case "jobs":                    await jobsCommand(rest[0], rest[1]); break;
     case "rm": case "remove":       rm(rest[0]); break;
     case "color": case "colour":    color(rest[0]); break;
     case "setup":

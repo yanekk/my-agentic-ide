@@ -178,4 +178,47 @@ eq("...and both files were written", [
 ], [true, true]);
 ok("...and the lock is released when the outermost call ends", !fs.existsSync(lockFile));
 
+section("8a. the jobs flag");
+{
+  const base = { account: "me@corp.com", calendarId: "c-j", title: "Jobs", colour: 7 };
+  const row = (slug) => store.readState().calendars.find((c) => c.slug === slug);
+
+  store.putCalendar({ slug: "plain", ...base }, T0);
+  eq("a calendar with no flag has neither field", ["jobs" in row("plain"), "jobsSince" in row("plain")], [false, false]);
+
+  eq("setJobs returns the calendar", store.setJobs("plain", true, T0 + 1).jobs, true);
+  eq("...turning on records when", row("plain").jobsSince, T0 + 1);
+  store.setJobs("plain", true, T0 + 2);
+  eq("...turning on twice keeps the first", row("plain").jobsSince, T0 + 1);
+  store.setColour("plain", 8);
+  eq("...setColour keeps both", [row("plain").jobs, row("plain").jobsSince], [true, T0 + 1]);
+  store.putAccount("me@corp.com", "rt-new", T0 + 3);
+  eq("...a re-sign-in keeps both", [row("plain").jobs, row("plain").jobsSince], [true, T0 + 1]);
+  store.putCalendar({ slug: "plain", ...base }, T0 + 4);
+  eq("...rebuilding the row keeps both", [row("plain").jobs, row("plain").jobsSince], [true, T0 + 1]);
+  eq("...and they are on disk", JSON.parse(fs.readFileSync(STATE_FILE, "utf8")).calendars.find((c) => c.slug === "plain").jobsSince, T0 + 1);
+
+  store.setJobs("plain", false, T0 + 5);
+  eq("off clears both", ["jobs" in row("plain"), "jobsSince" in row("plain")], [false, false]);
+  store.setJobs("plain", true, T0 + 6);
+  eq("off then on records a new time", row("plain").jobsSince, T0 + 6);
+  store.putCalendar({ slug: "plain", ...base, jobs: false }, T0 + 7);
+  eq("an explicit jobs: false turns it off", "jobs" in row("plain"), false);
+
+  store.putCalendar({ slug: "fresh", ...base, jobs: true, jobsSince: T0 + 8 }, T0 + 9);
+  eq("putCalendar takes both", [row("fresh").jobs, row("fresh").jobsSince], [true, T0 + 8]);
+  store.putCalendar({ slug: "dflt", ...base, jobs: true }, T0 + 9);
+  eq("...jobsSince defaults to now", row("dflt").jobsSince, T0 + 9);
+
+  eq("setJobs on an unknown slug is null", store.setJobs("nope", true, T0), null);
+
+  // Existing files have no flag, and this flag starts agents.
+  const disk = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  disk.calendars.push({ slug: "old", ...base, addedAt: 1 }, { slug: "truthy", ...base, addedAt: 1, jobs: "yes" });
+  fs.writeFileSync(STATE_FILE, JSON.stringify(disk));
+  eq("a row from before the flag reads as not jobs", Boolean(row("old").jobs), false);
+  eq("a merely truthy flag reads as not jobs", Boolean(row("truthy").jobs), false);
+  for (const slug of ["plain", "fresh", "dflt", "old", "truthy"]) store.removeCalendar(slug);
+}
+
 done();
