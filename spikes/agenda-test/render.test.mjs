@@ -435,4 +435,23 @@ eq("...with the row's own styling still closed",
   escaped.filter((l) => l.includes("sprint") || l.includes("RED"))
     .every((l) => l.endsWith(`\x1b[0m`) || visibleLen(l) <= W), true);
 
+// ---------------------------------------------------------------------------
+section("27a. a wider fetch does not bring the past back");
+// Jobs calendars fetch from 7 days back (calendar-agents DESIGN 2.7), so the cache
+// can hold what ended days ago, and the pane must still show only what is left.
+{
+  const opts = { slug: "work", tz: TZ, selfEmail: "me@corp.com", jobs: true };
+  const old = [
+    { id: "t", summary: "old timed", start: { dateTime: "2026-08-23T20:00:00+02:00" }, end: { dateTime: "2026-08-23T21:00:00+02:00" } },
+    { id: "a", summary: "old all-day", start: { date: "2026-08-23" }, end: { date: "2026-08-24" } },
+  ].map((e) => normaliseEvent(e, opts));
+  const args = { width: W, rows: 12, calendars: [CALS[0]], now: NOW, tz: TZ };
+  const only = cache({ work: { fetchedAt: FRESH, events: old, error: null } });
+  const none = cache({ work: { fetchedAt: FRESH, events: [], error: null } });
+  const lines = renderAgenda({ ...args, cache: only }).map(plain);
+  ok("an event from 3 days ago draws nothing", !lines.some((l) => l.includes("old ")), lines.join("|"));
+  eq("...the column is the same as with no events", lines, renderAgenda({ ...args, cache: none }).map(plain));
+  eq("...and asks for the same height", agendaHeight({ ...args, cache: only }), agendaHeight({ ...args, cache: none }));
+}
+
 done();
