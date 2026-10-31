@@ -21,7 +21,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T00 | long-command-spike | — | ⬜ | |
 | T01 | cockpit-suite-flake | — | ⬜ | |
 | T02 | job-decisions | T00 | ⬜ | |
-| T03 | jobs-calendar | — | ⬜ | |
+| T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ⬜ | |
 | T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
 | T06 | live-check | T00, T05 | ⬜ | |
