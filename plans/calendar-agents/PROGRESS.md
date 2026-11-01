@@ -10,7 +10,7 @@
 
 **Status:** Plan reviewed. Nothing built.
 **Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
+**Next `pir-work` will:** review T06.
 
 ## Tasks
 
@@ -24,11 +24,11 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ✅ | |
 | T05 | daemon-wiring | T01, T03, T04 | ✅ | |
-| T06 | live-check | T00, T05 | ⬜ | |
+| T06 | live-check | T00, T05 | 🔍 | Live check passed, worker-driven; see FINDINGS. Three model tests for the real creator shape (email, no `self`). Deviation: connector cannot create or delete calendars, so the owner did both by hand, named `calendar-agents`. Test agent removed, entries and calendar gone. |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** *(empty)*
+**Review queue:** T06
 
 ## Blocked on the user
 
