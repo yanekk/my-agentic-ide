@@ -9,7 +9,8 @@
 //   agenda.json         0600  { version,
 //                               accounts:  { "<email>": { refreshToken, addedAt } },
 //                               calendars: [ { slug, account, calendarId, title,
-//                                              colour, addedAt } ] }
+//                                              colour, addedAt,
+//                                              jobs?, jobsSince? } ] }   only while on
 //   agenda-cache.json   0600  { version, calendars: { "<slug>": { fetchedAt, events, error } } }
 //   agenda.lock               the write lock (5s stale break), as notes.lock
 //
@@ -221,6 +222,10 @@ export function readState({ rescue = true } = {}) {
       // that second-guesses a colour is a store that loses one.
       colour: c.colour ?? null,
       addedAt: Number(c.addedAt) || 0,
+      // Absent rather than false when off, so a row from before the flag and a row
+      // turned off are the same row. Strictly true: this flag lets entries start
+      // agents, so nothing merely truthy in a hand-edited file may turn it on.
+      ...(c.jobs === true ? { jobs: true, jobsSince: Number(c.jobsSince) || 0 } : {}),
     }));
 
   return { version: 1, accounts, calendars, corruptedTo };
@@ -255,11 +260,19 @@ export function removeAccount(email) {
   });
 }
 
-/** Upsert by slug, in place -- the slug is the handle, so its position is stable. */
-export function putCalendar({ slug, account, calendarId, title, colour }, now) {
+/**
+ * Upsert by slug, in place -- the slug is the handle, so its position is stable.
+ * `jobs` left undefined keeps what the row has: rebuilding a row must not quietly
+ * turn off the flag, and only setJobs and an explicit value change it.
+ */
+export function putCalendar({ slug, account, calendarId, title, colour, jobs, jobsSince }, now) {
   mutateState((state) => {
     const prev = state.calendars.find((c) => c.slug === slug);
     const cal = { slug, account, calendarId, title, colour, addedAt: prev?.addedAt || now };
+    if (jobs ?? prev?.jobs) {
+      cal.jobs = true;
+      cal.jobsSince = jobsSince ?? prev?.jobsSince ?? now;
+    }
     if (prev) state.calendars[state.calendars.indexOf(prev)] = cal;
     else state.calendars.push(cal);
   });
@@ -278,6 +291,27 @@ export function setColour(slug, colour) {
     const cal = state.calendars.find((c) => c.slug === slug);
     if (!cal) return null;
     cal.colour = colour;
+    return cal;
+  });
+}
+
+/**
+ * Stores the flag and nothing else: who may turn it on is the command's question.
+ * On keeps the first jobsSince, because a second `on` must not hide entries the
+ * first one already covers. Off clears it, so a later on starts a new history
+ * (calendar-agents DESIGN 2.1). Null for an unknown slug.
+ */
+export function setJobs(slug, on, now) {
+  return mutateState((state) => {
+    const cal = state.calendars.find((c) => c.slug === slug);
+    if (!cal) return null;
+    if (on) {
+      cal.jobsSince = cal.jobs ? cal.jobsSince : now;
+      cal.jobs = true;
+    } else {
+      delete cal.jobs;
+      delete cal.jobsSince;
+    }
     return cal;
   });
 }

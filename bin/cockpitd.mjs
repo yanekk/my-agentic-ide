@@ -53,6 +53,9 @@ import { decidePir, followPirReport, isPirKey, shouldReapPirKey, startingMode } 
 // the daemon is the other writer of that file: it clears an agent's list whenever
 // it launches a FRESH viewer. One helper rather than a second copy (DESIGN 3.5).
 import { withLock } from "./cockpit-agenda-store.mjs";
+// Agents started from a calendar (calendar-agents DESIGN 3.4). What to do is decided in
+// the job model; this file only times the tick.
+import { jobsTick, recoverStarting } from "./cockpit-jobs.mjs";
 // The pir usage feed (pir-usage-reader DESIGN 3.2): the reader finds pir's local
 // service, asks it, and applies newest-wins to usage-cache.json. The daemon only
 // owns the tick and the log-on-change.
@@ -3104,6 +3107,12 @@ const AGENDA_TZ = (() => {
   catch { return "UTC"; }
 })();
 
+// A jobs calendar also reaches back, so an entry that ended while the window was closed
+// is still in the cache to be reported as skipped (calendar-agents DESIGN 2.7). A bound,
+// not a civil date: one hour either way across a DST change does not matter here.
+const JOBS_FETCH_BACK_MS = 7 * 24 * 60 * 60 * 1000;
+const JOBS_TICK_MS = Number(process.env.COCKPIT_JOBS_TICK_MS) || 30_000;
+
 // One pass in flight at a time, guarded exactly as `reconcile` is. Overlapping
 // passes interleave writes to the cache and burn quota on a slow network.
 let agendaFetching = false;
@@ -3179,12 +3188,13 @@ async function refreshAgenda(reason) {
         });
         const { events: raw, timeZone } = await fetchEvents({
           token, calendarId: cal.calendarId,
-          timeMin: todayStart, timeMax: dayAfterStart, origin: AGENDA_ORIGIN,
+          timeMin: cal.jobs ? todayStart - JOBS_FETCH_BACK_MS : todayStart,
+          timeMax: dayAfterStart, origin: AGENDA_ORIGIN,
         });
         // The calendar's OWN zone places its all-day boundaries; the machine's is
         // the fallback for a calendar that does not say.
         const events = raw
-          .map((r) => normaliseEvent(r, { slug: cal.slug, tz: timeZone || AGENDA_TZ, selfEmail: cal.account }))
+          .map((r) => normaliseEvent(r, { slug: cal.slug, tz: timeZone || AGENDA_TZ, selfEmail: cal.account, jobs: !!cal.jobs }))
           .filter(Boolean);
         // A success clears `error` ENTIRELY, not just its kind.
         putCacheEntry(cal.slug, { fetchedAt: now, events, error: null });
@@ -4411,6 +4421,16 @@ setInterval(() => refreshPRs("tick"), PR_TICK_MS);
 setInterval(refreshUsage, USAGE_TICK_MS);
 // The footer's Aperture budget, every minute; a no-op off Bedrock.
 setInterval(() => refreshAperture("tick"), APERTURE_TICK_MS);
+// Calendar agents. Recovery comes before the first tick, so a leftover `starting` is
+// settled before anything could decide against it. The tick is its own timer because
+// refreshAgenda returns early when nothing is stale, and its promise is never awaited:
+// a slow `claude --bg` must not stall the fleet poll. jobsTick does not reject; the
+// catch is so a defect there can only ever be a log line.
+recoverStarting({ now: Date.now(), notesRepo: panes.repo, log });
+setInterval(() => {
+  jobsTick({ now: Date.now(), projectsRoot: panes.repo, notesRepo: panes.repo, zone: AGENDA_TZ, log })
+    .catch((e) => log(`jobs: tick failed, ${e?.name ?? "Error"}`));
+}, JOBS_TICK_MS);
 reconcile();
 // DESIGN 2.5 counts opening the window as a return to the cockpit, but onExit
 // only fires when an agent WAS attached -- at start-up none is, so without this

@@ -62,6 +62,20 @@ last events and adds one dim `last updated 22m ago · offline`; a revoked sign-i
 replaces that one calendar's rows with `home  sign-in expired · agenda add home`
 and leaves the others alone.
 
+A calendar marked as a **jobs calendar** (`agenda add <slug> --jobs`, `agenda jobs <slug>
+on|off`) starts agents. Every entry on it is a job: the title is a project folder under the
+projects root, the description is the instructions. At its start time the daemon runs `claude
+--bg` in that project, in its own worktree, with **bypass permissions** and no question tool, so
+nobody is asked anything and the agent could run anything on the machine; its preamble tells it
+to stay in the worktree and never push. It stays in `claude agents` and its final message is the
+report. **The cockpit window must stay open**: closed means nothing starts, and an entry missed
+that way still starts on reopening if its end time has not passed, else it leaves a note. Refused,
+skipped and failed entries each leave one note signed `calendar`; a successful start leaves none.
+Each entry is decided once, recorded in `calendar-jobs.json`, so a crash or rebuild never runs one
+twice: a start the daemon may have been cut off in becomes a note and is not retried. Primary
+calendars and calendars you do not own cannot be marked, and an entry someone else created is
+refused. The plan is `plans/calendar-agents/`.
+
 The fleet list's **names** are written for you too. Left alone, `claude agents`
 labels a session with a one-line summary Claude writes from your first message
 ("read handoff document") — fine on its own, poor in a list of six, because
@@ -220,6 +234,9 @@ bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
 bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic writes
 bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
 bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
+bin/cockpit-jobs-model.mjs     pure: calendar agents; parse an entry, decideJobs, the preamble and argv, the note wording
+bin/cockpit-jobs-store.mjs     the calendar-jobs.json ledger: read, set a corrupt one aside, atomic write, prune
+bin/cockpit-jobs.mjs           jobsTick (the daemon's 30 s starter), recoverStarting, `--once` for a hand-run tick
 bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, age+NEW/ACTIVE/STALE tags, summarizeDiffstat, paginate, two-line render + press emphasis, hit-zones
 bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments, listPRDiffstat
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
@@ -242,13 +259,14 @@ bin/cockpit-browse-open.mjs    the `open` shim broot runs on a double-click; rer
 bin/cockpit-browse-conf.mjs    builds broot's --conf chain (yours first, ours last)
 wezterm/cockpit.lua     window config; default_prog is the layout script; the plain-← binding
 wezterm/fleet-picker.lua   pure Lua: decide(pane, terminals, screen) → open|pass, the two empty-box markers
-spikes/cockpit-test/    integration test, wezterm stubbed (934 checks, ~111s median)
+spikes/cockpit-test/    integration test, wezterm stubbed (959 checks, ~111s median)
                         ONLY=<ids> runs a few sections while iterating; a partial
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
+spikes/calendar-jobs-test/  calendar agents: the model and its purity grep, the store, the tick against a fake claude, live-check.sh (337)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (516)
 spikes/stop-notify-test/ the Stop-hook sound decision, the hook end to end, its settings.json merge (38)
 spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in, the Aperture forecast (365)
@@ -296,7 +314,9 @@ setup), `agenda.json` (the sign-ins and the attached calendars — a corrupt one
 **moved aside** to `agenda.json.corrupt-<ts>` rather than discarded, because
 throwing a refresh token away costs two browser round trips) and
 `agenda-cache.json` (the fetched events, written by the daemon and watched by the
-pane), `auto-names/` (one small file per session — what the naming hook last called
+pane), `calendar-jobs.json` (each jobs-calendar entry's decision, keyed `{slug}/{eventId}`, written
+by the daemon alone, `0600`, lockless; a corrupt one is set aside as `calendar-jobs.json.corrupt-<ts>`
+and the fresh one ignores entries that began before that moment), `auto-names/` (one small file per session — what the naming hook last called
 it, whether it has **frozen** on a real name, and whether it has stood down because you
 renamed it by hand; a file each rather
 than one shared JSON so concurrent agents need no lock, pruned at 30 days),

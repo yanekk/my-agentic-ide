@@ -68,6 +68,15 @@ attaches one calendar, picked from a list. The daemon refreshes it every minute;
 lose the network and the events stay with one dim line saying how old they are.
 Agents may read it, but not connect one.
 
+A calendar you mark as a **jobs calendar** (`agenda add nightly --jobs`) starts work
+while you are away: an entry titled with a project folder starts one background
+Claude in that project at the entry's start time, with the entry's description as its
+instructions. It works in its own worktree and its final message in `claude agents`
+is the report. These agents run with **bypass permissions**, so nothing stops to ask,
+and only their instructions keep them inside the worktree. **The cockpit window must
+stay open**: nothing starts while it is closed. An entry that could not start leaves
+one line in the notes column. See [`docs/cockpit.md`](docs/cockpit.md#agents-started-from-a-calendar).
+
 ## Shift+O — the whole review loop
 
 1. Enter an agent in the fleet list. Diff and terminal retarget themselves.

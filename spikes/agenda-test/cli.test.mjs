@@ -973,5 +973,228 @@ section("35. what came off the wire is not allowed to draw itself");
   eq("...leaving none", slugs(legacy), []);
 }
 
+// ===========================================================================
+section("36. the jobs calendar");
+
+const JOBS_ID = "jobs@group.calendar.google.com";
+const JOB_LIST = [
+  { id: "me@corp.com", summary: "Jan", primary: true, accessRole: "owner" },
+  { id: JOBS_ID, summary: "Night jobs", accessRole: "owner" },
+  { id: "team@group.calendar.google.com", summary: "Team", accessRole: "writer" },
+  { id: "jobs2@group.calendar.google.com", summary: "More jobs", accessRole: "owner" },
+];
+const listIs = (items) => (req) => (req.path.endsWith("/users/me/calendarList")
+  ? { status: 200, body: { items } } : defaultReply(req));
+const rowOf = (dir, slug) => state(dir).calendars.find((c) => c.slug === slug);
+const bytes = (dir) => fs.readFileSync(path.join(dir, "agenda.json"), "utf8");
+const CLOSED = { AGENDA_ORIGIN: `http://127.0.0.1:1` };
+
+/** A signed-in account with a plain, attached calendar on the jobs calendar's id. */
+async function attached(name) {
+  const dir = freshDir(name);
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  const r = await run(["add", "night"], { dir, tty: writeTty(dir, "2") });
+  eq(`(${name}) set up`, r.status, 0);
+  return dir;
+}
+
+{
+  const h = await run(["help"], { dir: freshDir("jobs-help") });
+  ok("help documents both forms", h.out.includes("agenda add <slug> [--jobs]") && h.out.includes("agenda jobs <slug> on|off"), h.out);
+}
+
+{
+  const dir = freshDir("add-jobs");
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  const before = Date.now();
+  const r = await run(["add", "night", "--jobs"], { dir, tty: writeTty(dir, "2") });
+  eq("`add --jobs` on an owned, non-primary calendar exits 0", r.status, 0);
+  const row = rowOf(dir, "night");
+  eq("...and sets the flag", row.jobs, true);
+  ok("...and records when", row.jobsSince >= before && row.jobsSince <= Date.now(), JSON.stringify(row));
+  // The agenda command's own fetch caches no job fields; the tick leaves such events undecided.
+  ok("...its own fetch caches no instructions", cache(dir).calendars.night.events.every((e) => !("description" in e)));
+
+  const ls = await run(["ls"], { dir });
+  ok("`agenda ls` marks it", /night.*\[jobs\]/.test(ls.out), ls.out);
+
+  const flagged = await run(["add", "--jobs", "other"], { dir, tty: writeTty(dir, "1", "4") });
+  eq("the flag works before the slug too", [flagged.status, rowOf(dir, "other")?.jobs], [0, true]);
+  eq("...and `--jobs` is never taken for a slug", rowOf(dir, "--jobs"), undefined);
+
+  // Refused on the known account, so nothing at all should change.
+  for (const [what, n, word] of [["a primary calendar", "1", /primary/], ["a calendar not owned", "3", /do not own/]]) {
+    const was = bytes(dir);
+    const cacheWas = JSON.stringify(cache(dir));
+    const no = await run(["add", "bad", "--jobs"], { dir, tty: writeTty(dir, "1", n) });
+    eq(`\`add --jobs\` refuses ${what}`, no.status, 1);
+    ok("...saying why", word.test(no.all), no.all);
+    eq("...the state is untouched", bytes(dir), was);
+    eq("...the cache is untouched", JSON.stringify(cache(dir)), cacheWas);
+  }
+  const plainPrimary = await run(["add", "mine"], { dir, tty: writeTty(dir, "1", "1") });
+  eq("without --jobs a primary calendar still attaches", plainPrimary.status, 0);
+  ok("...and is not jobs", !rowOf(dir, "mine").jobs);
+}
+
+{
+  const dir = await attached("jobs-existing");
+  const was = bytes(dir);
+  const browsers = browserLog(dir).length;
+  stub.log.length = 0;
+  const r = await run(["add", "night", "--jobs"], { dir });
+  eq("`add <existing> --jobs` refuses", r.status, 1);
+  ok("...naming `agenda jobs`", r.all.includes("agenda jobs night on"), r.all);
+  eq("...opening no browser", browserLog(dir).length, browsers);
+  eq("...asking Google nothing", stub.log.length, 0);
+  eq("...and writing nothing", bytes(dir), was);
+}
+
+{
+  const dir = freshDir("add-jobs-dry");
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  const r = await run(["add", "x", "--jobs"], { dir, env: { AGENDA_DRY_RUN: "1" } });
+  eq("AGENDA_DRY_RUN=1 add --jobs exits 0", r.status, 0);
+  eq("...opening nothing", browserLog(dir).length, 0);
+  eq("...and writing nothing", fs.existsSync(path.join(dir, "agenda.json")), false);
+}
+
+{
+  const dir = await attached("jobs-onoff");
+  ok("a plain add is not jobs", !rowOf(dir, "night").jobs);
+
+  const on = await run(["jobs", "night", "on"], { dir });
+  eq("`jobs on` on an owned calendar exits 0", on.status, 0);
+  const since = rowOf(dir, "night").jobsSince;
+  eq("...sets the flag", rowOf(dir, "night").jobs, true);
+  ok("...and records when", since > 0);
+
+  fs.writeFileSync(path.join(dir, "agenda.json"), bytes(dir).replace(`"jobsSince": ${since}`, '"jobsSince": 1000'));
+  const again = await run(["jobs", "night", "on"], { dir });
+  eq("turning on twice keeps the first time", [again.status, rowOf(dir, "night").jobsSince], [0, 1000]);
+
+  const col = await run(["color", "night"], { dir });
+  eq("`agenda color` keeps it", [col.status, rowOf(dir, "night").jobs, rowOf(dir, "night").jobsSince], [0, true, 1000]);
+
+  // A repair: the token is dead until a fresh sign-in lands.
+  let reSignedIn = false;
+  stub.set((req) => {
+    if (req.path === "/token" && req.form.grant_type === "refresh_token" && !reSignedIn) {
+      return { status: 400, body: { error: "invalid_grant" } };
+    }
+    if (req.path === "/token" && req.form.grant_type === "authorization_code") reSignedIn = true;
+    return listIs(JOB_LIST)(req);
+  });
+  const rep = await run(["add", "night"], { dir });
+  eq("a repair `agenda add` keeps it", [rep.status, reSignedIn, rowOf(dir, "night").jobs, rowOf(dir, "night").jobsSince], [0, true, true, 1000]);
+  stub.set(listIs(JOB_LIST));
+
+  // Off is the way to stop agents starting, so nothing may stand in its way.
+  const off = await run(["jobs", "night", "off"], { dir, env: CLOSED });
+  eq("`jobs off` works offline", off.status, 0);
+  ok("...and clears both", !("jobs" in rowOf(dir, "night")) && !("jobsSince" in rowOf(dir, "night")));
+  const off2 = await run(["jobs", "night", "off"], { dir, env: CLOSED });
+  eq("...twice is fine", off2.status, 0);
+
+  const was = bytes(dir);
+  const offline = await run(["jobs", "night", "on"], { dir, env: CLOSED });
+  eq("`jobs on` refuses when Google cannot be reached", offline.status, 1);
+  ok("...saying it could not ask", /could not be asked/.test(offline.all), offline.all);
+  eq("...writing nothing", bytes(dir), was);
+
+  stub.set(() => ({ status: 503, body: {} }));
+  const failing = await run(["jobs", "night", "on"], { dir });
+  eq("...and when Google answers with an error", [failing.status, bytes(dir)], [1, was]);
+
+  stub.set(listIs(JOB_LIST.map((c) => (c.id === JOBS_ID ? { ...c, accessRole: "writer" } : c))));
+  const shared = await run(["jobs", "night", "on"], { dir });
+  eq("`jobs on` refuses when the role is no longer owner", [shared.status, bytes(dir)], [1, was]);
+  ok("...saying why", /do not own/.test(shared.all), shared.all);
+
+  stub.set(listIs(JOB_LIST.filter((c) => c.id !== JOBS_ID)));
+  const gone = await run(["jobs", "night", "on"], { dir });
+  eq("...and when the account no longer lists it", [gone.status, bytes(dir)], [1, was]);
+
+  stub.set(listIs(JOB_LIST));
+  const dry = await run(["jobs", "night", "on"], { dir, env: { AGENDA_DRY_RUN: "1" } });
+  eq("AGENDA_DRY_RUN=1 `jobs on` writes nothing", [dry.status, bytes(dir)], [0, was]);
+
+  const next = await run(["jobs", "night", "on"], { dir });
+  eq("off then on works", next.status, 0);
+  ok("...and records a new time", rowOf(dir, "night").jobsSince > 1000);
+}
+
+{
+  // The ledger keys on slug and event, so one calendar on two jobs slugs starts each entry twice.
+  const dir = freshDir("jobs-twin");
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  eq("(jobs-twin) set up", (await run(["add", "a", "--jobs"], { dir, tty: writeTty(dir, "2") })).status, 0);
+  const was = bytes(dir);
+  const twin = await run(["add", "b", "--jobs"], { dir, tty: writeTty(dir, "1", "2") });
+  eq("`add --jobs` refuses a calendar another slug already has as jobs", [twin.status, bytes(dir)], [1, was]);
+  ok("...naming that slug", /\ba\b.*already/.test(twin.all), twin.all);
+
+  const plain = await run(["add", "b"], { dir, tty: writeTty(dir, "1", "2") });
+  eq("...it still attaches plainly", [plain.status, Boolean(rowOf(dir, "b").jobs)], [0, false]);
+  const plainWas = bytes(dir);
+  stub.log.length = 0;
+  const on = await run(["jobs", "b", "on"], { dir, env: CLOSED });
+  eq("`jobs on` refuses it too, offline", [on.status, bytes(dir)], [1, plainWas]);
+  ok("...naming that slug", /\ba\b.*already/.test(on.all), on.all);
+  eq("`jobs on` again on the holder is fine", (await run(["jobs", "a", "on"], { dir })).status, 0);
+
+  eq("once the holder is off", (await run(["jobs", "a", "off"], { dir, env: CLOSED })).status, 0);
+  eq("...the other can take it", (await run(["jobs", "b", "on"], { dir })).status, 0);
+}
+
+{
+  const dir = freshDir("jobs-primary");
+  writeClientFile(dir);
+  stub.set(listIs(JOB_LIST));
+  await run(["add", "own"], { dir, tty: writeTty(dir, "1") });
+  const was = bytes(dir);
+  stub.log.length = 0;
+  const r = await run(["jobs", "own", "on"], { dir, env: CLOSED });
+  eq("`jobs on` refuses a primary calendar, offline too", [r.status, bytes(dir)], [1, was]);
+  ok("...saying why", /primary/.test(r.all), r.all);
+
+  const unknown = await run(["jobs", "nope", "on"], { dir });
+  eq("an unknown slug errors", unknown.status, 1);
+  ok("...saying so", unknown.all.includes("nope"), unknown.all);
+  const unknownOff = await run(["jobs", "nope", "off"], { dir });
+  eq("...for off too", unknownOff.status, 1);
+  for (const args of [["jobs"], ["jobs", "own"], ["jobs", "own", "maybe"]]) {
+    const bad = await run(args, { dir });
+    eq(`\`agenda ${args.join(" ")}\` is a usage error`, [bad.status, bytes(dir)], [1, was]);
+  }
+
+  // Google's own flag decides, not only the id: a primary calendar listed under an
+  // address other than the signed-in one (an alias) is still where invitations land.
+  const aliased = JOB_LIST.map((c) => (c.primary ? { ...c, id: "alias@corp.com" } : c));
+  stub.set(listIs(aliased));
+  const aliasAdd = await run(["add", "bad", "--jobs"], { dir, tty: writeTty(dir, "1", "1") });
+  eq("`add --jobs` refuses a primary calendar whose id is not the account", [aliasAdd.status, bytes(dir)], [1, was]);
+  const aliasPlain = await run(["add", "aka"], { dir, tty: writeTty(dir, "1", "1") });
+  eq("...which attaches plainly", aliasPlain.status, 0);
+  const aliasWas = bytes(dir);
+  const aliasOn = await run(["jobs", "aka", "on"], { dir });
+  eq("...and `jobs on` refuses it too", [aliasOn.status, bytes(dir)], [1, aliasWas]);
+  ok("...saying why", /primary/.test(aliasOn.all), aliasOn.all);
+  await run(["rm", "aka"], { dir });
+  stub.set(listIs(JOB_LIST));
+  const wasBeforeAgent = bytes(dir);
+
+  // An agent must not be able to promote a calendar, or demote one.
+  for (const args of [["jobs", "own", "on"], ["jobs", "own", "off"], ["add", "z", "--jobs"]]) {
+    const a = await run(args, { dir, env: { CLAUDECODE: "1" } });
+    eq(`\`agenda ${args.join(" ")}\` is refused to an agent`, [a.status, bytes(dir)], [1, wasBeforeAgent]);
+    ok("...saying so", /not available to an agent/.test(a.all), a.all);
+  }
+}
+
 stub.stop();
 done();
