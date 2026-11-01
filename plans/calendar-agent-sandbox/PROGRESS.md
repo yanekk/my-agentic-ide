@@ -4,9 +4,9 @@
 
 **Plan reviewed:** 2026-11-01 — 13 fixed, 5 decided with the user
 
-**Status:** All tasks built; T08 awaits review. The live calendar stays on and unconfined until merge and window reopen.
+**Status:** All tasks reviewed. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** review T08.
+**Next `pir-work` will:** nothing; the plan awaits its merge.
 
 ## Tasks
 
@@ -22,9 +22,9 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T05 | trial-run | T04 | ✅ | |
 | T06 | skill-refactor | T03, T05 | ✅ | |
 | T07 | wall-check | T04, T05 | ✅ | |
-| T08 | docs | T06, T07 | 🔍 | README, cockpit.md, CLAUDE.md state the wall, limits, version, post-merge order. Retired the `AGENDA_DRY_RUN` measured row, kept at cockpit.md § agenda repair; table stays thirty. Also published limits from FINDINGS beyond §2.8. No tests added; calendar-jobs and agenda suites green. |
+| T08 | docs | T06, T07 | ✅ | Two fixes: agenda count 637 to 925, denied-tools claim overstated for DesignSync and Workflow. Ran the counted suites, drove `agenda wall` in a scratch folder, checked limits against RESULTS.md. Docs only, no mutation. Hands-on half: none. wall-check facts `read-only` from FINDINGS. |
 
-**Review queue:** T08
+**Review queue:** empty
 
 ## Blocked on the user
 
