@@ -18,13 +18,13 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T01 | wall-rules | T00 | ✅ | |
 | T02 | write-guard | T01 | ✅ | |
 | T03 | exceptions-list | T01 | ✅ | |
-| T04 | confined-start | T01, T02, T03 | 🔍 | Real wallFacts, preflight, buildWallFor; dry run prints settings. tick suite now 237 checks. Deviations: touched `cockpit-test/run.sh` (13j needs a real repo); fake-claude unchanged; live-check refuses an unwalled dry run. Ran 13j and 13c only; the whole cockpit-test is pir's end run. |
+| T04 | confined-start | T01, T02, T03 | ✅ | Two defects fixed: symlinked project escaped the git ceiling; reftable repo looked confined, now `failed` `wall`. Ten mutations all red; dry run driven. cockpit-test: 13j, 13c only, whole file is pir's end run. Fake claude unverified against real until T07. |
 | T05 | trial-run | T04 | ⬜ | |
 | T06 | skill-refactor | T03, T05 | ⬜ | |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** T04
+**Review queue:** none
 
 ## Blocked on the user
 
