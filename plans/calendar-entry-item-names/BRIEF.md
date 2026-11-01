@@ -38,3 +38,4 @@ In `spikes/calendar-jobs-test/`, updating existing fixtures to the new title for
 
 ## Changed during the build
 2026-11-01: spikes/daemon-leak-test/run.sh expected eight daemon launches in cockpit-test and calendar-agents T05 added a ninth, red on main too. Count updated to nine here; the person's call.
+2026-11-01: the "slow but in-time" check in spikes/usage-test/fleet-status.test.mjs tripped its 3 s limit under load. Its fake now sleeps 0.2 s instead of 1 s; the person's call.

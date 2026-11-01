@@ -131,8 +131,9 @@ section("gatherClaude: every failure is { ok: false }, within the limit");
   eq("a grandchild holding the pipe past the limit", x.r, { ok: false });
   ok("...still within the limit plus a margin", x.ms < 400 + 600, `took ${Math.round(x.ms)} ms`);
 
-  // The default limit, with a fake that answers just under it, still answers.
-  x = await timed({ PATH: fakeClaude(`/bin/sleep 1\n/bin/echo '[]'`) });
+  // The default limit, with a fake slower than a real answer. A full second tripped the
+  // 3 s limit on a machine busy with the whole test run.
+  x = await timed({ PATH: fakeClaude(`/bin/sleep 0.2\n/bin/echo '[]'`) });
   eq("a slow but in-time answer is ok", x.r.ok, true);
 }
 
