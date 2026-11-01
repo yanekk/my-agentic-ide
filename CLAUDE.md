@@ -635,6 +635,26 @@ missing row goes in `FINDINGS.md`.
 worked, or the step that turned out to have none. A reversibility written down once is one
 nobody rediscovers at the worst moment.
 
+### A change to live infrastructure is rehearsed inside the build
+
+A dry run, a preview or a change set checks the shape of a change. The service checks its own
+fields (a character set, a length limit, a role it validates) only when it creates or updates the
+real thing. So the first real deploy of a changed template, config or schema is never the finish.
+remote-access-hardening previewed every template change, passed each time, and then failed its
+finish deploy three times on `main`, with each fix outside review.
+
+**A plan whose finish deploys infrastructure it changed has a rehearsal task.** That task deploys
+exactly what will ship, the real templates and not a stand-in, to a throwaway copy. It runs the
+same live checks the finish will run, then tears the copy down. It depends on every task that
+touches what it deploys, and it is reviewed like any other task. A failure there is task work on
+the feature branch, not a fix forward on the base branch.
+
+The throwaway deploy and its teardown each get a row in `DESIGN.md §5.3` with their cost, approved
+at plan review. A throwaway copy never touches the live one's domain, data or credentials. The
+planner writes the task. The plan reviewer flags any plan whose only real deploy is at finish.
+When a throwaway copy cannot exist (an account-wide singleton, one real device), `DESIGN.md` says
+so and I decide at plan review.
+
 ### Commit messages
 
 ```
@@ -781,7 +801,7 @@ where the boundary runs here and how it is enforced.
 The `pir` command and the procedure its sessions follow do not run from this checkout.
 `install.sh` copies the engine, its npm packages and its procedure texts (`roles/`) to
 `~/.claude/pir-engine/`, the `pir-install` skill to `~/.claude/skills/` and the `pir` launcher onto
-the PATH, and the installed `pir` execs `~/.claude/pir-engine/src/shell/pir.mjs` — the baked-in
+the PATH, and the installed `pir` execs `~/.claude/pir-engine/src/cli/shell/pir.mjs` — the baked-in
 path, not this repo. So editing `src/` or `roles/` here changes nothing a user runs until the
 install is refreshed.
 

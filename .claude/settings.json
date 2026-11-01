@@ -34,7 +34,9 @@
       "Bash(grep -c 'usage: pir service' ~/.claude/cockpit/daemon.log)",
       "Bash(claude agents --json --all)",
       "Bash(curl -s -m 3 -H \"Authorization: Bearer $(cat ~/.pir/api-key)\" http://127.0.0.1:47717/v2/runs)",
-      "Bash(curl -s -m 2 http://127.0.0.1:47717/health)"
+      "Bash(curl -s -m 2 http://127.0.0.1:47717/health)",
+      "Bash(git restore --staged --worktree .)",
+      "Bash(git clean -fd)"
     ],
     "ask": [
       "Bash(ln -sfn /Users/jankrolikowski/git/my-agentic-ide/.claude/worktrees/* /Users/jankrolikowski/.wezterm.lua)",

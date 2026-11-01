@@ -1,0 +1,18 @@
+{
+  "baseBranch": "main",
+  "setup": [],
+  "test": [
+    "FORCE_COLOR=0 bash spikes/pir-pane-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/fleet-picker-keys-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/auto-name-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/stop-notify-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/bitbucket-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/agenda-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/notes-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/daemon-leak-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/fleet-picker-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/usage-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/browse-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/cockpit-test/run.sh"
+  ]
+}
