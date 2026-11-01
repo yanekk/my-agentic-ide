@@ -614,6 +614,73 @@ and silently discarding a refresh token costs two browser round trips.
 - **The feature is in the way.** `agenda rm` every slug: with nothing configured the tick returns
   immediately, nothing is fetched, and the column falls back to notes alone.
 
+## Agents started from a calendar
+
+Work too long for a working day can run overnight: put it on a dedicated calendar and the cockpit
+starts an unattended background Claude for each entry. The calendar is the only interface. There
+is no queue, no job file and no new screen.
+
+```
+agenda add nightly --jobs     # attach a new calendar as a jobs calendar
+agenda jobs nightly on|off    # mark or unmark one already attached
+```
+
+A **primary** calendar is refused, because invitations land there, and so is one you do not own,
+because other people control it. An agent cannot run either command. Turning the mark on records
+when, so older entries are ignored rather than reported as missed. To stop everything starting,
+`agenda jobs nightly off` or close the window.
+
+**An entry** is a title and a description. The title is a project folder directly under the
+projects root, with a `.git` in it. The description is the instructions. Both are read at the
+start time, so a mistake can be fixed until then; moving an entry that has already been decided
+does not run it again.
+
+**At its start time** the daemon runs, with no shell because a description is untrusted text:
+
+```
+claude --bg -n "{project} / cal {MM-DD HH:MM} {id4}" --permission-mode bypassPermissions \
+  -w "cal-{YYYYMMDD-HHMM}-{id4}" --disallowedTools AskUserQuestion \
+  --append-system-prompt "{preamble}" "{prompt}"
+```
+
+It does not type into the fleet box, so it works with an agent attached and with `claude agents`
+parked, and no pane is touched. **Bypass permissions are deliberate**: a permission prompt would
+stall the agent until morning. The cost is that the agent could run anything on the machine. Only
+the preamble tells it to stay in its worktree, commit there, and never push or merge. It also gives
+the entry's end time as a deadline, which is told and not enforced. The agent stays in `claude
+agents` when it finishes, and its final message is the report.
+
+**The window must stay open.** The daemon is what starts agents, and it lives with the window. An
+entry whose start passed while the window was closed still starts on reopening if its end has not
+passed; that end time is how you say "too late after this". If it has passed, the entry is skipped
+with a note. Overlapping entries all start.
+
+**The notes column** hears about every problem, one note per entry, signed `calendar`: refused
+(invalid project, empty description, all-day, created by someone else), skipped because it ended,
+failed to start (with Claude's first error line, for instance an untrusted folder), and may not
+have started. A jobs calendar losing its sign-in or being deleted adds one note per episode. A
+successful start adds none, because the agent list shows it.
+
+**How it is wired.** `refreshAgenda` fetches a jobs calendar from seven days back rather than from
+today, and keeps `description` and `creatorOwn` on its events only, so other calendars' meeting
+text is not stored. The pane still draws only what is left of the day. A separate 30 s timer runs
+`jobsTick`, because `refreshAgenda` returns early when nothing is stale; it is never awaited on the
+reconcile path, and a failing tick is one line in `daemon.log` (`jobs: tick failed`), never a
+stalled fleet poll. Decisions need a fetch under five minutes old with no error: a stale cache
+could still hold an entry you deleted, and starting that is worse than starting late.
+
+**It never runs an entry twice.** `~/.claude/cockpit/calendar-jobs.json` records each decision,
+keyed by slug and event id, and `starting` is written before Claude runs. A `starting` found when
+the daemon starts may or may not have become an agent, so it becomes a note and is not retried: a
+rare missed run is preferred to any chance of a second one. A corrupt ledger is set aside, with a
+note, and entries that began before that moment are ignored.
+
+**Trying it safely.** `node bin/cockpit-jobs.mjs --once --fetch` runs one tick by hand;
+`COCKPIT_JOBS_DRY_RUN=1` prints the decisions and argv and writes nothing. `claude stop {id}` stops
+one agent; `claude rm {id}` removes it and its worktree.
+
+The rationale is `plans/calendar-agents/DESIGN.md`.
+
 ## BitBucket dashboard
 
 The fleet list's top pane no longer opens on a greeting. Its left ~75% is a **BitBucket

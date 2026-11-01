@@ -8,6 +8,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 🐞 | T05 review: fake unverified against real: section 13j's fake Google events carry `creator.self` and `description`. No recorded real sample; T06's live check is the first real one. |
+| 2026-11-01 | 🐞 | T05 review, not fixed: `CLAUDE.md` says agenda-test has 637 checks; its node suites now count 730 plus 15 bash, since T03. |
 | 2026-10-31 | 🐞 | T04 review sweep, not fixed: `bin/cockpitd.mjs:2451` `execFileAsync("claude", ["agents", "--json"])` has a SIGTERM-only limit, so a child ignoring SIGTERM never settles. |
 | 2026-10-31 | 🐞 | T04 review sweep, not fixed: `bin/cockpitd.mjs:3780` `execFileAsync("wezterm", get-text)` has the same SIGTERM-only limit. |
 | 2026-10-31 | 📌 | T04 review: real start line measured in a session transcript: `backgrounded · cdb302ae · superfrog-re / cal spike`, matching fake-claude. macOS `mktemp -d` with no template ignores `TMPDIR`. |
