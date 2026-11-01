@@ -3,12 +3,13 @@
 #
 #   bin/install.sh [--start-dir PATH] [--check] [--force] [--no-link]
 #
-# Three idempotent steps:
+# Idempotent steps:
 #   1. check the tools the cockpit shells out to, through a LOGIN shell
 #   2. write ~/.claude/cockpit/config.lua -- where this checkout lives, and which
 #      directory the fleet view opens in ($HOME/src on one machine, $HOME/git on
 #      another)
 #   3. point ~/.wezterm.lua at wezterm/cockpit.lua in this checkout
+#   4. link ~/.claude/skills/scheduled-run to skills/scheduled-run in this checkout
 #
 # Step 2 is what makes the checkout location-agnostic. A symlinked ~/.wezterm.lua
 # makes `wezterm.config_file` report the SYMLINK rather than its target, so the
@@ -286,6 +287,30 @@ else
     [ -n "$STOP" ] && ok "$STOP_PLAN"
 fi
 
+# --- 3e. plan the scheduled-run skill link ----------------------------------
+#
+# The skill lives in this repo so a change to it can be reviewed and merged. A real
+# folder there is the user's file, so it is moved aside rather than replaced -- and
+# NOT next to the link: Claude loads every folder under skills/ that has a SKILL.md
+# (measured on 2.1.316: a `old.bak-1` sibling listed as a skill), so a backup there
+# would stay callable and keep describing a wall that no longer matches.
+SKILL_TARGET="$REPO/skills/scheduled-run"
+SKILL_LINK="$HOME/.claude/skills/scheduled-run"
+SKILL_PLAN="link"
+say ""
+say "${bold}scheduled-run skill${off} ${dim}(~/.claude/skills)${off}"
+if [ ! -f "$SKILL_TARGET/SKILL.md" ]; then
+    SKILL_PLAN="skip"; warn "$SKILL_TARGET/SKILL.md is missing -- skipping"
+elif [ -L "$SKILL_LINK" ] && [ "$(readlink "$SKILL_LINK")" = "$SKILL_TARGET" ]; then
+    SKILL_PLAN="none"; ok "$SKILL_LINK -> $SKILL_TARGET  ${dim}(already points here)${off}"
+elif [ -L "$SKILL_LINK" ]; then
+    say "  will relink $SKILL_LINK -> $SKILL_TARGET  ${dim}(currently -> $(readlink "$SKILL_LINK"))${off}"
+elif [ -e "$SKILL_LINK" ]; then
+    SKILL_PLAN="move"; say "  will move your copy aside and link $SKILL_LINK -> $SKILL_TARGET"
+else
+    say "  will link $SKILL_LINK -> $SKILL_TARGET"
+fi
+
 if [ "$CHECK_ONLY" -eq 1 ]; then
     say ""
     say "--check: nothing written."
@@ -359,6 +384,25 @@ case "$LINK_PLAN" in
         ok "linked $LINK -> $TARGET"
         ;;
 esac
+
+# A warn and not a die: the window works without the skill, and everything above is done.
+if [ "$SKILL_PLAN" = "move" ]; then
+    SKILL_BACKUP="$HOME/.claude/scheduled-run.bak-$(date +%s)"
+    [ -e "$SKILL_BACKUP" ] && SKILL_BACKUP="$SKILL_BACKUP.$$"
+    if mv "$SKILL_LINK" "$SKILL_BACKUP"; then
+        warn "your previous skill: $SKILL_BACKUP"
+    else
+        warn "could not move $SKILL_LINK aside, so the skill is not linked"
+        SKILL_PLAN="skip"
+    fi
+fi
+if [ "$SKILL_PLAN" = "link" ] || [ "$SKILL_PLAN" = "move" ]; then
+    if mkdir -p "$(dirname "$SKILL_LINK")" && ln -sfn "$SKILL_TARGET" "$SKILL_LINK"; then
+        ok "linked $SKILL_LINK -> $SKILL_TARGET"
+    else
+        warn "could not link $SKILL_LINK"
+    fi
+fi
 
 # --- 5. what to do next -----------------------------------------------------
 say ""
