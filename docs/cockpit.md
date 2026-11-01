@@ -706,7 +706,7 @@ refuses a tool with no allow rule, so the settings allow `Bash`, `Read`, `Write`
 | `denyRead` plus `Read()` deny rules | `~/.ssh`, `~/.aws`, `~/.claude/cockpit`, `~/.config/gh`, `~/Library/Keychains`, `~/.claude/.credentials.json`, `~/.claude.json`. The first covers Bash, the second Read, Grep and Glob. Claude's own sign-in still works. |
 | `denyWrite` | Each branch existing at the start (ref file and lock), `packed-refs` and the main `HEAD`. Commits on the agent's own branch and new branches still work. `.git` hooks and config were refused by the sandbox already. |
 | Sites | `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`. GitHub is off, which refuses a push over SSH and `gh`. A dependency from GitHub fails. `WebFetch` and `WebSearch` have no allow rule. |
-| Denied tools | `SendMessage`, `RemoteTrigger`, `ListAgents`, `PushNotification`, `CronCreate`, `DesignSync`, `Workflow`, `EnterWorktree`, `ExitWorktree`. They ran with no allow rule, outside the sandbox, and a deny removes the tool. |
+| Denied tools | `SendMessage`, `RemoteTrigger`, `ListAgents`, `PushNotification`, `CronCreate`, `DesignSync`, `Workflow`, `EnterWorktree`, `ExitWorktree`. The ones T00 tried ran with no allow rule, outside the sandbox; `DesignSync` and `Workflow` were denied untried. A deny removes the tool. |
 | Guard | `bin/cockpit-jobs-guard.mjs`, a PreToolUse hook on Write, Edit and NotebookEdit, because the sandbox does not cover file tools. Refuses a path outside the worktree after resolving links, and `.git` and `.claude/settings*` inside it. Registered as `node '{guard}' --root '{root}' \|\| exit 2`, because any other hook failure lets the write through. |
 | `--strict-mcp-config`, empty `--mcp-config` | No connectors, claude.ai ones included. |
 | `--setting-sources user` | A project's committed hook otherwise runs outside the sandbox. Keeps the Stop ding and `worktree.baseRef`. |
@@ -1731,7 +1731,7 @@ spikes/agenda-test/run.sh
 ```
 
 The agenda's own core: the state files and their lock, the event model, the
-column renderer, the Google client and the `agenda` command. 637 assertions, and
+column renderer, the Google client and the `agenda` command, `agenda wall` included. 925 assertions, and
 **it never touches the network** — `AGENDA_ORIGIN` points Google's endpoints at a
 loopback stub, so the OAuth exchange, the refresh and the event fetch are all
 driven for real against a server the test owns. It asserts that a corrupt
