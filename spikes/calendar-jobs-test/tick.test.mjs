@@ -594,6 +594,24 @@ async function wallFailure(label, run, wordRe) {
   let threw = false;
   try { wallFacts("inner", "w", { projectsRoot: outer, home: os.homedir() }); } catch { threw = true; }
   ok("a broken project inside another repo does not answer with that repo", threw);
+  // The same project through a symlink: git walks up from the physical folder.
+  const linkRoot = fs.mkdtempSync(path.join(SCRATCH, "..", "link-root-"));
+  fs.symlinkSync(path.join(outer, "inner"), path.join(linkRoot, "linked"));
+  threw = false;
+  try { wallFacts("linked", "w", { projectsRoot: linkRoot, home: os.homedir() }); } catch { threw = true; }
+  ok("...nor when the project is a symlink into it", threw);
+  // A good project through a symlink still answers.
+  fs.symlinkSync(path.join(ROOT, "proj"), path.join(linkRoot, "good"));
+  eq("a symlinked project answers its own git dir", wallFacts("good", "w", { projectsRoot: linkRoot, home: os.homedir() }).commonDir, ALWAYS_THERE);
+  // No ref files to deny, so it would look confined and leave every branch movable.
+  fs.mkdirSync(path.join(ROOT, "rt"));
+  gitIn(path.join(ROOT, "rt"), "init", "-q", "-b", "main", "--ref-format=reftable");
+  reset();
+  cached([ev({ title: "rt / nightly" })]);
+  await tick();
+  eq("a reftable repo does not start", [calls().length, entry().state, entry().reason], [0, "failed", "wall"]);
+  ok("...and the note says why", /cannot protect/.test(notes()[0]?.text ?? ""), notes()[0]?.text);
+  fs.rmSync(path.join(ROOT, "rt"), { recursive: true });
   process.env.GIT_DIR = path.join(outer, ".git");
   const f = wallFacts("proj", "w", { projectsRoot: ROOT, home: os.homedir() });
   delete process.env.GIT_DIR;

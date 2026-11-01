@@ -148,7 +148,8 @@ function git(projectDir, args) {
   return execFileSync("git", args, {
     cwd: projectDir, encoding: "utf8", timeout: WALL_CMD_LIMIT_MS, maxBuffer: 16 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
-    env: { ...env, GIT_CEILING_DIRECTORIES: path.dirname(projectDir) },
+    // Physical, as git's own cwd is: a project that is a symlink would walk up past a logical one.
+    env: { ...env, GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) },
   });
 }
 
@@ -171,6 +172,11 @@ export function wallFacts(project, worktreeName, { projectsRoot, home }) {
   // Absolute: a main checkout answers a relative `.git`, and denyWrite would miss the refs.
   const commonDir = git(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
   if (!commonDir) throw new Error("no git dir");
+  // denyWrite protects ref files, and a reftable repo has none: every branch would look
+  // protected and stay movable. Denying reftable/ would stop the agent's own commits.
+  if (fs.existsSync(path.join(commonDir, "reftable"))) {
+    throw Object.assign(new Error("reftable"), { line: "this project stores its branches in a format the wall cannot protect" });
+  }
   // The full name: refname:short answers `heads/x` when a tag is also called x.
   const branches = git(dir, ["for-each-ref", "--format=%(refname)", "refs/heads"])
     .split("\n").filter(Boolean).map((r) => r.replace(/^refs\/heads\//, ""));
@@ -215,7 +221,7 @@ export function buildWallFor({ projectsRoot, home, guardPath = GUARD_PATH }) {
     if (!check.ok) return { unavailable: check.line };
     let facts;
     try { facts = wallFacts(project, worktreeName, { projectsRoot, home }); }
-    catch { return { unavailable: "git could not read this project" }; }
+    catch (e) { return { unavailable: e.line ?? "git could not read this project" }; }
     const { listUnreadable, ...rest } = facts;
     return { ...buildWallSettings({ ...rest, guardPath }), listUnreadable };
   };
