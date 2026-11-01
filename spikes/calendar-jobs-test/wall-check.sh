@@ -37,13 +37,16 @@ agents_ours() {
   claude agents --json --all 2>/dev/null | NAME_RE="$NAME_RE" node -e '
     let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
       const re=new RegExp(process.env.NAME_RE);
-      for(const a of JSON.parse(s)) if(re.test(a.name??"")) console.log(a.id);
+      let list; try { list=JSON.parse(s); } catch { process.exit(1); }
+      for(const a of list) if(re.test(a.name??"")) console.log(a.id);
     })'
 }
 
 clean() {
-  local id args rc out flag _ left=0 repo name
-  for id in $(agents_ours); do
+  local id ids args rc out flag _ left=0 repo name
+  # Unreadable is not "none": worktrees would go from under agents still running.
+  ids="$(agents_ours)" || { echo "clean: claude agents could not be read, nothing removed"; return 1; }
+  for id in $ids; do
     claude stop "$id" >/dev/null 2>&1
     # rm names the exact flag it wants when a worktree holds commits or edits, one at a time.
     args=(); rc=1
@@ -69,9 +72,11 @@ clean() {
   fi
   # rm keeps a session whose worktree held uncommitted files; with the worktree gone it goes.
   for id in $(agents_ours); do claude rm "$id" >/dev/null 2>&1; done
-  [ -n "$(agents_ours)" ] && { echo "LEFT agents: $(agents_ours | tr '\n' ' ')"; left=1; }
-  rm -rf "$SCRATCH"
-  if [ "$left" -eq 0 ]; then echo "clean: no wall-check agents, worktrees or branches left"; fi
+  if ids="$(agents_ours)"; then
+    [ -n "$ids" ] && { echo "LEFT agents: $(echo $ids)"; left=1; }
+  else echo "LEFT unknown: claude agents could not be read"; left=1; fi
+  # The manifest is what a second --clean works from, so it goes only when nothing is left.
+  if [ "$left" -eq 0 ]; then rm -rf "$SCRATCH"; echo "clean: no wall-check agents, worktrees or branches left"; fi
   return "$left"
 }
 
@@ -222,6 +227,7 @@ if want rehearsal; then
   git -C "$PROJ" -c user.name=wall-check -c user.email=wall-check@invalid -c commit.gpgsign=false commit -q --allow-empty -m start
   printf 'echo wall-check-trial-ok\ncurl -sS -m 20 example.com\n' > "$OUT/trial-commands.txt"
   node "$HELPER" control && fine "example.com answers from outside the wall" || unchecked "example.com does not answer from outside the wall, so its block proves nothing"
+  T_SINCE="$(node -e 'console.log(Date.now())')"
   # The real thing, not a copy: this is the first real -p trial (T05 review).
   env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN \
       -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ATTENDED -u CLAUDE_PID \
@@ -237,6 +243,12 @@ if want rehearsal; then
     console.log(Object.values(r).every(Boolean) ? "both" : JSON.stringify(r));
   ')"
   [ "$J" = "both" ] && fine "the final message names the command that passed and the one blocked" || surprise "the final message: $J"
+  node "$HELPER" trial-block wall-check-trial "$T_SINCE" example.com "Example Domain"
+  case $? in
+    0) fine "the command's own result shows example.com refused" ;;
+    1) surprise "example.com answered inside the wall" ;;
+    *) unchecked "no tool result shows what the example.com command got" ;;
+  esac
   L="$(git -C "$PROJ" worktree list | wc -l | tr -d ' ')"
   [ "$L" = "1" ] && fine "the worktree is gone" || surprise "worktrees left: $L"
   B="$(git -C "$PROJ" for-each-ref --format='%(refname:short)' refs/heads | grep -v '^main$' | wc -l | tr -d ' ')"

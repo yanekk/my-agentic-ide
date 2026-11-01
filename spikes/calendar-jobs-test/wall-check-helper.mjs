@@ -7,6 +7,7 @@
 //   control                                                         exit 0 example.com answers from outside the wall
 //   probe <cwd> <project> <root>                                    the wall's init, against a dead API
 //   suite <id> <script>                                             exit 0 that suite printed ALL PASS
+//   trial-block <project> <since-ms> <word> <reached-text>          exit 0 the trial's command was refused, 1 it got through, 2 no evidence
 
 import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -16,7 +17,7 @@ import path from "node:path";
 import { DIR } from "../../bin/cockpit-agenda-store.mjs";
 import { buildWallFor } from "../../bin/cockpit-jobs.mjs";
 import { buildClaudeArgs, worktreeName } from "../../bin/cockpit-jobs-model.mjs";
-import { judgeInit, parseCalls } from "./wall-check-judge.mjs";
+import { judgeBlockedCall, judgeInit, parseCalls } from "./wall-check-judge.mjs";
 
 const HOME = os.homedir();
 const JOBS = path.join(HOME, ".claude", "jobs");
@@ -163,7 +164,17 @@ function suite([id, script]) {
   return runs.some((c) => !c.isError && /ALL PASS/.test(c.result ?? "")) ? 0 : 1;
 }
 
+/** The trial leaves no agent to look up, but -p keeps a transcript, named after its worktree. */
+function trialBlock([project, since, word, reachedText]) {
+  const projects = path.join(HOME, ".claude", "projects");
+  const files = fs.readdirSync(projects).filter((d) => d.includes(`${project}--claude-worktrees-`)).flatMap((d) =>
+    fs.readdirSync(path.join(projects, d)).filter((f) => f.endsWith(".jsonl")).map((f) => path.join(projects, d, f)));
+  const fresh = files.filter((f) => fs.statSync(f).mtimeMs >= Number(since));
+  const verdict = judgeBlockedCall({ calls: fresh.flatMap((f) => parseCalls(fs.readFileSync(f, "utf8"))), blockedWord: word, reachedText });
+  return verdict === "refused" ? 0 : verdict === "BREACH" ? 1 : 2;
+}
+
 const [verb, ...rest] = process.argv.slice(2);
-const verbs = { suite, start, wait, flags, control, probe };
+const verbs = { "trial-block": trialBlock, suite, start, wait, flags, control, probe };
 if (!verbs[verb]) { console.error("wall-check-helper: no such verb"); process.exit(2); }
 process.exitCode = await verbs[verb](rest);

@@ -113,8 +113,10 @@ export function buildWallSettings({ worktree, home, guardPath, commonDir, branch
 
   // macOS mktemp uses this per-user folder and ignores TMPDIR, so without it every script's
   // `mktemp -d` is refused (measured, T07). Owner's choice; published in DESIGN 2.8.
-  const allowWrite = typeof userTemp === "string" && userTemp.startsWith("/") ? [tidy(userTemp)] : [];
+  // Held to an exception's own rules: a bad answer means no folder, not a wider wall.
   const gitDir = fold(tidy(commonDir));
+  const tempOk = typeof userTemp === "string" && !folderProblem(userTemp, home) && !overlaps(fold(tidy(userTemp)), gitDir);
+  const allowWrite = tempOk ? [tidy(userTemp)] : [];
   for (const value of list("write", "write")) {
     const check = validateException("write", value, { home });
     if (!check.ok) { drop("write", value, check.why); continue; }

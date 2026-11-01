@@ -2,7 +2,7 @@
 // proves nothing however green the real run looks.
 
 import { section, eq, done } from "../agenda-test/harness.mjs";
-import { judgeInit, judgeMain, judgeTrial, parseCalls } from "./wall-check-judge.mjs";
+import { judgeBlockedCall, judgeInit, judgeMain, judgeTrial, parseCalls } from "./wall-check-judge.mjs";
 
 section("parseCalls");
 {
@@ -33,6 +33,15 @@ section("the rehearsal");
 eq("names both", judgeTrial({ report: "1. echo wc-ok passed\n2. curl example.com blocked (403)", passMarker: "wc-ok", blockedWord: "example.com" }),
   { namesPassed: true, namesBlocked: true, saysBlocked: true });
 eq("silent on the block", judgeTrial({ report: "1. wc-ok passed", passMarker: "wc-ok", blockedWord: "example.com" }).namesBlocked, false);
+eq("no failures elsewhere is not a block", judgeTrial({ report: "1. wc-ok passed\n2. curl example.com passed\n\nNo commands failed, nothing blocked.", passMarker: "wc-ok", blockedWord: "example.com" }).saysBlocked, false);
+eq("the word on the line after", judgeTrial({ report: "wc-ok\ncurl example.com\n  result: blocked", passMarker: "wc-ok", blockedWord: "example.com" }).saysBlocked, true);
+
+section("the blocked call, from its tool result");
+const curl = (result) => ({ calls: [{ name: "Bash", input: { command: "curl example.com" }, result, isError: false }], blockedWord: "example.com", reachedText: "Example Domain" });
+eq("the real refusal", judgeBlockedCall(curl("Connection blocked by network allowlist\n<sandbox_violations>\ndeny network-outbound example.com:80 (user denied)")), "refused");
+eq("the page came back", judgeBlockedCall(curl("<h1>Example Domain</h1>")), "BREACH");
+eq("something else happened", judgeBlockedCall(curl("curl: (6) could not resolve host")), "not checkable");
+eq("never ran", judgeBlockedCall({ calls: [], blockedWord: "example.com", reachedText: "Example Domain" }), "not checkable");
 
 section("main");
 eq("unchanged", judgeMain({ before: "a", after: "a" }), "unchanged");
