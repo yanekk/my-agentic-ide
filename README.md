@@ -72,10 +72,31 @@ A calendar you mark as a **jobs calendar** (`agenda add nightly --jobs`) starts 
 while you are away: an entry titled `project / item name`, like
 `superfrog-re / run nightly tests`, starts one background Claude in that project folder
 at the entry's start time, with the entry's description as its instructions. It works in its own worktree and its final message in `claude agents`
-is the report. These agents run with **bypass permissions**, so nothing stops to ask,
-and only their instructions keep them inside the worktree. **The cockpit window must
-stay open**: nothing starts while it is closed. An entry that could not start leaves
-one line in the notes column. See [`docs/cockpit.md`](docs/cockpit.md#agents-started-from-a-calendar).
+is the report. **The cockpit window must stay open**: nothing starts while it is closed.
+An entry that could not start leaves one line in the notes column.
+
+Nothing stops to ask, and the machine holds these agents inside a **wall**. It refuses
+writes outside the worktree, moving a branch that already exists, a push, reading
+`~/.ssh`, `~/.aws`, the GitHub and Claude logins, the keychain and the cockpit's own
+folder, every site except npm and PyPI, web fetches, connectors and messages to other
+sessions. A start that cannot be confined does not run. The `scheduled-run` skill tries
+a job inside the wall before it writes the entry, and only you can add an exception,
+per project, with `agenda wall <project> allow-site|allow-ports|allow-write`. A job
+that hits a block carries on and lists it in its report.
+
+The wall is not a promise against a determined attacker. It does not cover reading the
+rest of the machine, temporary folders, data sent to an allowed site, tags, unreachable
+git objects, branches created after the run began, or what the commits do once merged.
+Your other sessions have no wall and can edit the exceptions list. Apple Events to apps
+already running were only weakly measured. Resuming a run by hand with `claude --bg
+--resume {id}` drops the wall, and a run cannot use the GPU. A later Claude version
+could ignore the settings: the results are for Claude Code 2.1.316, which updates
+itself, and `spikes/calendar-jobs-test/wall-check.sh` is the recheck you run by hand. It
+shows Claude took the settings, a job completes and an unlisted site is blocked; it does
+not re-prove the refused secret reads, push or branch moves, measured once on real agents.
+
+After merging a change to this, run `bin/install.sh`, reopen the window, then add any
+exceptions. See [`docs/cockpit.md`](docs/cockpit.md#agents-started-from-a-calendar).
 
 ## Shift+O — the whole review loop
 

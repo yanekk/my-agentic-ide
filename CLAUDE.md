@@ -66,16 +66,19 @@ A calendar marked as a **jobs calendar** (`agenda add <slug> --jobs`, `agenda jo
 on|off`) starts agents. Every entry on it is a job: the title is `{project} / {item name}`, the
 project a folder under the projects root and the item what tells entries apart, and the description
 is the instructions. At its start time the daemon runs `claude
---bg` in that project, in its own worktree, with **bypass permissions** and no question tool, so
-nobody is asked anything and the agent could run anything on the machine; its preamble tells it
-to stay in the worktree and never push. It stays in `claude agents` and its final message is the
-report. **The cockpit window must stay open**: closed means nothing starts, and an entry missed
+--bg` in that project, in its own worktree, with `dontAsk` and no question tool, so nobody is asked
+anything, inside a **wall** the machine enforces: no writes outside the worktree, no moving an existing
+branch, no push, no reads of the listed secrets, only the npm and PyPI sites, no connectors, no messages
+to other sessions. A start that cannot be confined does not run. Only a person adds an exception, per
+project, with `agenda wall`; the `scheduled-run` skill tries a job in the wall first
+(`cockpit-jobs.mjs --trial`). It stays in `claude agents` and its final message is the report, listing
+whatever was blocked. **The cockpit window must stay open**: closed means nothing starts, and an entry missed
 that way still starts on reopening if its end time has not passed, else it leaves a note. Refused,
 skipped and failed entries each leave one note signed `calendar`; a successful start leaves none.
 Each entry is decided once, recorded in `calendar-jobs.json`, so a crash or rebuild never runs one
 twice: a start the daemon may have been cut off in becomes a note and is not retried. Primary
 calendars and calendars you do not own cannot be marked, and an entry someone else created is
-refused. The plan is `plans/calendar-agents/`.
+refused. The plans are `plans/calendar-agents/` and `plans/calendar-agent-sandbox/`.
 
 The fleet list's **names** are written for you too. Left alone, `claude agents`
 labels a session with a one-line summary Claude writes from your first message
@@ -205,7 +208,8 @@ makes typing-without-submitting possible.
 ## Running it
 
 Once per machine: `bin/install.sh`. It checks the seven tools (and `pir`, reported but optional), records where this
-checkout is and which projects root to open in, points `~/.wezterm.lua` here, and
+checkout is and which projects root to open in, points `~/.wezterm.lua` here, links
+`~/.claude/skills/scheduled-run` to `skills/scheduled-run`, and
 registers three things in `~/.claude/settings.json`: the session-naming hook, the
 usage statusline (`cockpit-usage-tap.mjs`, which feeds the footer's usage segment;
 reversible with `cockpit-usage-tap.mjs --uninstall`), and the stop-notify hook
@@ -235,9 +239,13 @@ bin/cockpit-agenda.mjs  the `agenda` command (cockpit terminals only)
 bin/cockpit-agenda-store.mjs   the agenda's three state files, its lock, atomic writes
 bin/cockpit-agenda-model.mjs   pure: normalise Google's events, decide what shows, draw it
 bin/cockpit-agenda-google.mjs  OAuth loopback+PKCE, token refresh, the events REST call
-bin/cockpit-jobs-model.mjs     pure: calendar agents; parse an entry, decideJobs, the preamble and argv, the note wording
+bin/cockpit-jobs-model.mjs     pure: calendar agents; parse an entry, decideJobs, the preamble, the start and trial argv, the note wording
+bin/cockpit-wall-model.mjs     pure: buildWallSettings (a run's settings, from facts, never the description), validateException
+bin/cockpit-guard-model.mjs    pure: guardVerdict, the file-tool write decision
+bin/cockpit-wall-store.mjs     jobs-wall.json: per-project exceptions
+bin/cockpit-jobs-guard.mjs     the PreToolUse hook on calendar runs: resolves the path, exit 0 or 2, any failure refuses
 bin/cockpit-jobs-store.mjs     the calendar-jobs.json ledger: read, set a corrupt one aside, atomic write, prune
-bin/cockpit-jobs.mjs           jobsTick (the daemon's 30 s starter), recoverStarting, `--once` for a hand-run tick
+bin/cockpit-jobs.mjs           jobsTick (the daemon's 30 s starter), recoverStarting, wallFor and its preflight, `--once` for a hand-run tick, `--trial`
 bin/cockpit-bitbucket-model.mjs   pure: normalise a PR, classify/concernsMe into tabs, sort, age+NEW/ACTIVE/STALE tags, summarizeDiffstat, paginate, two-line render + press emphasis, hit-zones
 bin/cockpit-bitbucket-client.mjs  BitBucket HTTPS client (Bearer, GET only): getUser, listOpenPRs, listPRComments, listPRDiffstat
 bin/cockpit-bitbucket-store.mjs   reads the four config settings; reads/writes bitbucket-cache.json + bitbucket-view.json
@@ -265,9 +273,10 @@ spikes/cockpit-test/    integration test, wezterm stubbed (959 checks, ~111s med
                         run is NOT the test command and never prints ALL PASS.
                         SECTIONS=1 lists ids, TIMINGS=1 times them, stress.sh repeats
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
-spikes/agenda-test/     the agenda's store, model, Google client and command (637)
+spikes/agenda-test/     the agenda's store, model, Google client and command, `agenda wall` (925)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
-spikes/calendar-jobs-test/  calendar agents: the model and its purity grep, the store, the tick against a fake claude, live-check.sh (392)
+spikes/calendar-jobs-test/  calendar agents: the models and their purity grep, the guard, the stores, tick and trial against a fake claude (1177); live-check.sh; wall-check.sh, the wall's recheck on real agents, run by hand, not by run.sh
+spikes/calendar-wall-spike/ T00's probes of the wall on real agents; RESULTS.md is the record
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (516)
 spikes/stop-notify-test/ the Stop-hook sound decision, the hook end to end, its settings.json merge (38)
 spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in, the Aperture forecast (365)
@@ -280,6 +289,7 @@ spikes/pty-inject/      PTY harness used to settle how injection behaves
 spikes/fleet-picker-spike/  T00's probes: ← through a GUI Lua callback, the empty-box markers, picker open time
 spikes/pane-swap/       headless-mux probes: swapping the full-width diff pane,
                         and why the footer would not stay one line high
+skills/scheduled-run/   the skill that tries a job in the wall and writes its calendar entry; linked by install.sh
 docs/requirements.md    what this had to do, and why VSCode and Conductor didn't
 docs/cockpit.md         how it works and why; read before changing the daemon
 ```
@@ -317,7 +327,8 @@ throwing a refresh token away costs two browser round trips) and
 `agenda-cache.json` (the fetched events, written by the daemon and watched by the
 pane), `calendar-jobs.json` (each jobs-calendar entry's decision, keyed `{slug}/{eventId}`, written
 by the daemon alone, `0600`, lockless; a corrupt one is set aside as `calendar-jobs.json.corrupt-<ts>`
-and the fresh one ignores entries that began before that moment), `auto-names/` (one small file per session — what the naming hook last called
+and the fresh one ignores entries that began before that moment), `jobs-wall.json` (per-project wall
+exceptions, written only by `agenda wall`, `0600`, temp-then-rename, read at each start), `auto-names/` (one small file per session — what the naming hook last called
 it, whether it has **frozen** on a real name, and whether it has stood down because you
 renamed it by hand; a file each rather
 than one shared JSON so concurrent agents need no lock, pruned at 30 days),
@@ -379,10 +390,10 @@ this is the index.
 | One lock covers all three agenda files, and `withLock` counts **depth** | The agents share these files with you, so every write locks (stale locks broken at 5s, so a process killed mid-write cannot wedge it for ever). One lock over three files makes nesting the *ordinary* case — attaching a calendar and priming its cache is one `withLock` around calls that each take it again. Measured before the guard, that compound write took **5035ms**: the inner call spun its whole retry budget against a lock **this process** held, then broke it as stale and unlinked it, leaving the rest of the transaction with **no lock at all** — the opposite of what wrapping it was for. (The session-naming state needs no lock for the opposite reason: one small file per session, never a shared one.) |
 | Google's downloaded client JSON is **nested**, and the parse must accept it | A Desktop client downloads as `{ "installed": { "client_id": … } }` — snake_case, one level down — and a web client uses `"web"`; the plan assumed a flat `{ clientId, clientSecret }` and the spike **rejected the real file**. So `agenda setup` accepts `installed`, `web` and flat, in either key style, and stores the normalised flat shape: what is on disk is ours, what is read is Google's. |
 | A 403 carrying `ACCESS_TOKEN_SCOPE_INSUFFICIENT` is `auth`, **not** `gone` — and the repair must probe with the **events** call | Google's consent screen has a **per-scope checkbox**, so an unticked calendar box yields a token that refreshes perfectly and 403s only on events. Rendering `calendar gone` would send you to `agenda rm` — destroying a working configuration and fixing nothing. `agenda add <slug>` on a calendar that already exists is therefore a **repair**, not a refusal: it re-signs-in the *account*, leaves the calendar row alone and re-fetches everything sharing that sign-in, so all the loud lines clear at once. It probes first — a working calendar still refuses, a `gone` one is sent to `agenda rm`, a transient failure changes nothing — and the probe fetches **events**, because a token-only probe answers "the sign-in works" and refuses, the exact dead end the repair exists to close. The verdict is read with the model's own `errorKind`, so the command and the line that sent you to it cannot drift apart. |
-| `AGENDA_DRY_RUN=1` binds the **repair** too, with its own check | The repair branch is decided before `add` reaches its dry-run block, so a dry run aimed at an already-connected slug opened a real browser and signed in for real — the opposite of what the flag promises, on one of the two seatbelts every hands-on check in this project is handed over under. |
 | The **resting pane must not rescue** a corrupt `agenda.json` | `readState()` *quarantines* a corrupt file to `agenda.json.corrupt-<ts>`. The pane repaints every 2s, so it always won that race and moved the sign-ins aside **with nobody to tell** — killing the announcement the CLI exists to make. The pane reads with `rescue: false`; quarantining is the `agenda` command's job alone, where a person is watching. |
 | An all-day event is a **civil date**, and an offset-less `dateTime` is not in the machine's zone | DST makes a local day 23 or 25 hours long, so "today plus 86400000" is wrong twice a year, and an all-day event carries `date` (not `dateTime`) precisely because it has no instant — the day bounds are computed in the calendar's zone. Google can also return a local wall-clock time whose zone lives in a sibling field; parsing that with the machine's zone silently shifts an event by hours, and it is a purity leak the grep cannot see, because `new Date(s)` is not a clock call. |
 | A session title can only be set from a **`UserPromptSubmit`** hook, and Claude's own summary arrives too late for the first one | Measured against the 2.1.251 binary: `hookSpecificOutput.sessionTitle` appears in that event's schema and no other. There is no `--name` on `claude agents` and the model has no tool to rename itself, so instructions in CLAUDE.md cannot do this — only the hook can. The `{"type":"ai-title"}` record is written *after* the first reply and `session_title` in the hook input carries only a **custom** title, so the opening words of the prompt stand in and are replaced from the transcript on a later prompt. A custom title permanently suppresses the summary, so naming immediately and upgrading later is the only way to have both — and a name **you** type ends the rule for ever: the hook cannot tell its own last title from a human's by inspection, so it records what it set and compares, and a mismatch writes `backedOff`, never cleared. Without that, `/rename` would be undone on your next prompt. |
+| Calendar runs use `dontAsk`, because `allowedDomains` limits nothing under bypass | Measured on 2.1.316: under `bypassPermissions` an unlisted site is auto-approved (`example.com` returned 200 with one site listed); under `dontAsk` it gets 403 from the proxy and nothing stalls. `dontAsk` is not complete either: RemoteTrigger, ListAgents, EnterWorktree and others ran with no allow rule, so each is denied by name. A wrongly typed field silently drops the whole `--settings`, exit 0, and `--mcp-config`/`--disallowedTools` swallow a following prompt. Detail: `spikes/calendar-wall-spike/RESULTS.md`. |
 | `settings.json` is merged, never rewritten, and a malformed one is **refused** | It is the user's file — their model, their plugins, their own hooks — and one that fails to parse silently disables *every* setting in it. So `--install` drops only a previous registration of **ours** (matched on the script's basename, so a moved checkout is re-pointed rather than duplicated), leaves every other `UserPromptSubmit` hook alone, writes atomically, and exits non-zero rather than overwrite a file it could not parse. |
 
 ## How agent switching is detected
@@ -416,6 +427,11 @@ something was attached, never *which*.
   Claude Code is then talking to Amazon's Bedrock endpoints directly, which need AWS SigV4
   request signing the namer does not do; building a signing path for a setup no one here uses
   is cost without a user (see `plans/bedrock-agent-naming/DESIGN.md §8`).
+- The calendar wall ends at what it lists. It does not stop reads of the rest of the machine, temporary
+  folders, data sent to an allowed site, tags, unreachable git objects, branches made after the start, or
+  what commits do once merged; `claude --bg --resume {id}` without flags drops it, and a run has no GPU.
+  Results are for Claude Code 2.1.316, which updates itself; `wall-check.sh` rechecks by hand and does not
+  re-prove refused secret reads, pushes or branch moves. Full list: `docs/cockpit.md` § The wall.
 - The Anthropic key is guarded against **other users** by the file's `0600`, not against
   **your own** processes: an agent runs as you and can read
   `~/.claude/cockpit/anthropic-api-key` off disk. A real wall is the macOS Keychain, which

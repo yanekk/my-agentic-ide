@@ -640,8 +640,9 @@ already been decided does not run it again.
 **At its start time** the daemon runs, with no shell because a description is untrusted text:
 
 ```
-claude --bg -n "{project} / {item} {MM-DD HH:MM} {id4}" --permission-mode bypassPermissions \
-  -w "cal-{YYYYMMDD-HHMM}-{id4}" --disallowedTools AskUserQuestion \
+claude --bg -n "{project} / {item} {MM-DD HH:MM} {id4}" --permission-mode dontAsk \
+  -w "cal-{YYYYMMDD-HHMM}-{id4}" --settings '{the wall}' --setting-sources user \
+  --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disallowedTools AskUserQuestion \
   --append-system-prompt "{preamble}" "{prompt}"
 ```
 
@@ -650,11 +651,10 @@ following the agent, and control characters and `â”€` become spaces, because `â”
 that header. The date and id stay so the instances of a recurring entry have different names.
 
 It does not type into the fleet box, so it works with an agent attached and with `claude agents`
-parked, and no pane is touched. **Bypass permissions are deliberate**: a permission prompt would
-stall the agent until morning. The cost is that the agent could run anything on the machine. Only
-the preamble tells it to stay in its worktree, commit there, and never push or merge. It also gives
-the entry's end time as a deadline, which is told and not enforced. The agent stays in `claude
-agents` when it finishes, and its final message is the report.
+parked, and no pane is touched. The preamble tells the agent to stay in its worktree, commit there,
+never push or merge, and carry on past a block and list it. It also gives the entry's end time as a
+deadline, which is told and not enforced. The agent stays in `claude agents` when it finishes, and
+its final message is the report.
 
 **The window must stay open.** The daemon is what starts agents, and it lives with the window. An
 entry whose start passed while the window was closed still starts on reopening if its end has not
@@ -686,7 +686,137 @@ note, and entries that began before that moment are ignored.
 `COCKPIT_JOBS_DRY_RUN=1` prints the decisions and argv and writes nothing. `claude stop {id}` stops
 one agent; `claude rm {id}` removes it and its worktree.
 
-The rationale is `plans/calendar-agents/DESIGN.md`.
+### The wall
+
+An unattended agent must never stall, so nothing may stop to ask, and it must be unable to damage
+the machine, read the listed secrets, reach unapproved sites, push or use connectors. The wall applies
+to every calendar start, with no per-entry opt-out. `buildWallSettings` is a pure function of facts
+about the project, and the description is not one of its inputs, so nothing written on a calendar can
+loosen it.
+
+**The mode is `dontAsk`, not bypass.** Calendar runs used `bypassPermissions` until this wall.
+Measured on 2.1.316: under bypass `sandbox.network.allowedDomains` limits nothing, because an unlisted
+site is auto-approved. Under `dontAsk` it gets a 403 from the proxy and nothing stalls. `dontAsk`
+refuses a tool with no allow rule, so the settings allow `Bash`, `Read`, `Write`, `Edit`,
+`NotebookEdit`, `Glob` and `Grep`.
+
+| Layer | What it does |
+|---|---|
+| Sandbox | Shell commands only. `failIfUnavailable`, no unsandboxed escape. Writes limited to the worktree and the temporary folders. |
+| `denyRead` plus `Read()` deny rules | `~/.ssh`, `~/.aws`, `~/.claude/cockpit`, `~/.config/gh`, `~/Library/Keychains`, `~/.claude/.credentials.json`, `~/.claude.json`. The first covers Bash, the second Read, Grep and Glob. Claude's own sign-in still works. |
+| `denyWrite` | Each branch existing at the start (ref file and lock), `packed-refs` and the main `HEAD`. Commits on the agent's own branch and new branches still work. `.git` hooks and config were refused by the sandbox already. |
+| Sites | `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`. GitHub is off, which refuses a push over SSH and `gh`. A dependency from GitHub fails. `WebFetch` and `WebSearch` have no allow rule. |
+| Denied tools | `SendMessage`, `RemoteTrigger`, `ListAgents`, `PushNotification`, `CronCreate`, `DesignSync`, `Workflow`, `EnterWorktree`, `ExitWorktree`. They ran with no allow rule, outside the sandbox, and a deny removes the tool. |
+| Guard | `bin/cockpit-jobs-guard.mjs`, a PreToolUse hook on Write, Edit and NotebookEdit, because the sandbox does not cover file tools. Refuses a path outside the worktree after resolving links, and `.git` and `.claude/settings*` inside it. Registered as `node '{guard}' --root '{root}' \|\| exit 2`, because any other hook failure lets the write through. |
+| `--strict-mcp-config`, empty `--mcp-config` | No connectors, claude.ai ones included. |
+| `--setting-sources user` | A project's committed hook otherwise runs outside the sandbox. Keeps the Stop ding and `worktree.baseRef`. |
+
+Package caches are redirected under `/tmp/claude/` through the settings' `env`. Writing to the shared
+caches is rejected, because a poisoned cache would run later outside the wall.
+
+**A start that cannot be confined does not run.** Before writing `starting`, the tick checks that
+`sandbox-exec` runs and the guard file exists, and gathers the project's git facts. A failure is
+ledger state `failed`, reason `wall`, one note, no retry. This has to happen first because `--bg`
+returns 0 even when the session later fails.
+
+**A job that hits a block** carries on with what it can, commits that and lists the block in its final
+message. No note is written for it.
+
+### Exceptions
+
+Per project, in `~/.claude/cockpit/jobs-wall.json`, read at each start, so a change applies to the
+next run.
+
+```
+agenda wall                              # the projects that have exceptions
+agenda wall <project>                    # what it has, plus the defaults
+agenda wall <project> allow-site <host>
+agenda wall <project> allow-ports        # let it open local ports
+agenda wall <project> allow-write <path> # shell commands only; the guard still refuses file tools there
+agenda wall <project> remove site|ports|write [value]
+```
+
+Only a person can change them: the command refuses agents, as `agenda jobs` does, and a scheduled run
+cannot read the file because the cockpit folder is denied. A calendar entry cannot name one, because
+anything that can write to the calendar could then open the wall.
+
+Refused at the command, and dropped again at each start with one note in case the file was edited by
+hand: a wildcard covering everything, `github.com` and its subdomains, a writable folder that is `/`,
+the home folder, inside a secret folder, `~/.claude`, or the project's own `.git`. The host of any of
+the project's git remotes is dropped at the start, where the remote is known. An `allow-*` for a project
+with no folder under the projects root is refused, so a typo does not surface as a block overnight. An
+unreadable list means no exceptions and one note per start, and the run goes ahead.
+
+### The trial
+
+```
+node bin/cockpit-jobs.mjs --trial --project NAME --root DIR [--limit-min 10] --commands-file FILE
+```
+
+The `scheduled-run` skill (`skills/scheduled-run/`, linked by `bin/install.sh`) runs this with the job's
+setup and a short test before it creates an entry. It makes a throwaway worktree from the project's
+`HEAD`, runs `claude -p --model haiku` with the settings a real start gets, prints the agent's report
+and always removes the worktree and its branch. It writes no ledger and no note and reads no calendar.
+The skill shows what passed and what was blocked and proposes exceptions; you can schedule regardless.
+`-p` skips the workspace trust check, so a project `--bg` refuses still shows up only as the
+failed-to-start note.
+
+### What the wall does not cover
+
+- **Reads of everything else on the machine**, such as `~/.zshrc` and other repos.
+- **Commits take effect when merged and run.** The wall ends at the merge.
+- **Temporary folders are writable**, including macOS's per-user folder from `getconf
+  DARWIN_USER_TEMP_DIR`, because `mktemp -d` ignores `TMPDIR`. An agent could alter other programs'
+  temporary files there.
+- **An allowed site could receive data.**
+- **Tags and unreachable git objects** in the shared store, and **any branch created after the run
+  started**: the deny list is taken once, at the start.
+- **Your other sessions have no wall** and can edit `jobs-wall.json`.
+- **Apple Events to apps already running.** `osascript` was refused with `-600` from inside, but the
+  control was weak: neither app was seen to act from outside either.
+- **Resuming by hand loses the wall.** `claude --bg --resume {id}` naming no flags starts a copy with
+  none of it, so user allow rules run unsandboxed. `claude respawn` and `claude stop` then `claude
+  attach` keep it. A real daemon restart was not measured, to spare live agents; it could only restart
+  from `respawnFlags`, which keep the wall.
+- **A wrongly typed settings field drops the whole wall silently**, exit 0, with user allow rules then
+  running unsandboxed. A test pins the shape, and `wall-check.sh` detects it after an update.
+- **No GPU inside the wall**, locked screen or not. Window tests fail `no GPU adapter`, and a job lists
+  them as blocked.
+- **`allow-write` for a folder in another project** is accepted and opens that project's `.git` hooks.
+  Only the run's own project is checked.
+- **A site exception and an `~/.ssh/config` alias**: remote hosts come from `git remote -v`, so an alias
+  hides the real push host from the check. SSH stays refused at the proxy; HTTPS to that host would not.
+- **The trial's `git worktree add` runs outside the wall**, so a project's committed `post-checkout` hook
+  runs unconfined. Whether a real `-w` does the same is unmeasured.
+- **Disk.** Job worktrees are kept for review; a superfrog one is about 5.8 GB until removed.
+
+### What was proven, and on which version
+
+**Results are for Claude Code 2.1.316, which updates itself.** `spikes/calendar-jobs-test/wall-check.sh`
+is the recheck, run by hand after an update, and `--clean` removes its agents and test commits. It starts
+real agents from the real argv with a scratch `COCKPIT_DIR` and no calendar. On 2026-11-01 it found 17
+tools against 87 without the settings, a build-and-test job completing in the worktree, superfrog's smoke
+running to its end, and a trial naming a pass and a block of `example.com`.
+
+It does **not** re-prove refused outside writes, secret reads, pushes or branch moves. A real agent told to
+attack was stopped by a safety classifier and declined, and the owner dropped that run. Those refusals rest
+on the measurements of 2026-11-01 in `spikes/calendar-wall-spike/RESULTS.md`, and a Claude update could
+change them unnoticed.
+
+### After a merge
+
+The live daemon has the old code until it restarts, and calendar runs stay as they were until then. In
+order:
+
+1. `bin/install.sh`, which links the skill.
+2. Reopen the cockpit window, which turns the wall on.
+3. Add any exceptions a job needs. Superfrog needs `agenda wall superfrog-re allow-write
+   ~/.cache/superfrog-re` and `allow-write ~/Library/ghidra`, and no site or ports.
+
+To undo the wall, revert the merge and reopen the window.
+
+The rationale is `plans/calendar-agents/DESIGN.md` and `plans/calendar-agent-sandbox/DESIGN.md`; where the
+first says bypass, the second replaced it.
 
 ## BitBucket dashboard
 
