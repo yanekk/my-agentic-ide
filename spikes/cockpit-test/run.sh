@@ -4200,7 +4200,7 @@ jseed a
 waituntil 10 "the attached start" bgatleast "JOB-TEXT-a" 1
 # The tail of the path: macOS answers /private/var for mktemp's /var.
 check "it starts in the entry's project" "/agendaj/projects/proj [--bg]" "$JBG"
-check "...with bypass permissions" "[--permission-mode] [bypassPermissions]" "$JBG"
+check "...in dontAsk mode" "[--permission-mode] [dontAsk]" "$JBG"
 check "...in a worktree, with no question tool" "[--disallowedTools] [AskUserQuestion]" "$JBG"
 waituntil 10 "the ledger to say started" sh -c 'grep -q "\"started\"" "$1"' _ "$SJ/calendar-jobs.json"
 same "...and the ledger keeps the agent's id" "$(lq 'l.entries["nightly/a"].agentId')" "jj11kk22"

@@ -13,6 +13,7 @@
     "FORCE_COLOR=0 bash spikes/fleet-picker-test/run.sh",
     "FORCE_COLOR=0 bash spikes/usage-test/run.sh",
     "FORCE_COLOR=0 bash spikes/browse-test/run.sh",
-    "FORCE_COLOR=0 bash spikes/cockpit-test/run.sh"
+    "FORCE_COLOR=0 bash spikes/cockpit-test/run.sh",
+    "FORCE_COLOR=0 bash spikes/calendar-jobs-test/run.sh"
   ]
 }

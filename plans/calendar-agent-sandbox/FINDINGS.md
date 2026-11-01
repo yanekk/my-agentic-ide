@@ -6,6 +6,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | `git rev-parse --git-common-dir` answers relative `.git` in a main checkout. `buildWallSettings` trusts `commonDir`, so T04 must pass an absolute path (`--path-format=absolute`) or `denyWrite` misses the real refs. |
+| 2026-11-01 | 📌 | T01 review, real 2.1.316 init against a dead API: built settings give 17 tools with every denied tool gone; a mistyped field gives 26. Fake `claude` proves no acceptance; T07 repeats this. |
 | 2026-11-01 | 🐞 | T00 review: EnterWorktree `path` moved a walled agent into another worktree, where Bash wrote. Denied with ExitWorktree, owner approved; T01 must include both. Daemon restart stays unmeasured, owner accepted. |
 | 2026-11-01 | 📌 | T01's doc argv omits `--setting-sources user`, its `SECRET_DIRS` omits the new denies, and its section list omits §7, whose T00 results override it. T01's builder must read §7. |
 | 2026-11-01 | 🐞 | Superfrog worktree builds about 5.8 GB and stays until removed; four probes filled the disk to 132 MB free. Job worktrees are kept for review, so nightly runs accumulate. No task covers it. |
