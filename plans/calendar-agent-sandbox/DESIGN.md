@@ -123,7 +123,8 @@ The skill shows the result and proposes exceptions; the owner can schedule regar
 ### 3.1 The boundary
 
 ```
-bin/cockpit-wall-model.mjs    pure. Facts as arguments; returns settings, guard verdicts, validation.
+bin/cockpit-wall-model.mjs    pure. Facts as arguments; returns settings and validation.
+bin/cockpit-guard-model.mjs   pure. The guard's verdict.
 bin/cockpit-jobs-model.mjs    pure. buildClaudeArgs takes the settings; the preamble; note wording.
 bin/cockpit-wall-store.mjs    jobs-wall.json.
 bin/cockpit-jobs-guard.mjs    the hook: reads stdin, resolves paths, calls the model's verdict.
@@ -131,7 +132,7 @@ bin/cockpit-jobs.mjs          gathers facts, preflight, the tick, --once, --tria
 bin/cockpit-agenda.mjs        the `agenda wall` command.
 ```
 
-The grep in `spikes/calendar-jobs-test/run.sh` covers the new pure file too. If that test fails, the fix is to move the code, never to relax the test. Every rule on the pure side is a millisecond test, and a rule that leaks across needs a real agent to check.
+The grep in `spikes/calendar-jobs-test/run.sh` covers the new pure files too. If that test fails, the fix is to move the code, never to relax the test. Every rule on the pure side is a millisecond test, and a rule that leaks across needs a real agent to check.
 
 ### 3.2 `buildWallSettings`
 

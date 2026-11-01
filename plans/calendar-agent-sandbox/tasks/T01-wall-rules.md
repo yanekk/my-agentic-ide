@@ -23,7 +23,6 @@ export const SECRET_DIRS;       // ~/.ssh ~/.aws ~/.claude/cockpit ~/.config/gh
 export function buildWallSettings({ worktree, home, guardPath, commonDir, branches, remoteHosts, exceptions })
   // -> { settings, dropped: [{ project?, kind, value, why }] }
 export function validateException(kind, value, { home })   // -> { ok } | { ok: false, why }
-export function guardVerdict({ root, resolvedPath, toolName })   // -> { allow, reason }
 
 // cockpit-jobs-model.mjs
 buildClaudeArgs({ event, project, item, instructions, zone, wall })
@@ -39,7 +38,7 @@ Argv, in this order so a variadic flag never meets the prompt:
 --disallowedTools AskUserQuestion --append-system-prompt {preamble} {prompt}
 ```
 
-`guardVerdict` lives here so T02 is a thin shell; T01 owns its tests for the root, `.git` and `.claude/settings*` rules.
+The settings name T02's script by the `guardPath` argument and T00's command form, so T01 does not need T02's code.
 
 The preamble drops "never touch" as the only protection and states: the machine enforces the wall, what is blocked, do not try to work around it, carry on with what you can, commit, and list each block in the final message.
 
@@ -51,7 +50,7 @@ The preamble drops "never touch" as the only protection and states: the machine 
 - [ ] Each branch yields ref and `.lock`, plus `packed-refs` and `HEAD`; zero branches; a branch name with a slash.
 - [ ] Exception widening merges; ports set `allowLocalBinding`; absent means the key is absent.
 - [ ] `validateException` and the drop in `buildWallSettings`: `*`, `github.com`, `api.github.com`, remote host, `/`, home, `~/.ssh/x`, `~/.claude`, `.git`, relative path, path with `..`; a good site and folder pass.
-- [ ] `guardVerdict`: inside, the root itself, sibling with a shared prefix (`/a/wt` vs `/a/wt2`), outside, `.git/x`, `.claude/settings.json`, `.claude/other` allowed, empty path refuses.
+- [ ] The hook entry uses T00's fail-shut command form with the given `guardPath` and worktree, and matches Write, Edit and NotebookEdit.
 - [ ] `decideJobs` with `wallFor` returning `unavailable` starts nothing and records `failed`/`wall` with one note.
 - [ ] Purity grep covers the new file and can fail.
 

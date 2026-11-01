@@ -4,7 +4,7 @@
 
 ## Goal
 
-The hook that stops the file tools writing outside the worktree, which the sandbox does not cover (measured). It fails shut. If T01 has not landed, define `guardVerdict` here by T01's signature and let the merge reconcile; the signature in T01's doc is binding.
+The hook that stops the file tools writing outside the worktree, which the sandbox does not cover (measured). It fails shut, and its rule is a pure function so the rule is a millisecond test.
 
 ## Design sections this implements
 
@@ -12,11 +12,14 @@ The hook that stops the file tools writing outside the worktree, which the sandb
 
 ## Files
 
-`bin/cockpit-jobs-guard.mjs` (new), `spikes/calendar-jobs-test/guard.test.mjs` (new).
+`bin/cockpit-guard-model.mjs` (new, pure, added to the purity grep in `spikes/calendar-jobs-test/run.sh`), `bin/cockpit-jobs-guard.mjs` (new), `spikes/calendar-jobs-test/guard.test.mjs` (new).
 
 ## Interface
 
 ```
+// cockpit-guard-model.mjs
+guardVerdict({ root, resolvedPath, toolName })   // -> { allow, reason }
+
 node bin/cockpit-jobs-guard.mjs --root <worktree>
   stdin: Claude's PreToolUse JSON { tool_name, tool_input: { file_path | notebook_path } }
   exit 0 allowed; exit 2 refused with one line on stderr naming the rule, not the content
@@ -28,6 +31,7 @@ Resolves symlinks of the deepest existing parent, then the remainder, because th
 
 Spawned with real stdin:
 
+- [ ] `guardVerdict` directly: the root itself, sibling with a shared prefix (`/a/wt` vs `/a/wt2`), `.claude/other` allowed, empty path refuses.
 - [ ] New file inside; existing file inside; deep new folder inside.
 - [ ] Absolute outside; `..` out; relative path resolved against the root and not the guard's cwd.
 - [ ] Symlink file inside to outside; symlinked parent folder to outside; chain of two.
