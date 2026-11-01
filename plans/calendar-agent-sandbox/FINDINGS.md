@@ -6,6 +6,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 🐞 | Superfrog worktree builds about 5.8 GB and stays until removed; four probes filled the disk to 132 MB free. Job worktrees are kept for review, so nightly runs accumulate. No task covers it. |
+| 2026-11-01 | 📌 | A worktree-isolated `--bg` session refuses Bash lines mixing git with other commands, and `git -c`: "too complex to verify". Plain single `git add`, `git commit` work. T04's preamble should say so. |
+| 2026-11-01 | 📌 | Guard knows only the worktree, so an `allowWrite` exception folder takes Bash but refuses Write and Edit. T02 and T04 decide nothing here unless raised; agents can use the shell. |
+| 2026-11-01 | 🔄 | T00 changed DESIGN §7: more denies, Claude login and keychain closed, `--setting-sources user`. Flagless `claude --bg --resume` and invalid settings lose the wall; both published. |
 | 2026-11-01 | 📌 | `claude --help` says settings failing validation are silently ignored non-interactively. Unmeasured for `--settings` under `--bg`; T00 measures it. |
 | 2026-11-01 | 📌 | User settings allow `SendMessage`, git and aws commands, and set `allowMachLookup: ["*"]`. Whether they carry into a run is T00's. |
 | 2026-11-01 | 📌 | `pip` is absent, only `pip3`; Homebrew Python 3.15 is `EXTERNALLY-MANAGED`, so installs need a venv. |
