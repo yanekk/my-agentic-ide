@@ -16,7 +16,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 |---|---|---|---|---|
 | T00 | wall-measurements | — | ✅ | |
 | T01 | wall-rules | T00 | ✅ | |
-| T02 | write-guard | T01 | ⬜ | |
+| T02 | write-guard | T01 | ✅ | |
 | T03 | exceptions-list | T01 | ✅ | Reviewed: one fix, `allow-write ""` stored the cwd, reproduced by a real run, test locks it. Probed odd sites and folders in a scratch home; four mutations went red. Two findings logged open: another project's folder is accepted, `*.co.uk` passes. Done-when help checked against `agenda help`, bare `agenda` draws the day. |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
 | T05 | trial-run | T04 | ⬜ | |
