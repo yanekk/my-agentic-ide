@@ -6,6 +6,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T07 review sweep: `spikes/calendar-wall-spike/clean.sh` has `--clean`'s fault, a failing `claude agents` reads as none left, then removes its scratch. Not fixed. |
+| 2026-11-01 | 📌 | T07 review: `wall-check.sh` passes superfrog whatever `tools/smoke.sh` scores, printing counts only; 5 of 117 failing or 100 both read as expected. No threshold decided. |
+| 2026-11-01 | 🐞 | T07 review, reproduced by planted inputs, fixed, tests lock them: `userTemp` of root, home or holding `.git` widened `allowWrite`; `judgeTrial` trusted the agent's words, now tool result too; `--clean` called unreadable agents clean. |
 | 2026-11-01 | 📌 | T07, worker-driven, Claude 2.1.316: `wall-check.sh` ALL AS EXPECTED. 17 tools against 87; notes-test, npm, venv pip, commit passed; superfrog smoke finished, 5 of 117 failing; trial named pass and `example.com` block, cleaned up. Ledger, agenda, mains unchanged; `--clean` run. |
 | 2026-11-01 | 🔄 | T07: real attack agent stopped by a safety classifier, then declined; nothing attempted. Owner dropped the attack run. Outside writes, secrets, push and `update-ref` rest on T00 only; DESIGN §1, §2.8 say so. T08 must publish it. |
 | 2026-11-01 | 🔄 | T07: `mktemp -d` ignores `TMPDIR` on macOS, refused inside the wall, failing every suite using it. Owner opened `getconf DARWIN_USER_TEMP_DIR` at every start; published in §2.8. Superfrog went from 6 to 5 failures. |
