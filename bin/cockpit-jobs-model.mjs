@@ -48,7 +48,7 @@ export function plainText(html) {
 // --- one entry -------------------------------------------------------------
 
 // The pattern is what stops a title walking out of the projects root.
-function validProjectName(name) {
+export function validProjectName(name) {
   return /^[A-Za-z0-9._-]+$/.test(name) && name !== "." && name !== "..";
 }
 
