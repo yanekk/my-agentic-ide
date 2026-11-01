@@ -4,9 +4,9 @@
 
 **Plan reviewed:** 2026-11-01 — 13 fixed, 5 decided with the user
 
-**Status:** T00 implemented, awaiting review. The live calendar stays on and unconfined until merge and window reopen.
+**Status:** T00 reviewed; T01 next. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** review T00.
+**Next work will:** build T01, reading DESIGN §7's T00 results, which override its doc.
 
 ## Tasks
 
@@ -14,7 +14,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
-| T00 | wall-measurements | — | 🔍 | Every item answered in `spikes/calendar-wall-spike/RESULTS.md`; five owner decisions in DESIGN §7. Deviations: branch refusals on a copy of superfrog's git store; real daemon restart not done; Apple Events control weak; extra probes `tools`, `closing`, `keyblock`. |
+| T00 | wall-measurements | — | ✅ | Measurements hold; hole found: EnterWorktree let a walled agent's Bash write in another worktree; denied, owner approved. Daemon restart unmeasured, owner accepted. Reran hookform, invalid4, branches, keyblock; added enterwt, bghook. No mutation: spike only. Apple Events control weak; TodoWrite, LSP unmeasured, not offered. |
 | T01 | wall-rules | T00 | ⬜ | |
 | T02 | write-guard | T01 | ⬜ | |
 | T03 | exceptions-list | T01 | ⬜ | |
@@ -24,7 +24,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** T00
+**Review queue:** empty
 
 ## Blocked on the user
 
