@@ -9,11 +9,18 @@
 //     COCKPIT_JOBS_DRY_RUN=1 prints the decisions, argv and each start's settings, and
 //     writes nothing: not the ledger, not a note, not even the cache --fetch filled.
 //
+//   node bin/cockpit-jobs.mjs --trial --project NAME --root DIR [--limit-min 10] --commands-file FILE
+//     Runs the commands in the project's wall, in a throwaway worktree (DESIGN 2.10).
+//     Prints the agent's final message. Exit 0 it ran (blocks are in the text), 1 it
+//     could not run, 2 usage. No ledger, no note, no calendar. The dry run prints the
+//     argv and makes nothing.
+//
 // The description is untrusted text from a calendar and may hold anything. It
 // reaches only Claude's argv. A log line carries slug, project and state; execFile's
 // error.message is never used anywhere, because it quotes the whole command line.
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { dayBounds, errorKind, normaliseEvent, safeText } from "./cockpit-agenda-model.mjs";
 import { DIR, putCacheEntry, readCache, readClient, readState } from "./cockpit-agenda-store.mjs";
 import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google.mjs";
-import { decideJobs, noteText } from "./cockpit-jobs-model.mjs";
+import { buildTrialArgs, decideJobs, noteText, validProjectName } from "./cockpit-jobs-model.mjs";
 import { buildWallSettings } from "./cockpit-wall-model.mjs";
 import { readWall } from "./cockpit-wall-store.mjs";
 import { pruneLedger, readLedger, writeLedger } from "./cockpit-jobs-store.mjs";
@@ -140,16 +147,24 @@ function fetchFailureNotes(calendars, cache, ledger, { log, dry, print }) {
 
 // --- the wall's facts (calendar-agent-sandbox DESIGN 3.4) ----------------------
 
-function git(projectDir, args) {
-  // An inherited GIT_DIR would answer for some other repo. The ceiling stops a broken
-  // project's .git falling through to a repo around it, whose refs would then be the
-  // ones "protected" while this project's stay open.
+// An inherited GIT_DIR would answer for some other repo. The ceiling stops a broken
+// project's .git falling through to a repo around it, whose refs would then be the
+// ones "protected" while this project's stay open.
+function envWithoutGit() {
   const { GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, ...env } = process.env;
+  return env;
+}
+
+function gitEnv(projectDir) {
+  // Physical, as git's own cwd is: a project that is a symlink would walk up past a logical one.
+  return { ...envWithoutGit(), GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) };
+}
+
+function git(projectDir, args) {
   return execFileSync("git", args, {
     cwd: projectDir, encoding: "utf8", timeout: WALL_CMD_LIMIT_MS, maxBuffer: 16 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
-    // Physical, as git's own cwd is: a project that is a symlink would walk up past a logical one.
-    env: { ...env, GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) },
+    env: gitEnv(projectDir),
   });
 }
 
@@ -384,6 +399,171 @@ export async function fetchJobCalendars({ now, zone, log = () => {} }) {
   return cache;
 }
 
+// --- the trial (DESIGN 2.10) -------------------------------------------------
+
+const TRIAL_ADD_LIMIT_MS = 5 * 60 * 1000;   // checking out a large project is slow
+const TRIAL_OUTPUT_MAX = 64 * 1024 * 1024;
+const TRIAL_DRAIN_MS = 500;
+const TRIAL_LIMIT_MAX_MIN = Math.floor((2 ** 31 - 1) / 60_000);   // past this setTimeout fires at once
+
+/**
+ * One child in its own process group, so whatever it started goes with it: those would
+ * hold the throwaway folder, and a killed claude's Bash children would run on. The group
+ * also keeps a terminal's Ctrl+C from killing git before cleanup is ready.
+ * spawn and not execFile, which drops `detached` (measured: the child stayed in our group
+ * and the group kill found nothing). No shell, all the same.
+ * Resolves { err, stdout, stderr, timedOut }; never rejects.
+ */
+function runInGroup(file, args, { cwd, env, limitMs, stops }) {
+  return new Promise((resolve) => {
+    let timedOut = false, limit, hardStop, drain, child, failure = null;
+    const out = [], errs = [];
+    const signal = (name) => { try { process.kill(-child.pid, name); } catch { /* already gone */ } };
+    const stop = () => {
+      clearTimeout(hardStop);
+      signal("SIGTERM");
+      hardStop = setTimeout(() => signal("SIGKILL"), KILL_GRACE_MS);
+    };
+    const finish = () => {
+      clearTimeout(limit); clearTimeout(hardStop); clearTimeout(drain);
+      stops.delete(stop);
+      const stdout = Buffer.concat(out).toString("utf8");
+      resolve({ err: failure, stdout, stderr: Buffer.concat(errs).toString("utf8"), timedOut });
+    };
+    try {
+      child = spawn(file, args, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      failure = e;   // a NUL byte in a command throws here
+      return finish();
+    }
+    let room = TRIAL_OUTPUT_MAX;
+    const keep = (into) => (chunk) => { if (room > 0) { into.push(chunk); room -= chunk.length; } };
+    child.stdout.on("data", keep(out));
+    child.stderr.on("data", keep(errs));
+    child.on("error", (e) => { failure = e; finish(); });
+    stops.add(stop);
+    limit = setTimeout(() => { timedOut = true; stop(); }, limitMs);
+    // The pipes close only when everyone holding them has gone, and a leftover process
+    // can hold them for ever. The child's exit decides, then the leftovers and pipes go.
+    child.on("exit", (code, sig) => {
+      clearTimeout(hardStop);
+      if (code !== 0) failure = Object.assign(new Error("failed"), { code: code ?? sig });
+      signal("SIGKILL");
+      drain = setTimeout(() => { child.stdout.destroy(); child.stderr.destroy(); }, TRIAL_DRAIN_MS);
+    });
+    child.on("close", finish);
+  });
+}
+
+/**
+ * Takes the worktree, its branch and any folder the trial had to make. Sync, so nothing
+ * can come between a signal and it. Returns what is still there, for the caller to say.
+ */
+function removeTrial({ dir, worktree, branch, madeDirs }) {
+  const quiet = (args) => {
+    // Detached: a second Ctrl+C must not kill the git doing the cleaning up.
+    try { execFileSync("git", args, { cwd: dir, env: gitEnv(dir), stdio: "ignore", detached: true, timeout: 60_000 }); return true; }
+    catch { return false; }
+  };
+  if (fs.existsSync(worktree) && !quiet(["worktree", "remove", "--force", "--force", worktree])) {
+    try { fs.rmSync(worktree, { recursive: true, force: true }); } catch { /* reported below */ }
+  }
+  quiet(["worktree", "prune"]);
+  quiet(["branch", "-D", branch]);
+  for (const d of madeDirs) { try { fs.rmdirSync(d); } catch { /* something else uses it */ } }
+  const left = [];
+  if (fs.existsSync(worktree)) left.push(worktree);
+  if (quiet(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])) left.push(`branch ${branch}`);
+  return left;
+}
+
+/** Reads the commands; null when there is no usable list. The text goes nowhere but argv. */
+function readCommands(file) {
+  try {
+    const commands = fs.readFileSync(file, "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+    return commands.length ? commands : null;
+  } catch { return null; }
+}
+
+function parseTrialArgs(argv) {
+  const out = { limitMin: 10 };
+  for (let i = 0; i < argv.length; i++) {
+    const has = argv[i + 1] != null;
+    if (argv[i] === "--trial") continue;
+    if (argv[i] === "--project" && has) out.project = argv[++i];
+    else if (argv[i] === "--root" && has) out.root = argv[++i];
+    else if (argv[i] === "--commands-file" && has) out.file = argv[++i];
+    else if (argv[i] === "--limit-min" && has) out.limitMin = Number(argv[++i]);
+    else return null;
+  }
+  return out.project != null && out.root && out.file && out.limitMin > 0 && out.limitMin <= TRIAL_LIMIT_MAX_MIN ? out : null;
+}
+
+async function trialCommand(argv) {
+  const opts = parseTrialArgs(argv);
+  if (!opts) { console.error(USAGE); return 2; }
+  if (!validProjectName(opts.project)) { console.error("that is not a project name"); return 2; }
+  const commands = readCommands(opts.file);
+  if (!commands) { console.error("no commands: the file is missing, unreadable or empty"); return 2; }
+
+  const root = path.resolve(opts.root);
+  const dir = path.join(root, opts.project);
+  if (!fs.existsSync(path.join(dir, ".git"))) { console.error(`no project folder is named "${opts.project}"`); return 1; }
+
+  const id = randomBytes(4).toString("hex");
+  const name = `wall-trial-${id}`;
+  const wall = buildWallFor({ projectsRoot: root, home: os.homedir() })(opts.project, name);
+  if (!wall.settings) { console.error(`the wall could not be set up: ${wall.unavailable}`); return 1; }
+  // Said here and not as notes: a trial leaves none, and a person is reading this.
+  if (wall.listUnreadable) console.error("the wall exceptions list could not be read, so this trial has none");
+  for (const d of wall.dropped ?? []) console.error(`a wall exception was ignored because it is not allowed: ${safeText(String(d.value))}`);
+
+  const args = buildTrialArgs({ settings: wall.settings, commands });
+  if (dryRun()) {
+    console.log(`would run a trial in ${path.join(dir, ".claude", "worktrees", name)}`);
+    console.log(`  argv: ${JSON.stringify(["claude", ...args])}`);
+    return 0;
+  }
+
+  const worktree = path.join(dir, ".claude", "worktrees", name);
+  // `.claude` and its `worktrees` may be new here, and a copy must not leave them behind.
+  const madeDirs = [path.join(dir, ".claude", "worktrees"), path.join(dir, ".claude")].filter((d) => !fs.existsSync(d));
+
+  let stoppedBy = null;
+  const stops = new Set();
+  // Stays installed through the cleanup: a second signal must not cut that short.
+  const onSignal = (sig) => { stoppedBy ??= sig; for (const stop of stops) stop(); };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  let code = 1, report = null, line = null;
+  try {
+    const add = await runInGroup("git", ["worktree", "add", "-q", "-b", name, worktree, "HEAD"], {
+      cwd: dir, env: gitEnv(dir), limitMs: TRIAL_ADD_LIMIT_MS, stops,
+    });
+    if (add.err) line = "git could not make the throwaway worktree";
+    else if (!stoppedBy) {
+      const run = await runInGroup("claude", args, {
+        // An inherited GIT_DIR would point the agent's git at some other repo, outside the throwaway copy.
+        cwd: worktree, env: envWithoutGit(), limitMs: opts.limitMin * 60_000, stops,
+      });
+      // -p prints only at its end, so what a killed run wrote is not a report.
+      if (run.timedOut) line = `the trial passed its ${opts.limitMin} minute limit and was stopped, so it has no report`;
+      else if (run.err) line = failureLine(run.err, "", run.stderr);
+      else if (!run.stdout.trim()) line = "claude finished without a final message";
+      else { report = run.stdout; code = 0; }
+    }
+  } finally {
+    const left = removeTrial({ dir, worktree, branch: name, madeDirs });
+    if (left.length) console.error(`the trial could not remove: ${left.join(", ")}`);
+  }
+  if (stoppedBy) { console.error(`the trial was stopped by ${stoppedBy}`); return 1; }
+  // safeText: this is claude's own stderr, and a person's terminal obeys escapes in it.
+  if (line) console.error(safeText(line));
+  if (report != null) process.stdout.write(report);
+  return code;
+}
+
 // --- the command -----------------------------------------------------------
 
 function panesRoot() {
@@ -393,9 +573,11 @@ function panesRoot() {
   } catch { return null; }
 }
 
-const USAGE = "usage: cockpit-jobs.mjs --once [--fetch] [--root DIR]";
+const USAGE = "usage: cockpit-jobs.mjs --once [--fetch] [--root DIR]\n"
+  + "       cockpit-jobs.mjs --trial --project NAME --root DIR [--limit-min 10] --commands-file FILE";
 
 async function main(argv) {
+  if (argv.includes("--trial")) return trialCommand(argv);
   let once = false, fetch = false, root = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--once") once = true;
