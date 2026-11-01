@@ -53,25 +53,26 @@ done
 
 same "the real ledger is untouched" "$(ledger_sig "$REAL_LEDGER")" "$LEDGER_BEFORE"
 
-# --- the pure model keeps its side of the boundary (DESIGN 3.1) ------------
+# --- the pure models keep their side of the boundary (DESIGN 3.1) ----------
 # If this fails, the fix is to MOVE THE CODE, never to relax the grep: every rule
 # that leaks across this line needs a rig instead of a millisecond test.
 impure() {
   grep -nE "Date\.now|new Date\([[:space:]]*\)|process\.|[\"'](node:)?(fs|child_process|https?)(/[a-z]+)?[\"']|fetch\(" "$1" | wc -l | tr -d ' '
 }
-MODEL="$ROOT/bin/cockpit-jobs-model.mjs"
-same "the model reaches for nothing impure" "$(impure "$MODEL")" "0"
 
 # The grep is only worth something if it can fail, so each forbidden thing is
 # planted in a copy, one at a time.
 i=0
-while IFS= read -r plant; do
-  i=$((i+1))
-  P="$T/planted-$i.mjs"
-  cp "$MODEL" "$P"
-  printf '%s\n' "$plant" >> "$P"
-  same "the grep catches: $plant" "$(impure "$P")" "1"
-done <<'PLANTS'
+for MODEL in "$ROOT/bin/cockpit-jobs-model.mjs" "$ROOT/bin/cockpit-wall-model.mjs"; do
+  NAME="$(basename "$MODEL")"
+  same "$NAME reaches for nothing impure" "$(impure "$MODEL")" "0"
+  while IFS= read -r plant; do
+    i=$((i+1))
+    P="$T/planted-$i.mjs"
+    cp "$MODEL" "$P"
+    printf '%s\n' "$plant" >> "$P"
+    same "$NAME: the grep catches: $plant" "$(impure "$P")" "1"
+  done <<'PLANTS'
 const t = Date.now();
 const t = new Date();
 const h = process.env.HOME;
@@ -81,6 +82,7 @@ import cp from "node:child_process";
 import h from "node:https";
 import h from "https";
 PLANTS
+done
 
 daemon_tripwire "$T" || fail=1
 if [ "$fail" -eq 0 ]; then echo "ALL PASS ($pass bash checks; node suites counted above)"; else echo "FAILURES"; fi

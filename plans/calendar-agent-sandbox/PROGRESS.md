@@ -6,7 +6,7 @@
 
 **Status:** Plan written, nothing built. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** T00, because its measurements gate the design.
+**Next `pir-work` will:** review T01.
 
 ## Tasks
 
@@ -15,7 +15,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | # | Task | Depends on | State | Notes |
 |---|---|---|---|---|
 | T00 | wall-measurements | — | ✅ | |
-| T01 | wall-rules | T00 | ⬜ | |
+| T01 | wall-rules | T00 | 🔍 | bin/cockpit-wall-model.mjs, new argv, required wallFor; temporary wallFor in jobsTick until T04. 331 new node checks. Deviations: §7's denies, `--setting-sources user`, `SECRET_FILES` export; Read() deny on Keychains too; ancestors of secrets and of .git refused; `listUnreadable` on wallFor's result; preamble gains the plain-git sentence. |
 | T02 | write-guard | T01 | ⬜ | |
 | T03 | exceptions-list | T01 | ⬜ | |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
@@ -24,7 +24,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T01
 
 ## Blocked on the user
 

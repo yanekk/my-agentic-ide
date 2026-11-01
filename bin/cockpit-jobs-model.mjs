@@ -112,17 +112,20 @@ function civil(ts, zone) {
 
 // --- what the agent is told ------------------------------------------------
 
-/** DESIGN 2.5. The long-command sentence is the wording T00 ran for 75 minutes. */
+/** The long-command sentence is the wording calendar-agents T00 ran for 75 minutes. */
 export function buildPreamble({ end, zone }) {
   const { hour, minute } = civil(end, zone);
   return [
     "Nobody is present, and nobody will answer until morning. Never wait for a reply and never ask a question.",
     "When a choice comes up, make the most defensible decision and record it.",
-    "Work only in the current worktree, on its branch, and commit there. Never push, never merge, and never touch anything outside the worktree.",
+    "Work only in the current worktree, on its branch, and commit there. Never push and never merge.",
+    "The machine enforces a wall around this run. It blocks writing outside this worktree, moving existing git branches, reading secret folders such as ~/.ssh, any site other than the package registries, pushing, connectors, and messages to other sessions.",
+    "Do not try to work around a block. Carry on with what you can still do, commit that, and list each block in your final message.",
+    "Run each git command alone and in its plain form: a line mixing git with other commands, or using git -c, is refused.",
     `The deadline is ${hour}:${minute}, so wrap up by then.`,
     "Run long commands in the background with the longest time limit allowed and do not end your turn until they have finished.",
     "Do not end your turn while work is still running.",
-    "Your final message is the report. State the outcome, what was done, the decisions taken, and what is left.",
+    "Your final message is the report. State the outcome, what was done, the decisions taken, each thing the wall blocked, and what is left.",
   ].join("\n");
 }
 
@@ -142,22 +145,36 @@ function clipItem(item) {
   return Array.from(characters.segment(item), (s) => s.segment).slice(0, NAME_ITEM_MAX).join("").trim();
 }
 
+/** The folder name `-w` is given. decideJobs needs it first, to ask for the wall. */
+export function worktreeName({ event, zone }) {
+  const { year, month, day, hour, minute } = civil(event.start, zone);
+  return `cal-${year}${month}${day}-${hour}${minute}-${id4(event.id)}`;
+}
+
 /**
- * The argv for execFile("claude", ...), DESIGN 2.4 flag for flag.
+ * The argv for execFile("claude", ...).
  * The date and id stay in the name after the item: a recurring entry repeats its
  * title, and the daemon leaves the panes alone on an ambiguous name.
  * The prompt's fixed first line keeps it from beginning with "-", which Claude's
- * option parser would read as a flag whatever execFile does. --disallowedTools
- * takes several values, so a flag must follow it or it would swallow the prompt.
+ * option parser would read as a flag whatever execFile does. --mcp-config and
+ * --disallowedTools take several values, so a flag must follow each or it would
+ * swallow the prompt (measured: the agent sat idle with its prompt read as deny rules).
+ * --setting-sources user: a project's committed hook otherwise runs outside the sandbox.
+ * With no wall this throws, because an agent with none must never be started.
  */
-export function buildClaudeArgs({ event, project, item, instructions, zone }) {
-  const { year, month, day, hour, minute } = civil(event.start, zone);
+export function buildClaudeArgs({ event, project, item, instructions, zone, wall }) {
+  if (!wall?.settings) throw new TypeError("a start needs its wall");
+  const { month, day, hour, minute } = civil(event.start, zone);
   const tag = id4(event.id);
   return [
     "--bg",
     "-n", `${project} / ${clipItem(item)} ${month}-${day} ${hour}:${minute} ${tag}`,
-    "--permission-mode", "bypassPermissions",
-    "-w", `cal-${year}${month}${day}-${hour}${minute}-${tag}`,
+    "--permission-mode", "dontAsk",
+    "-w", worktreeName({ event, zone }),
+    "--settings", JSON.stringify(wall.settings),
+    "--setting-sources", "user",
+    "--strict-mcp-config",
+    "--mcp-config", '{"mcpServers":{}}',
     "--disallowedTools", "AskUserQuestion",
     "--append-system-prompt", buildPreamble({ end: event.end, zone }),
     `Instructions from the calendar entry:\n${instructions}`,
@@ -184,7 +201,8 @@ function oneLine(text, max = 120) {
 /**
  * The text of one note. `detail` holds what the kind needs: refused { title, reason,
  * project }, missed { title }, failed { title, line }, unknown { title }, auth { slug },
- * gone { slug }, corrupt { path }. The last four are written by the tick, not by
+ * gone { slug }, corrupt { path }, wall { title, line }, wall-list { project },
+ * wall-dropped { project, value }. Auth, gone, corrupt and unknown are written by the tick, not by
  * decideJobs; the words all live here.
  */
 export function noteText(kind, detail = {}) {
@@ -207,6 +225,12 @@ export function noteText(kind, detail = {}) {
       return `Jobs calendar "${slug}" can no longer be found, so its entries will not start. Run: agenda rm ${slug}`;
     case "corrupt":
       return `The calendar job record was unreadable and was moved to ${oneLine(detail.path, 200)}. Entries that had already started will not run again.`;
+    case "wall":
+      return `Calendar entry "${title}" not started: its wall could not be set up (${oneLine(detail.line)}). It will not be retried.`;
+    case "wall-list":
+      return `The wall exceptions list could not be read, so "${oneLine(detail.project, 60)}" started with none. A run that hits a block reports it. Check: agenda wall`;
+    case "wall-dropped":
+      return `A wall exception for "${oneLine(detail.project, 60)}" was ignored because it is not allowed: ${oneLine(detail.value, 80)}`;
     default:
       return `Calendar job: ${oneLine(kind)} ${oneLine(detail.title)}`.trim();
   }
@@ -214,14 +238,29 @@ export function noteText(kind, detail = {}) {
 
 // --- the decision ----------------------------------------------------------
 
+function askWall(wallFor, project, name) {
+  try {
+    const wall = wallFor(project, name);
+    if (wall?.settings) return wall;
+    return { unavailable: wall?.unavailable ?? "no wall was given" };
+  } catch (e) {
+    // The constructor name only: the message can carry anything.
+    return { unavailable: `${e?.name ?? "Error"} while working it out` };
+  }
+}
+
 /**
  * What to do right now, a function of its arguments alone. DESIGN 2.2, 2.3, 2.7.
  *
  * `ledgerChanges` holds refused and missed. A started entry is NOT in it: the tick
  * writes `starting` itself immediately before it runs Claude (DESIGN 2.7), so what
  * is decided and what is recorded cannot be split across two writers.
+ *
+ * `wallFor(project, worktreeName)` gives { settings, dropped, listUnreadable? } or
+ * { unavailable: reason }. Anything else, a throw or no wallFor at all reads as
+ * unavailable: this is what stops an unconfined start, so it fails shut.
  */
-export function decideJobs({ calendars, cache, ledger, now, projectsRoot, zone, projectExists }) {
+export function decideJobs({ calendars, cache, ledger, now, projectsRoot, zone, projectExists, wallFor }) {
   const start = [];
   const notes = [];
   const ledgerChanges = [];
@@ -272,12 +311,22 @@ export function decideJobs({ calendars, cache, ledger, now, projectsRoot, zone, 
         notes.push({ key, text: noteText("refused", { title: event.title, reason, project: job.project }) });
         continue;
       }
+      const wall = askWall(wallFor, job.project, worktreeName({ event, zone }));
+      if (!wall.settings) {
+        ledgerChanges.push({ key, state: "failed", reason: "wall" });
+        notes.push({ key, text: noteText("wall", { title: event.title, line: wall.unavailable }) });
+        continue;
+      }
+      if (wall.listUnreadable) notes.push({ key, text: noteText("wall-list", { project: job.project }) });
+      for (const d of wall.dropped ?? []) {
+        notes.push({ key, text: noteText("wall-dropped", { project: job.project, value: d.value }) });
+      }
       start.push({
         key,
         project: job.project,
         title: event.title,
         cwd: `${root}/${job.project}`,
-        args: buildClaudeArgs({ event, project: job.project, item: job.item, instructions: job.instructions, zone }),
+        args: buildClaudeArgs({ event, project: job.project, item: job.item, instructions: job.instructions, zone, wall }),
         end: event.end,
       });
     }

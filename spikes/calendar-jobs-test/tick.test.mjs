@@ -81,6 +81,16 @@ section("starting and started");
   eq("the starting row carries the title", c[0].ledger?.entries?.["night/evt1"]?.title, "proj / nightly");
   eq("the started row carries the title", entry().title, "proj / nightly");
   ok("the prompt is the last argument", c[0].args.at(-1) === "Instructions from the calendar entry:\nrun the tests");
+  eq("it runs in dontAsk", c[0].args[c[0].args.indexOf("--permission-mode") + 1], "dontAsk");
+  ok("bypass is gone", !c[0].args.includes("bypassPermissions"));
+  ok("connectors are off", c[0].args.includes("--strict-mcp-config"));
+  {
+    const s = JSON.parse(c[0].args[c[0].args.indexOf("--settings") + 1]);
+    eq("the settings turn the sandbox on", s.sandbox.enabled, true);
+    const wt = c[0].args[c[0].args.indexOf("-w") + 1];
+    ok("the guard is rooted at this entry's worktree",
+      s.hooks.PreToolUse[0].hooks[0].command.includes(path.join(ROOT, "proj", ".claude", "worktrees", wt)));
+  }
   eq("exit 0 is `started`", entry().state, "started");
   eq("...with the id parsed", entry().agentId, "ab12cd34");
   eq("a successful start adds no note", notes().length, 0);

@@ -4,8 +4,9 @@
 
 import { section, ok, eq, done } from "../agenda-test/harness.mjs";
 import {
-  plainText, parseJob, decideJobs, buildPreamble, buildClaudeArgs, noteText,
+  plainText, parseJob, decideJobs, buildPreamble, buildClaudeArgs, noteText, worktreeName,
 } from "../../bin/cockpit-jobs-model.mjs";
+import { buildWallSettings } from "../../bin/cockpit-wall-model.mjs";
 import { normaliseEvent } from "../../bin/cockpit-agenda-model.mjs";
 
 const ZONE = "Europe/Warsaw";
@@ -14,6 +15,10 @@ const START = T("2026-11-01T20:00:00Z");   // 21:00 in Warsaw
 const END = T("2026-11-01T23:00:00Z");     // 00:00 on the 2nd in Warsaw
 const MIN = 60000;
 const ROOT = "/Users/me/src";
+const wallOf = (worktree = "/w") => buildWallSettings({ worktree, home: "/Users/me", guardPath: "/g.mjs",
+  commonDir: "/r/.git", branches: ["main"], remoteHosts: [], exceptions: {} });
+const WALL = wallOf();
+const wallFor = () => WALL;
 
 const ev = (over = {}) => ({
   id: "evt1", title: "superfrog / nightly", start: START, end: END, allDay: false, reply: "n/a", slug: "night",
@@ -22,11 +27,11 @@ const ev = (over = {}) => ({
 const CAL = { slug: "night", account: "me@x.y", jobs: true, jobsSince: T("2026-10-01T00:00:00Z") };
 
 function decide({ events = [ev()], now = START, ledger = { version: 1, entries: {} }, calendars = [CAL],
-  cacheEntry, exists = () => true } = {}) {
+  cacheEntry, exists = () => true, wall = wallFor } = {}) {
   const fresh = cacheEntry ?? { fetchedAt: now, events, error: null };
   return decideJobs({
     calendars, cache: { version: 1, calendars: { night: fresh } }, ledger, now,
-    projectsRoot: ROOT, zone: ZONE, projectExists: exists,
+    projectsRoot: ROOT, zone: ZONE, projectExists: exists, wallFor: wall,
   });
 }
 const nothing = (d) => d.start.length === 0 && d.notes.length === 0 && d.ledgerChanges.length === 0;
@@ -44,7 +49,7 @@ ok("not one millisecond before start", nothing(decide({ now: START - 1 })));
 }
 eq("a trailing slash on the root does not double up",
   decideJobs({ calendars: [CAL], cache: { calendars: { night: { fetchedAt: START, events: [ev()], error: null } } },
-    ledger: { entries: {} }, now: START, projectsRoot: ROOT + "/", zone: ZONE, projectExists: () => true }).start[0].cwd,
+    ledger: { entries: {} }, now: START, projectsRoot: ROOT + "/", zone: ZONE, projectExists: () => true, wallFor }).start[0].cwd,
   "/Users/me/src/superfrog");
 eq("starts late, inside the entry", decide({ now: END - 1 }).start.length, 1);
 {
@@ -225,35 +230,95 @@ for (const [name, input, want] of [
 section("2.4 the argv");
 const EVT = ev({ id: "abc_20261101T200000Z" });
 {
-  const args = buildClaudeArgs({ event: EVT, project: "superfrog", item: "nightly", instructions: "go", zone: ZONE });
+  const args = buildClaudeArgs({ event: EVT, project: "superfrog", item: "nightly", instructions: "go", zone: ZONE, wall: WALL });
   const name = args[2], wt = args[6], tag = name.slice(-4);
   ok("id4 is four hex characters", /^[0-9a-f]{4}$/.test(tag));
   eq("flag for flag", args, [
     "--bg",
     "-n", `superfrog / nightly 11-01 21:00 ${tag}`,
-    "--permission-mode", "bypassPermissions",
+    "--permission-mode", "dontAsk",
     "-w", `cal-20261101-2100-${tag}`,
+    "--settings", JSON.stringify(WALL.settings),
+    "--setting-sources", "user",
+    "--strict-mcp-config",
+    "--mcp-config", '{"mcpServers":{}}',
     "--disallowedTools", "AskUserQuestion",
     "--append-system-prompt", buildPreamble({ end: EVT.end, zone: ZONE }),
     "Instructions from the calendar entry:\ngo",
   ]);
   eq("the worktree name is what Git allows", /^[A-Za-z0-9-]+$/.test(wt), true);
   eq("a flag follows --disallowedTools", args[args.indexOf("--disallowedTools") + 2], "--append-system-prompt");
+  eq("a flag follows --mcp-config", args[args.indexOf("--mcp-config") + 2], "--disallowedTools");
+  ok("bypass is gone", !args.includes("bypassPermissions"));
+  eq("worktreeName is what -w is given", worktreeName({ event: EVT, zone: ZONE }), wt);
   eq("decideJobs hands back this argv",
     decide({ events: [ev({ id: "abc_20261101T200000Z", description: "<p>go</p>" })] }).start[0].args, args);
 }
 for (const hostile of ["-rf /", "--dangerously", 'say "hi" \'there\'', "line one\nline two\n--flag", "$(touch x) `y`"]) {
-  const args = buildClaudeArgs({ event: EVT, project: "p", item: "i", instructions: hostile, zone: ZONE });
-  eq(`one element, no more: ${JSON.stringify(hostile)}`, args.length, 12);
+  const args = buildClaudeArgs({ event: EVT, project: "p", item: "i", instructions: hostile, zone: ZONE, wall: WALL });
+  eq(`one element, no more: ${JSON.stringify(hostile)}`, args.length, 19);
+  eq("...and the settings do not move", args[args.indexOf("--settings") + 1], JSON.stringify(WALL.settings));
   eq("...byte-exact in the last element", args.at(-1), `Instructions from the calendar entry:\n${hostile}`);
   ok("...which never begins with -", !args.at(-1).startsWith("-"));
 }
 {
-  const nameOf = (id) => buildClaudeArgs({ event: ev({ id }), project: "p", item: "i", instructions: "i", zone: ZONE });
+  const nameOf = (id) => buildClaudeArgs({ event: ev({ id }), project: "p", item: "i", instructions: "i", zone: ZONE, wall: WALL });
   const a = nameOf("abc_20261101T200000Z"), b = nameOf("def_20261101T200000Z");
   ok("two recurring instances in one minute: names differ", a[2] !== b[2]);
   ok("two recurring instances in one minute: worktrees differ", a[6] !== b[6]);
   eq("the same id always gives the same name", nameOf("abc_20261101T200000Z")[2], a[2]);
+}
+
+section("2.9 no wall, no start");
+ok("buildClaudeArgs refuses to build without a wall", (() => {
+  try { buildClaudeArgs({ event: EVT, project: "p", item: "i", instructions: "i", zone: ZONE }); return false; }
+  catch { return true; }
+})());
+for (const [name, wall] of [
+  ["unavailable", () => ({ unavailable: "sandbox-exec failed" })],
+  ["a throw", () => { throw new Error("secret detail"); }],
+  ["nothing returned", () => undefined],
+  ["no wallFor at all", null],
+]) {
+  const d = decide({ wall });
+  eq(`${name}: nothing starts`, d.start, []);
+  eq(`${name}: recorded failed/wall`, d.ledgerChanges, [{ key: "night/evt1", state: "failed", reason: "wall" }]);
+  eq(`${name}: one note`, d.notes.length, 1);
+  ok(`${name}: the note names the entry`, d.notes[0].text.includes('"superfrog / nightly"'));
+  ok(`${name}: the note quotes no exception message`, !d.notes[0].text.includes("secret detail"));
+}
+ok("the reason reaches the note", decide({ wall: () => ({ unavailable: "sandbox-exec failed" }) }).notes[0].text.includes("sandbox-exec failed"));
+{
+  const asked = [];
+  const d = decide({ wall: (project, name) => { asked.push([project, name]); return WALL; } });
+  eq("wallFor is asked for this project and worktree", asked, [["superfrog", worktreeName({ event: ev(), zone: ZONE })]]);
+  ok("...and its settings reach the argv", d.start[0].args.includes(JSON.stringify(WALL.settings)));
+  const none = [];
+  decide({ now: START - 1, wall: () => { none.push(1); return WALL; } });
+  decide({ exists: () => false, wall: () => { none.push(1); return WALL; } });
+  eq("an entry not starting never asks", none, []);
+  const one = decide({ events: [ev({ id: "a" }), ev({ id: "b" })],
+    wall: () => { none.push(1); return none.length === 1 ? { unavailable: "x" } : WALL; } });
+  eq("one project's failure leaves the next entry alone", one.start.map((s) => s.key), ["night/b"]);
+}
+{
+  const d = decide({ wall: () => ({ ...WALL, listUnreadable: true,
+    dropped: [{ kind: "site", value: "github.com", why: "no" }, { kind: "write", value: "/", why: "no" }] }) });
+  eq("it still starts", d.start.length, 1);
+  eq("unreadable list plus two dropped rows: three notes", d.notes.length, 3);
+  ok("the list note names the project", d.notes[0].text.includes('"superfrog"') && d.notes[0].text.includes("could not be read"));
+  ok("a dropped note names the value", d.notes[1].text.includes("github.com"));
+  eq("nothing is recorded by the model", d.ledgerChanges, []);
+}
+ok("a hostile dropped value stays one clean line", !/[\x1b\n]/.test(noteText("wall-dropped", { project: "p", value: "a\x1b[31m\nb" })));
+
+section("2.9 the preamble");
+{
+  const p = buildPreamble({ end: END, zone: ZONE });
+  for (const words of ["The machine enforces a wall", "Do not try to work around", "Carry on with what you can", "commit that", "list each block", "each thing the wall blocked"]) {
+    ok(`says: ${words}`, p.includes(words));
+  }
+  ok("no longer rests on \"never touch\"", !p.includes("never touch"));
 }
 
 section("the agent's name");
@@ -302,11 +367,10 @@ section("2.5 the preamble");
     ["commit there", "commit there"],
     ["no push", "Never push"],
     ["no merge", "never merge"],
-    ["nothing outside", "never touch anything outside the worktree"],
     ["the deadline, midnight in the zone", "The deadline is 00:00"],
     ["T00's confirmed wording", "Run long commands in the background with the longest time limit allowed and do not end your turn until they have finished."],
     ["work still running", "Do not end your turn while work is still running."],
-    ["the report", "State the outcome, what was done, the decisions taken, and what is left."],
+    ["the report", "State the outcome, what was done, the decisions taken, each thing the wall blocked, and what is left."],
   ]) ok(`preamble: ${what}`, p.includes(needle), p);
   ok("preamble never begins with -", !p.startsWith("-"));
 }
@@ -315,7 +379,7 @@ section("DST: the zone passed decides");
 {
   // Warsaw leaves summer time at 01:00Z on 25 Oct 2026: 02:30 happens twice.
   const summer = T("2026-10-25T00:30:00Z"), winter = T("2026-10-25T01:30:00Z");
-  const worktree = (start, zone) => buildClaudeArgs({ event: ev({ start, end: start + MIN }), project: "p", item: "i", instructions: "i", zone })[6];
+  const worktree = (start, zone) => buildClaudeArgs({ event: ev({ start, end: start + MIN }), project: "p", item: "i", instructions: "i", zone, wall: WALL })[6];
   ok("before the change, summer offset", worktree(summer, ZONE).startsWith("cal-20261025-0230-"));
   ok("after the change, winter offset", worktree(winter, ZONE).startsWith("cal-20261025-0230-"));
   ok("another zone, another name", worktree(summer, "America/New_York").startsWith("cal-20261024-2030-"));

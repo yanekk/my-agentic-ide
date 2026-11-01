@@ -15,6 +15,7 @@
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +23,7 @@ import { dayBounds, errorKind, normaliseEvent, safeText } from "./cockpit-agenda
 import { DIR, putCacheEntry, readCache, readClient, readState } from "./cockpit-agenda-store.mjs";
 import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google.mjs";
 import { decideJobs, noteText } from "./cockpit-jobs-model.mjs";
+import { buildWallSettings } from "./cockpit-wall-model.mjs";
 import { pruneLedger, readLedger, writeLedger } from "./cockpit-jobs-store.mjs";
 import { addNote } from "./cockpit-notes.mjs";
 
@@ -133,6 +135,17 @@ function fetchFailureNotes(calendars, cache, ledger, { log, dry, print }) {
   return { changed, texts };
 }
 
+// Temporary, feature branch only: T04 replaces this with the real facts and the
+// preflight, and is merged with this task. Empty facts mean no branch is protected yet.
+function placeholderWallFor(projectsRoot) {
+  const guardPath = fileURLToPath(new URL("./cockpit-jobs-guard.mjs", import.meta.url));
+  return (project, name) => buildWallSettings({
+    worktree: path.join(projectsRoot, project, ".claude", "worktrees", name),
+    home: os.homedir(), guardPath, commonDir: path.join(projectsRoot, project, ".git"),
+    branches: [], remoteHosts: [], exceptions: {},
+  });
+}
+
 let ticking = false;
 
 /**
@@ -164,6 +177,7 @@ export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () =>
     const decision = decideJobs({
       calendars, cache: seen, ledger, now, projectsRoot, zone,
       projectExists: (name) => fs.existsSync(path.join(projectsRoot, name, ".git")),
+      wallFor: placeholderWallFor(projectsRoot),
     });
 
     if (dry) {
