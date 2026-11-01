@@ -20,7 +20,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T03 | exceptions-list | T01 | ✅ | |
 | T04 | confined-start | T01, T02, T03 | ✅ | |
 | T05 | trial-run | T04 | ✅ | |
-| T06 | skill-refactor | T03, T05 | ⬜ | |
+| T06 | skill-refactor | T03, T05 | ✅ | |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
