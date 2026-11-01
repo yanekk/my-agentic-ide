@@ -16,7 +16,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 |---|---|---|---|---|
 | T00 | wall-measurements | — | ✅ | |
 | T01 | wall-rules | T00 | ✅ | |
-| T02 | write-guard | T01 | ⬜ | |
+| T02 | write-guard | T01 | 🔍 | Guard model and hook, 103 checks. Deviations: walks links itself, so dangling links are caught; refuses `~` and whitespace paths via `rawPathRefusal`; relative paths must also pass against hook `cwd`; `.git`, `.claude/settings*` refused at any depth, case-insensitive. |
 | T03 | exceptions-list | T01 | ⬜ | |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
 | T05 | trial-run | T04 | ⬜ | |
@@ -24,7 +24,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T02
 
 ## Blocked on the user
 
