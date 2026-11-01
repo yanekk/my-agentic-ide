@@ -17,14 +17,14 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T00 | wall-measurements | — | ✅ | |
 | T01 | wall-rules | T00 | ✅ | |
 | T02 | write-guard | T01 | ⬜ | |
-| T03 | exceptions-list | T01 | ⬜ | |
+| T03 | exceptions-list | T01 | 🔍 | Store and `agenda wall`; 206 new checks. Deviations: exports `validProjectName` from the jobs model; stores `allow-write` with links resolved; refuses the project's `.git` at the command; honours `AGENDA_DRY_RUN`; `remove site|write` require a value; an unreadable read exits 1. |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
 | T05 | trial-run | T04 | ⬜ | |
 | T06 | skill-refactor | T03, T05 | ⬜ | |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T03
 
 ## Blocked on the user
 
