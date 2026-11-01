@@ -315,7 +315,8 @@ ok("a hostile dropped value stays one clean line", !/[\x1b\n]/.test(noteText("wa
 section("2.9 the preamble");
 {
   const p = buildPreamble({ end: END, zone: ZONE });
-  for (const words of ["The machine enforces a wall", "Do not try to work around", "Carry on with what you can", "commit that", "list each block", "each thing the wall blocked"]) {
+  for (const words of ["The machine enforces a wall", "Do not try to work around", "Carry on with what you can", "commit that", "list each block", "each thing the wall blocked",
+    "Run each git command alone and in its plain form", "using git -c"]) {
     ok(`says: ${words}`, p.includes(words));
   }
   ok("no longer rests on \"never touch\"", !p.includes("never touch"));
