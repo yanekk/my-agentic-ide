@@ -9,8 +9,8 @@
 **Plan reviewed:** 2026-10-31 — 15 fixed, 7 decided with the user
 
 **Status:** Plan reviewed. Nothing built.
-**Last updated:** 2026-10-31
-**Next `pir-work` will:** T00, because the instructions every agent gets depend on its answer. T01 and T03 can run beside it.
+**Last updated:** 2026-11-01
+**Next `pir-work` will:** T06, the live check, the only task left.
 
 ## Tasks
 
@@ -23,12 +23,12 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T02 | job-decisions | T00 | ✅ | |
 | T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ✅ | |
-| T05 | daemon-wiring | T01, T03, T04 | 🔍 | Fetch window, job fields, tick and recovery in `cockpitd`. Section 13j adds 25 checks; docs updated. Deviation: whole suite not run, per the parallel-worker rule; CLAUDE.md count 959 is arithmetic. Parked case uses pir in the slot. |
+| T05 | daemon-wiring | T01, T03, T04 | ✅ | Review clean, no fix commit. Sections 13j and 13c passed five times; four wiring mutations went red; old entries stay out of the pane; docs' flags checked against `claude --help`. Whole suite left to pir. Real Google and real `claude --bg` through the daemon: unverified until T06. |
 | T06 | live-check | T00, T05 | ⬜ | |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
 
-**Review queue:** T05
+**Review queue:** empty
 
 ## Blocked on the user
 
