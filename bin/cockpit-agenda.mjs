@@ -829,6 +829,8 @@ function resolveFolder(value) {
 function wallAddFolder(value, project) {
   const home = os.homedir();
   const refuse = (why) => die(`${wire(value)} cannot be allowed: ${why}. Nothing was changed.`);
+  // path.resolve("") is the cwd: an unset shell variable must not allow wherever you stand.
+  if (!value) refuse("a folder must be a path");
   // As typed too, so a link cannot be what makes a refused path pass or a `~` go unread.
   const raw = validateException("write", value.startsWith("~") ? value : resolveFolder(value), { home });
   if (!raw.ok) refuse(raw.why);
@@ -874,7 +876,7 @@ function wallChange(project, action, args) {
       after = [`${project} no longer has ${wire(value)}.`];
     } else if (kind === "write") {
       // What was typed, or what it resolves to: the stored form has its links resolved.
-      const forms = [value, resolveFolder(value), realOfDeepest(resolveFolder(value))];
+      const forms = value ? [value, resolveFolder(value), realOfDeepest(resolveFolder(value))] : [];
       apply = (row) => { row.write = asList(row.write).filter((w) => !forms.includes(w)); };
       after = [`${project} no longer has ${wire(value)}.`];
     } else die(WALL_USAGE);

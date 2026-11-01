@@ -126,6 +126,14 @@ section("forbidden values write nothing");
     ok("...saying why", /cannot be allowed/.test(r.all), r.all);
   }
   ok("a link into a secret folder is named as that", /\.ssh/.test(wall(dir, "alpha", "allow-write", home("caches/innocent")).all));
+  // path.resolve("") is the cwd, so an unset shell variable would have allowed wherever the person stood.
+  const blank = run(dir, ["wall", "alpha", "allow-write", ""], { cwd: home("caches") });
+  eq("an empty folder is refused, not read as the cwd", [blank.status, bytes(dir)], [1, null]);
+  ok("...saying so", /must be a path/.test(blank.all), blank.all);
+  const standing = fresh();
+  run(standing, ["wall", "alpha", "allow-write", "."], { cwd: home("caches") });
+  run(standing, ["wall", "alpha", "remove", "write", ""], { cwd: home("caches") });
+  eq("an empty `remove write` does not take the cwd's row", rows(standing).alpha.write, [home("caches")]);
 }
 
 section("project names and folders");
