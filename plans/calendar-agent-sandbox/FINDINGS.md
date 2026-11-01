@@ -6,6 +6,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T05: the trial's `git worktree add` runs outside the wall, so a project's committed `post-checkout` hook runs unconfined. Whether a real `-w` does the same is unmeasured. |
+| 2026-11-01 | 📌 | T05: a trial whose cleanup fails keeps its exit code and names what is left on stderr. T06's skill must show stderr, as dropped exceptions and an unreadable list also go there. |
 | 2026-11-01 | 🐞 | T04 review: fake `claude` unverified against real; T07's `wall-check.sh` is the first real start from this argv. Project folder that is itself a linked worktree: where `-w` lands, and so the guard's root, unmeasured, read-only. |
 | 2026-11-01 | 🐞 | T04 review: reftable repo gave `denyWrite` no ref files, so branches stayed movable; symlinked project walked past `GIT_CEILING_DIRECTORIES`. Reproduced by script against real repos, both fixed, tests lock them. |
 | 2026-11-01 | 📌 | T04: `remoteHosts` comes from `git remote -v`, so an `~/.ssh/config` alias yields the alias, not the real host. A site exception for the real push host then passes. SSH stays refused at the proxy; HTTPS to it would not. |

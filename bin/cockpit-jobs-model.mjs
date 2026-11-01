@@ -151,15 +151,27 @@ export function worktreeName({ event, zone }) {
   return `cal-${year}${month}${day}-${hour}${minute}-${id4(event.id)}`;
 }
 
+// What makes a run walled, shared by a real start and a trial so they cannot drift.
+// --mcp-config and --disallowedTools take several values, so a flag must follow each
+// or it would swallow the prompt (measured: the agent sat idle with its prompt read as
+// deny rules). Every caller puts --append-system-prompt next.
+// --setting-sources user: a project's committed hook otherwise runs outside the sandbox.
+function wallFlags(settings) {
+  return [
+    "--settings", JSON.stringify(settings),
+    "--setting-sources", "user",
+    "--strict-mcp-config",
+    "--mcp-config", '{"mcpServers":{}}',
+    "--disallowedTools", "AskUserQuestion",
+  ];
+}
+
 /**
  * The argv for execFile("claude", ...).
  * The date and id stay in the name after the item: a recurring entry repeats its
  * title, and the daemon leaves the panes alone on an ambiguous name.
  * The prompt's fixed first line keeps it from beginning with "-", which Claude's
- * option parser would read as a flag whatever execFile does. --mcp-config and
- * --disallowedTools take several values, so a flag must follow each or it would
- * swallow the prompt (measured: the agent sat idle with its prompt read as deny rules).
- * --setting-sources user: a project's committed hook otherwise runs outside the sandbox.
+ * option parser would read as a flag whatever execFile does.
  * With no wall this throws, because an agent with none must never be started.
  */
 export function buildClaudeArgs({ event, project, item, instructions, zone, wall }) {
@@ -171,13 +183,38 @@ export function buildClaudeArgs({ event, project, item, instructions, zone, wall
     "-n", `${project} / ${clipItem(item)} ${month}-${day} ${hour}:${minute} ${tag}`,
     "--permission-mode", "dontAsk",
     "-w", worktreeName({ event, zone }),
-    "--settings", JSON.stringify(wall.settings),
-    "--setting-sources", "user",
-    "--strict-mcp-config",
-    "--mcp-config", '{"mcpServers":{}}',
-    "--disallowedTools", "AskUserQuestion",
+    ...wallFlags(wall.settings),
     "--append-system-prompt", buildPreamble({ end: event.end, zone }),
     `Instructions from the calendar entry:\n${instructions}`,
+  ];
+}
+
+// --- the trial (DESIGN 2.10) -------------------------------------------------
+
+const TRIAL_PREAMBLE = [
+  "This is a trial of a scheduled job. Nobody is present: never wait for a reply and never ask a question.",
+  "The machine enforces a wall around this run. Do not try to work around a block; record it and go on to the next command.",
+  "Run each git command alone and in its plain form: a line mixing git with other commands, or using git -c, is refused.",
+  "Run long commands with the longest time limit allowed and do not end your turn until they have finished.",
+].join("\n");
+
+/**
+ * The argv for `claude -p`, with the wall a real start gets. Without settings it throws,
+ * as buildClaudeArgs does. The prompt's fixed first line keeps a command from being read
+ * as one of Claude's flags, and each command stays on its own numbered line.
+ */
+export function buildTrialArgs({ settings, commands }) {
+  if (!settings) throw new TypeError("a trial needs its wall");
+  const list = commands.map((c, i) => `${i + 1}. ${c}`).join("\n");
+  return [
+    "-p",
+    "--model", "haiku",
+    "--permission-mode", "dontAsk",
+    ...wallFlags(settings),
+    "--append-system-prompt", TRIAL_PREAMBLE,
+    "Run these commands in order, each one even if an earlier one failed. Do not fix anything and do not commit anything.\n"
+      + `${list}\n`
+      + "Your final message is the report: for each command, whether it passed, and each thing the wall blocked.",
   ];
 }
 

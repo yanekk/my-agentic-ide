@@ -4,6 +4,7 @@
 // and behaves as FAKE_CLAUDE_MODE says.
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 if (args[0] === "--i-am-the-fake") { console.log("fake-claude"); process.exit(0); }
@@ -13,7 +14,8 @@ try { ledger = JSON.parse(fs.readFileSync(path.join(process.env.COCKPIT_DIR, "ca
 catch { /* no ledger: the test asserts on that */ }
 fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, cwd: process.cwd(), dir: process.env.COCKPIT_DIR, ledger })}\n`);
 
-const say = () => console.log(`backgrounded · ab12cd34 · ${args[args.indexOf("-n") + 1]}`);
+// `-p` prints the final message; `--bg` prints its one line.
+const say = () => console.log(args[0] === "-p" ? "FAKE FINAL MESSAGE" : `backgrounded · ab12cd34 · ${args[args.indexOf("-n") + 1]}`);
 
 switch (process.env.FAKE_CLAUDE_MODE) {
   case "trust":
@@ -22,6 +24,24 @@ switch (process.env.FAKE_CLAUDE_MODE) {
   case "garbled":
     console.log("something Claude never printed before");
     process.exit(0);
+  case "stderr-fail":
+    console.error("claude said no");
+    process.exit(4);
+  case "empty":
+    process.exit(0);
+  case "leaves-child": {
+    // Holds this process's stdout open after it has exited, as a forgotten server would.
+    const child = spawn("sleep", ["60"], { stdio: "inherit" });
+    fs.writeFileSync(process.env.FAKE_CLAUDE_CHILD, String(child.pid));
+    child.unref();
+    say();
+    process.exit(0);
+  }
+  case "commits":
+    // Leaves things a clean removal would refuse: an untracked file, and a commit on the branch.
+    fs.writeFileSync("left-behind.txt", "x");
+    say();
+    break;
   case "silent-fail":
     process.exit(3);
   case "hang":

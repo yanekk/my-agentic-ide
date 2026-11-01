@@ -6,7 +6,7 @@
 
 **Status:** Plan written, nothing built. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** T00, because its measurements gate the design.
+**Next `pir-work` will:** review T05.
 
 ## Tasks
 
@@ -19,12 +19,12 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T02 | write-guard | T01 | ✅ | |
 | T03 | exceptions-list | T01 | ✅ | |
 | T04 | confined-start | T01, T02, T03 | ✅ | |
-| T05 | trial-run | T04 | ⬜ | |
+| T05 | trial-run | T04 | 🔍 | `--trial` in `cockpit-jobs.mjs`, `buildTrialArgs`, 176 checks. Deviations: `spawn` not `execFile`, which drops `detached`; bad name exits 2, missing folder 1; dry run honoured; failed cleanup keeps the exit code and says so on stderr. |
 | T06 | skill-refactor | T03, T05 | ⬜ | |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T05
 
 ## Blocked on the user
 
