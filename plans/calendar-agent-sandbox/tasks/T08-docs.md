@@ -12,7 +12,7 @@ Say what the wall now is and what it does not cover, in every place that today s
 
 ## Files
 
-`README.md` (the jobs calendar paragraph), `docs/cockpit.md` (§ Agents started from a calendar: the argv, the mode, the wall, exceptions, the trial, limits, post-merge steps), `CLAUDE.md` (the jobs paragraph, the file map entries for the new `bin/` files and `skills/`, state list `jobs-wall.json`, the suite's count, `Known limits`, one row in the measured table for bypass versus allowedDomains, retiring one row to keep thirty).
+`README.md` (the jobs calendar paragraph), `docs/cockpit.md` (§ Agents started from a calendar: the argv, the mode, the wall, exceptions, the trial, limits, post-merge steps), `CLAUDE.md` (the jobs paragraph, the file map entries for the new `bin/` files, `skills/` and `spikes/calendar-wall-spike/`, state list `jobs-wall.json`, the suite's count, `Known limits`, one row in the measured table for bypass versus allowedDomains, retiring one row to keep thirty).
 
 ## Tests
 

@@ -51,14 +51,14 @@ Runs use `--permission-mode dontAsk`, not `bypassPermissions` (owner, 2026-11-01
              network: { allowedDomains: [...], allowLocalBinding?: true },
              filesystem: { denyRead: [...secrets], denyWrite: [...branch refs], allowWrite?: [...] } },
   permissions: { allow: ["Bash","Read","Write","Edit","NotebookEdit","Glob","Grep", ...T00's list],
-                 deny: ["Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.claude/cockpit/**)", "Read(~/.config/gh/**)"] },
+                 deny: ["Read(~/.ssh/**)", "Read(~/.aws/**)", "Read(~/.claude/cockpit/**)", "Read(~/.config/gh/**)", "SendMessage"] },
   hooks: { PreToolUse: [ guard on Write|Edit|NotebookEdit ] },
   env?: { cache redirects, §2.6 } }
 ```
 
 Measured: a `--settings` sandbox block overrides `sandbox.enabled: false` in user settings. `WebFetch` and `WebSearch` have no allow rule, because they run outside the sandbox and a URL can carry data; measured refused. The sandbox covers shell commands only, which is why the file tools need deny rules and the guard. Reads use both `denyRead` (Bash) and `Read()` rules (Read, Grep, Glob). A `Read()` rule must start `~/` or `//`: measured, `Read(/abs/path)` silently matched nothing because one slash means relative to the settings file.
 
-Connectors and MCP are off through `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` (measured: no `mcp__` tools, claude.ai connectors included). `--mcp-config` and `--disallowedTools` are variadic, so another flag must follow each or they swallow the prompt; this was measured by getting it wrong, and an agent sat idle with its prompt read as deny rules.
+`SendMessage` is denied because user settings allow it and the other sessions it reaches have no wall (owner, 2026-11-01). A `--settings` deny overrides that allow; T00 measures it. Connectors and MCP are off through `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` (measured: no `mcp__` tools, claude.ai connectors included). `--mcp-config` and `--disallowedTools` are variadic, so another flag must follow each or they swallow the prompt; this was measured by getting it wrong, and an agent sat idle with its prompt read as deny rules.
 
 ### 2.3 Writes
 
@@ -84,7 +84,7 @@ Per project, in `~/.claude/cockpit/jobs-wall.json` (owner, 2026-11-01). Kinds: a
 
 Only a person adds one, with `agenda wall <project> allow-site|allow-ports|allow-write ...`, guarded by `refuseIfAgent`, the same check that stops an agent marking a jobs calendar. Scheduled agents cannot read or write the file because the cockpit folder is denied. A calendar entry has no way to name one, because anything that can write to the calendar could then open the wall.
 
-Refused at the command, and dropped again at each start in case the file was edited by hand: a wildcard covering everything, `github.com` and its subdomains, the host of any of that project's git remotes (checked at the start only, where the remote is known), a writable folder that is `/`, the home folder, inside a denied secret folder, `~/.claude`, or a project's `.git`. A dropped row writes one note per start.
+Refused at the command, and dropped again at each start in case the file was edited by hand: a wildcard covering everything, `github.com` and its subdomains, the host of any of that project's git remotes (checked at the start only, where the remote is known), a writable folder that is `/`, the home folder, inside a denied secret folder, `~/.claude`, or a project's `.git`. A dropped row writes one note per start. An `allow-*` for a project with no folder under the projects root is refused too, so a typo does not surface as an overnight block (owner, 2026-11-01); `remove` still works on one.
 
 An unreadable list means no exceptions and one note, per start. A wall with fewer holes is the safe direction, and the run still goes ahead. A run that then hits a block reports it.
 
@@ -96,7 +96,7 @@ Published in README, `docs/cockpit.md` and the skill, because a wall of unknown 
 - The keychain: `security find-generic-password` found `Claude Code-credentials` from inside the sandbox. T00 measures whether the secret can be read.
 - Commits take effect when merged and run; the wall ends at the merge.
 - Temporary folders are writable. An allowed site could receive data.
-- Tags and unreachable git objects in the shared store.
+- Tags and unreachable git objects in the shared store, and any branch created after the run started: the deny list is taken once, at the start.
 - Other unconfined sessions run as the owner and can edit `jobs-wall.json`.
 - Results are for Claude Code 2.1.316, which updates itself. `wall-check.sh` is the recheck, run by hand.
 - Apps already running that accept Apple Events: measured with Terminal not running only (T00).
@@ -110,7 +110,7 @@ Published in README, `docs/cockpit.md` and the skill, because a wall of unknown 
 
 ### 2.10 The trial
 
-`scheduled-run` runs the job's setup and short test in the wall before creating an entry. `cockpit-jobs.mjs --trial` makes a throwaway worktree, runs `claude -p` on a small model with the settings a real start would get for that project, a time limit (default 10 minutes), and instructions to run the given commands and list what was blocked without fixing anything. It prints the final message and always removes the worktree and its branch. It writes no ledger and no note, and never reads a calendar.
+`scheduled-run` runs the job's setup and short test in the wall before creating an entry. `cockpit-jobs.mjs --trial` makes a throwaway worktree from the project's `HEAD` (where a real `-w` starts here, through `worktree.baseRef: head` in user settings; calendar-agents FINDINGS 2026-10-31), runs `claude -p` on a small model with the settings a real start would get for that project, a time limit (default 10 minutes), and instructions to run the given commands and list what was blocked without fixing anything. It prints the final message and always removes the worktree and its branch. It writes no ledger and no note, and never reads a calendar.
 
 `-p` is used because the skill waits for the answer. It differs from `--bg`: `-p` skips the workspace trust check, so a project `--bg` refuses is not caught by a trial; the skill checks nothing here and the failed-to-start note remains the report.
 
@@ -136,7 +136,7 @@ The grep in `spikes/calendar-jobs-test/run.sh` covers the new pure files too. If
 
 ### 3.2 `buildWallSettings`
 
-A function of `{ worktree, home, guardPath, commonDir, branches, baseHead, remoteHosts, exceptions }`. Returns `{ settings, dropped }`. The description is not an input, which is the proof it cannot affect the wall; a test passes hostile descriptions and compares.
+A function of `{ worktree, home, guardPath, commonDir, branches, remoteHosts, exceptions }`. Returns `{ settings, dropped }`. The description is not an input, which is the proof it cannot affect the wall; a test passes hostile descriptions and compares.
 
 ### 3.3 The guard
 
@@ -144,7 +144,7 @@ A function of `{ worktree, home, guardPath, commonDir, branches, baseHead, remot
 
 ### 3.4 Data flow
 
-`jobsTick` passes `wallFor(project, worktreeName)` into `decideJobs`, alongside `projectExists`, because decideJobs is what builds the argv and must stay pure. `wallFor` is the impure gatherer in `cockpit-jobs.mjs`: `git rev-parse --git-common-dir`, `git for-each-ref refs/heads`, `git remote -v`, the exceptions file. The worktree is `{project}/.claude/worktrees/{name}` (measured). `buildClaudeArgs` is called with the result. `cockpitd.mjs` does not change, since it already calls `jobsTick`.
+`jobsTick` passes `wallFor(project, worktreeName)` into `decideJobs`, alongside `projectExists`, because decideJobs is what builds the argv and must stay pure. `wallFor` is the impure gatherer in `cockpit-jobs.mjs`: `git rev-parse --git-common-dir`, `git for-each-ref refs/heads`, `git remote -v`, the exceptions file. These are `execFileSync` with a short limit, because `decideJobs` is synchronous; only a pass with an entry due pays it. The worktree is `{project}/.claude/worktrees/{name}` (measured). `buildClaudeArgs` is called with the result. `cockpitd.mjs` does not change, since it already calls `jobsTick`.
 
 ### 3.5 Storage
 
@@ -169,11 +169,11 @@ No screen changes, so there is no end-to-end rig or drill: `agenda wall` is plai
 | | |
 |---|---|
 | OS | macOS, Darwin 25.5; `sandbox-exec` at `/usr/bin` |
-| Runtime | Node, Bash, zero npm dependencies; `rg` and `socat` present |
+| Runtime | Node 24.2, Bash, zero npm dependencies; `rg` and `socat` present; `pip3` only, and Homebrew Python 3.15 refuses installs outside a venv |
 | Claude Code | 2.1.316, self-updating. User settings: `sandbox.enabled: false`, `network.allowMachLookup: ["*"]` |
 | **Deliberately absent** | `timeout` (GNU coreutils); `bwrap`. Use `perl -e 'alarm shift; exec @ARGV'` |
 
-**The test command.** The block on top, each line from the repo root. These are the lines in `.pir/settings.json` plus `spikes/calendar-jobs-test`, which that file omits; T01 adds it there, since `pir` runs the file's lines. Measured here in a fresh worktree 2026-11-01: `calendar-jobs-test` passes (379 node checks plus 13) and leaves the tree clean. The stored lines were not re-measured, because nothing is being installed. Quiet on pass, no colour (`FORCE_COLOR=0`), failures in full; `VERBOSE=1` on that suite prints each check.
+**The test command.** The block on top, each line from the repo root. These are the lines in `.pir/settings.json` plus `spikes/calendar-jobs-test`, which that file omits; T01 adds it there, since `pir` runs the file's lines. Measured here in a fresh worktree 2026-11-01: `calendar-jobs-test` passes (379 node checks plus 13) and leaves the tree clean. Plan review ran the whole block in a fresh copy on 2026-11-01. Quiet on pass, no colour (`FORCE_COLOR=0`), failures in full; `VERBOSE=1` on that suite prints each check.
 
 **Dependencies.** None added.
 
@@ -194,7 +194,7 @@ No screen changes, so there is no end-to-end rig or drill: `agenda wall` is plai
 | `--trial` time limit | 10 min | Kills the trial and removes its worktree |
 | `perl alarm` on each probe | required | Bounds a real probe agent |
 
-Never point a test at the real jobs calendar without the dry run. `wall-check.sh` and the trial never read a calendar at all. Probe targets outside a worktree are only in a scratch folder the script created; real secrets are only ever tested for refusal, reporting success or failure and never printing content.
+Never point a test at the real jobs calendar without the dry run. `wall-check.sh` and the trial never read a calendar at all. `wall-check.sh` includes one real trial, the only one the build runs (owner, 2026-11-01). Probe targets outside a worktree are only in a scratch folder the script created; real secrets are only ever tested for refusal, reporting success or failure and never printing content.
 
 ### 5.3 Outside the code — who acts
 
@@ -206,7 +206,7 @@ Never point a test at the real jobs calendar without the dry run. `wall-check.sh
 
 | Action | Command (exact, wrapped) | Bin | Why this bin | Way back | Expected cost | Login check |
 |---|---|---|---|---|---|---|
-| T00 probe agents, scratch and `agentic-ide` | `bash spikes/calendar-wall-spike/run.sh` | worker | Confined, small model, own worktrees only | `spikes/calendar-wall-spike/clean.sh` | small usage | `claude agents --json` |
+| T00 probe agents, scratch, `agentic-ide` and `superfrog-re` | `bash spikes/calendar-wall-spike/run.sh` | worker | Confined, small model, own worktrees only. Includes a keychain read counted in bytes and an Apple Events probe that opens a Terminal window | `spikes/calendar-wall-spike/clean.sh` | small usage; superfrog smoke duration unmeasured | `claude agents --json` |
 | Remove probe agents and commits | `bash spikes/calendar-wall-spike/clean.sh` | ask | Discards test commits for good | none once discarded; they are throwaway | none | `claude agents --json` |
 | Real trial runs | `bash spikes/calendar-jobs-test/wall-check.sh` | worker | Confined, scratch `COCKPIT_DIR`, no calendar | `wall-check.sh --clean` | modest usage; superfrog smoke duration measured in T00 | `claude agents --json` |
 | Remove trial agents | `bash spikes/calendar-jobs-test/wall-check.sh --clean` | ask | Discards test commits for good | none once discarded | none | `claude agents --json` |
@@ -232,9 +232,10 @@ To stop runs: `agenda jobs <slug> off`, or close the window. To undo the wall en
 - **Calendar left on until shipped** (owner, 2026-11-01), accepting unconfined nights meanwhile.
 - **Trial plus per-project exceptions** (owner, 2026-11-01), over no exceptions, exceptions in the entry (any writer of the calendar could open the wall) or asking only.
 - **GitHub login file and existing branches added to the wall** (planner's proposal, owner agreed 2026-11-01): `~/.config/gh/hosts.yml` was readable, and refs were writable.
+- **No messages to other sessions** (owner, 2026-11-01): an unconfined session could do what the wall refuses. A job reports through its final message.
 - **Whole cockpit folder denied**, not only key files: it holds meeting titles and tokens, and nothing in a run needs it. Consequence: `note` and `agenda` fail inside a run, which agrees with the report being the final message.
 - **Skill moves into the repo** at `skills/scheduled-run/`, linked by `install.sh`. It lived only in the home folder, so a change could be neither reviewed nor merged, and a worker editing the live copy would describe a wall that does not exist yet.
-- **Survey.** Extended: `buildClaudeArgs`, `decideJobs`, `jobsTick`, `noteText`, `agenda`, `refuseIfAgent`, the fake `claude`, the `live-check.sh` pattern. New: guard, wall model and store, trial, `wall-check.sh`. Not used: `--restricted`, which removes Bash. `--setting-sources` is not used unless T00 shows committed project settings widen the wall; measured so far, a project's `settings.local.json` did not.
+- **Survey.** Extended: `buildClaudeArgs`, `decideJobs`, `jobsTick`, `noteText`, `agenda`, `refuseIfAgent`, the fake `claude`, the `live-check.sh` pattern. New: guard, wall model and store, trial, `wall-check.sh`. Not used: `--restricted`, which removes Bash. `--setting-sources` is not used unless T00 shows committed project or user settings widen the wall; measured so far, a project's `settings.local.json` did not.
 - No prototype: no screen.
 
 ---

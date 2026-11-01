@@ -26,7 +26,7 @@ T00 gates DESIGN §2.2 (allow list), §2.3 (guard's fail-shut form), §2.4 (bran
 | # | Task | Depends on |
 |---|---|---|
 | [T01](tasks/T01-wall-rules.md) | wall-rules | T00 |
-| [T02](tasks/T02-write-guard.md) | write-guard | T00 |
+| [T02](tasks/T02-write-guard.md) | write-guard | T01 |
 | [T03](tasks/T03-exceptions-list.md) | exceptions-list | T01 |
 
 At the end every rule is proven in milliseconds and no run has changed yet.
@@ -69,7 +69,7 @@ T02 and T07 are off it. The only leaf is T08.
 
 ## Parallel width
 
-9 tasks · longest dependency chain 7 · up to 2 could run at once (T01 with T02; T06 with T07). Counted by hand from the table above. Mostly serial by nature.
+9 tasks · longest dependency chain 7 · up to 2 could run at once (T02 with T03; T06 with T07). Counted by hand from the table above. Mostly serial by nature.
 
 ## Rough sizing
 
@@ -79,7 +79,7 @@ T02 and T07 are off it. The only leaf is T08.
 | **Medium** | T01, T02, T03, T05, T07 |
 | **Light** | T06, T08 |
 
-T00 and T07 may overrun: superfrog's smoke test takes an unmeasured time and may need more than local ports. `spikes/cockpit-test` asserts nothing here, though its 2 min run is part of every review.
+T00 and T07 may overrun: superfrog's smoke test takes an unmeasured time and may need more than local ports. `spikes/cockpit-test` asserts the argv at one point (T01 updates it); its 2 min run is part of every review.
 
 ## Decisions still open
 

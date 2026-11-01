@@ -22,7 +22,7 @@ preflight({ guardPath })   // -> { ok } | { ok: false, line }: sandbox-exec no-o
 export { wallFacts, preflight, buildWallFor };            // T05 reuses them
 ```
 
-`jobsTick` runs the preflight once per pass with something to start, and hands `decideJobs` a `wallFor` that returns `{ unavailable }` on failure. Dropped and unreadable rows add a note per start. The guard path comes from `import.meta.url`. Git commands use `execFile` with a time limit, and a failure there is `unavailable` rather than a start with an empty branch list.
+`jobsTick` runs the preflight once per pass with something to start, and hands `decideJobs` a `wallFor` that returns `{ unavailable }` on failure. Dropped and unreadable rows add a note per start. The guard path comes from `import.meta.url`. The temporary `wallFor` from T01 goes. Git commands use `execFileSync` with a short time limit (`decideJobs` is synchronous), and a failure there is `unavailable` rather than a start with an empty branch list.
 
 Dry run prints the argv and settings, so a person can read the wall without starting anything.
 

@@ -12,11 +12,11 @@
 
 ## Files
 
-`skills/scheduled-run/SKILL.md` (new, starting from the current live file), `bin/install.sh`, the installer's check in `spikes/` where install is tested.
+`skills/scheduled-run/SKILL.md` (new, starting from the current live file), `bin/install.sh`, `spikes/usage-test/install.test.mjs` (the installer check).
 
 ## What changes in the skill
 
-- New step after gathering details: find the checkout with `readlink ~/.wezterm.lua`, write the job's setup and a short test as commands, and run `--trial` (T05) with a time limit. Ask for the commands if they are not clear, and say this is a short real run using usage.
+- New step after gathering details: find the checkout with `readlink ~/.wezterm.lua`, write the job's setup and a short test as commands, and run `--trial` (T05) with a time limit, as a background command because a foreground one is cut off at 10 minutes. Ask for the commands if they are not clear, and say this is a short real run using usage.
 - Show what passed and was blocked in plain words. For each block propose either changing the job or an exception, with the exact `agenda wall` line for the person to type, because it refuses agents. Say an extra site could also receive data. Re-run the trial after an exception.
 - The owner may schedule despite a block; the confirmation names it.
 - Replace "all permissions bypassed" in step 4 with what the wall blocks and does not cover, briefly, and link `docs/cockpit.md`.
@@ -35,4 +35,4 @@
 ## Done when
 
 - [ ] The test suite covering the installer passes.
-- [ ] A reviewer following the skill text by hand, using T05's real command against a scratch project under `COCKPIT_DIR`, finds no step that does not exist.
+- [ ] A reviewer following the skill text by hand, using T05's command with the fake `claude` first on `PATH`, against a scratch project under `COCKPIT_DIR`, finds no step that does not exist.

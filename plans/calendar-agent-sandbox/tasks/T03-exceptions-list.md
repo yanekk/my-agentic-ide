@@ -31,14 +31,14 @@ readWall()      // -> { projects, unreadable: bool }; never throws, never quaran
 writeWall(obj)  // 0600, temp-then-rename
 ```
 
-Project names pass the jobs title pattern. `allow-site` prints a line saying an allowed site can also receive data. A refused value prints `validateException`'s reason. `refuseIfAgent` gets a `wall` reason: it changes what agents may do. Reading verbs are open, so the skill can show the list.
+Project names pass the jobs title pattern, and an `allow-*` needs that folder under the projects root (the same root the tick uses); `remove` does not, so a row for a deleted project can go. `allow-site` prints a line saying an allowed site can also receive data. A refused value prints `validateException`'s reason. `refuseIfAgent` gets a `wall` reason: it changes what agents may do. Reading verbs are open, so the skill can show the list.
 
 ## Tests
 
 - [ ] Each verb adds and removes; a repeat is idempotent; two sites kept in order.
 - [ ] `CLAUDECODE` set: each changing verb refused, file untouched; reading works.
 - [ ] Every forbidden value from T01 refused with no write.
-- [ ] A bad project name refused; `__proto__` safe.
+- [ ] A bad project name refused; `__proto__` safe; `allow-*` on a missing folder refused with no write; `remove` on one works.
 - [ ] File mode 0600; corrupt file reads as `unreadable` and is not moved or rewritten by a read.
 - [ ] A write on a corrupt file refuses and says so, so a person does not lose rows silently.
 

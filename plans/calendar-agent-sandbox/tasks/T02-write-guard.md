@@ -1,6 +1,6 @@
 # T02 — write-guard
 
-**Phase:** 1 · **Depends on:** T00 · **Weight:** medium
+**Phase:** 1 · **Depends on:** T01 · **Weight:** medium
 
 ## Goal
 
@@ -12,7 +12,7 @@ The hook that stops the file tools writing outside the worktree, which the sandb
 
 ## Files
 
-`bin/cockpit-guard-model.mjs` (new, pure, added to the purity grep in `spikes/calendar-jobs-test/run.sh`), `bin/cockpit-jobs-guard.mjs` (new), `spikes/calendar-jobs-test/guard.test.mjs` (new).
+`bin/cockpit-guard-model.mjs` (new, pure, added to the purity grep in `spikes/calendar-jobs-test/run.sh`, which T01 also edits, hence the dependency), `bin/cockpit-jobs-guard.mjs` (new), `spikes/calendar-jobs-test/guard.test.mjs` (new).
 
 ## Interface
 

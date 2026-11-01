@@ -26,7 +26,7 @@ node bin/cockpit-jobs.mjs --trial --project <name> --root <projects root> [--lim
 buildTrialArgs({ settings, commands })  // -> argv for `claude -p`, small model, same wall flags
 ```
 
-The worktree is `{project}/.claude/worktrees/wall-trial-{id}` on a new branch from the base. The instructions: run these commands in order, do not fix or commit anything, and list per command whether it passed and each thing the wall blocked. It uses `execFile`, kills at the limit, and removes worktree and branch in `finally`, including on SIGINT and SIGTERM. The preflight of T04 applies. The commands reach only argv.
+The worktree is `{project}/.claude/worktrees/wall-trial-{id}` on a new branch from the project's `HEAD`, where a real `-w` starts here. The instructions: run these commands in order, do not fix or commit anything, and list per command whether it passed and each thing the wall blocked. It uses `execFile`, kills at the limit, and removes worktree and branch in `finally`, including on SIGINT and SIGTERM. `-p` prints only at its end, so a run killed at the limit has no final message: exit 1 with a line naming the limit. The preflight of T04 applies. The commands reach only argv.
 
 ## Tests
 

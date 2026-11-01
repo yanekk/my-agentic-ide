@@ -1,0 +1,11 @@
+{
+  "allow": [
+    "Bash(bash spikes/calendar-wall-spike/run.sh)",
+    "Bash(bash spikes/calendar-jobs-test/wall-check.sh)",
+    "Bash(claude agents --json)"
+  ],
+  "ask": [
+    "Bash(bash spikes/calendar-wall-spike/clean.sh)",
+    "Bash(bash spikes/calendar-jobs-test/wall-check.sh --clean)"
+  ]
+}

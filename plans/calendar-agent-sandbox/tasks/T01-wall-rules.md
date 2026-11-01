@@ -4,7 +4,7 @@
 
 ## Goal
 
-The pure statement of the wall: what settings a run gets, the new argv, the instructions and the note. Nothing runs differently yet, because the tick still has to supply the facts (T04), so `decideJobs` keeps working by a required `wallFor` argument that tick tests stub until T04 wires it.
+The pure statement of the wall: what settings a run gets, the new argv, the instructions and the note. `decideJobs` takes a required `wallFor`. So every suite stays green before T04, `jobsTick` gets a temporary `wallFor` that calls `buildWallSettings` with empty facts; T04 replaces it with the real one. This exists only on the feature branch: T04 is merged with it.
 
 ## Design sections this implements
 
@@ -12,7 +12,7 @@ The pure statement of the wall: what settings a run gets, the new argv, the inst
 
 ## Files
 
-`bin/cockpit-wall-model.mjs` (new), `bin/cockpit-jobs-model.mjs`, `spikes/calendar-jobs-test/wall-model.test.mjs` (new), `spikes/calendar-jobs-test/model.test.mjs`, `spikes/calendar-jobs-test/tick.test.mjs`, `spikes/calendar-jobs-test/run.sh` (purity grep on the new file), `.pir/settings.json` (add the `calendar-jobs-test` line).
+`bin/cockpit-wall-model.mjs` (new), `bin/cockpit-jobs-model.mjs`, `bin/cockpit-jobs.mjs` (the temporary `wallFor` only), `spikes/cockpit-test/run.sh` (its `[bypassPermissions]` check becomes `[dontAsk]`), `spikes/calendar-jobs-test/wall-model.test.mjs` (new), `spikes/calendar-jobs-test/model.test.mjs`, `spikes/calendar-jobs-test/tick.test.mjs`, `spikes/calendar-jobs-test/run.sh` (purity grep on the new file), `.pir/settings.json` (add the `calendar-jobs-test` line).
 
 ## Interface
 
@@ -45,7 +45,7 @@ The preamble drops "never touch" as the only protection and states: the machine 
 ## Tests
 
 - [ ] Exact argv order; `--bg` flags kept; `bypassPermissions` absent.
-- [ ] Settings hold every flag of §2.2; `Read()` rules start `~/` or `//`.
+- [ ] Settings hold every flag of §2.2, `SendMessage` denied; `Read()` rules start `~/` or `//`.
 - [ ] A hostile description (`--settings`, JSON, newlines) leaves settings byte-identical.
 - [ ] Each branch yields ref and `.lock`, plus `packed-refs` and `HEAD`; zero branches; a branch name with a slash.
 - [ ] Exception widening merges; ports set `allowLocalBinding`; absent means the key is absent.
@@ -56,5 +56,5 @@ The preamble drops "never touch" as the only protection and states: the machine 
 
 ## Done when
 
-- [ ] `spikes/calendar-jobs-test/run.sh` passes with the new argv and all the above.
+- [ ] `spikes/calendar-jobs-test/run.sh` and `spikes/cockpit-test/run.sh` pass with the new argv and all the above.
 - [ ] `.pir/settings.json` runs the suite.
