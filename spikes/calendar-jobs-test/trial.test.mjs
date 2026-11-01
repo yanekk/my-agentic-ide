@@ -128,6 +128,12 @@ section("a failing agent");
   eq("no report", r.stdout, "");
   nothingLeft("after a failure");
 
+  reset("escape-fail");
+  const x = await trial();
+  eq("its stderr's escapes do not reach the terminal", x.stderr.includes("\x1b") || x.stderr.includes("\x07"), false);
+  ok("its words still do", /bad/.test(x.stderr), x.stderr);
+  nothingLeft("after a failure with escapes");
+
   reset("silent-fail");
   const s = await trial();
   eq("a silent failure is exit 1", s.code, 1);
@@ -255,7 +261,7 @@ section("what is refused");
   ok("it names the project", /"nope"/.test(none.stderr), none.stderr);
   eq("no flags", (await trial(["--trial"])).code, 2);
   eq("an unknown flag", (await trial(trialArgs(["--wat"]))).code, 2);
-  for (const limit of ["0", "-1", "abc"]) eq(`limit ${limit}`, (await trial(trialArgs(["--limit-min", limit]))).code, 2);
+  for (const limit of ["0", "-1", "abc", "Infinity", "40000"]) eq(`limit ${limit}`, (await trial(trialArgs(["--limit-min", limit]))).code, 2);
   eq("a missing commands file", (await trial(["--trial", "--project", "proj", "--root", ROOT, "--commands-file", "/no/such"])).code, 2);
   const blank = path.join(SCRATCH, "blank.txt");
   fs.writeFileSync(blank, "\n  \n");
@@ -286,6 +292,21 @@ section("a command never reaches a shell or a log line");
   eq("a NUL byte: exit 1", r.code, 1);
   ok("the command is not quoted", !r.stderr.includes("a\0b"));
   nothingLeft("after a NUL byte");
+}
+
+section("an inherited git setting");
+{
+  // Without this the agent's git answers for the other repo, outside the throwaway copy.
+  const other = path.join(SCRATCH, "other-repo");
+  makeRepo(other);
+  reset();
+  const r = await trial(trialArgs(), { GIT_DIR: path.join(other, ".git"), GIT_WORK_TREE: other });
+  eq("exit 0", r.code, 0);
+  const [c] = calls();
+  ok("the agent does not get GIT_DIR", c.gitDir === undefined, c.gitDir);
+  ok("the agent does not get GIT_WORK_TREE", c.gitWorkTree === undefined, c.gitWorkTree);
+  eq("the other repo has no new branch", gitIn(other, "branch", "--format=%(refname:short)").trim(), "main");
+  nothingLeft("with an inherited GIT_DIR");
 }
 
 section("the dry run");

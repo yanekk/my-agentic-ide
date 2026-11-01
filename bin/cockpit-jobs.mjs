@@ -150,10 +150,14 @@ function fetchFailureNotes(calendars, cache, ledger, { log, dry, print }) {
 // An inherited GIT_DIR would answer for some other repo. The ceiling stops a broken
 // project's .git falling through to a repo around it, whose refs would then be the
 // ones "protected" while this project's stay open.
-function gitEnv(projectDir) {
+function envWithoutGit() {
   const { GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, ...env } = process.env;
+  return env;
+}
+
+function gitEnv(projectDir) {
   // Physical, as git's own cwd is: a project that is a symlink would walk up past a logical one.
-  return { ...env, GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) };
+  return { ...envWithoutGit(), GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) };
 }
 
 function git(projectDir, args) {
@@ -400,6 +404,7 @@ export async function fetchJobCalendars({ now, zone, log = () => {} }) {
 const TRIAL_ADD_LIMIT_MS = 5 * 60 * 1000;   // checking out a large project is slow
 const TRIAL_OUTPUT_MAX = 64 * 1024 * 1024;
 const TRIAL_DRAIN_MS = 500;
+const TRIAL_LIMIT_MAX_MIN = Math.floor((2 ** 31 - 1) / 60_000);   // past this setTimeout fires at once
 
 /**
  * One child in its own process group, so whatever it started goes with it: those would
@@ -491,7 +496,7 @@ function parseTrialArgs(argv) {
     else if (argv[i] === "--limit-min" && has) out.limitMin = Number(argv[++i]);
     else return null;
   }
-  return out.project != null && out.root && out.file && out.limitMin > 0 && Number.isFinite(out.limitMin) ? out : null;
+  return out.project != null && out.root && out.file && out.limitMin > 0 && out.limitMin <= TRIAL_LIMIT_MAX_MIN ? out : null;
 }
 
 async function trialCommand(argv) {
@@ -538,7 +543,10 @@ async function trialCommand(argv) {
     });
     if (add.err) line = "git could not make the throwaway worktree";
     else if (!stoppedBy) {
-      const run = await runInGroup("claude", args, { cwd: worktree, env: process.env, limitMs: opts.limitMin * 60_000, stops });
+      const run = await runInGroup("claude", args, {
+        // An inherited GIT_DIR would point the agent's git at some other repo, outside the throwaway copy.
+        cwd: worktree, env: envWithoutGit(), limitMs: opts.limitMin * 60_000, stops,
+      });
       // -p prints only at its end, so what a killed run wrote is not a report.
       if (run.timedOut) line = `the trial passed its ${opts.limitMin} minute limit and was stopped, so it has no report`;
       else if (run.err) line = failureLine(run.err, "", run.stderr);
@@ -550,7 +558,8 @@ async function trialCommand(argv) {
     if (left.length) console.error(`the trial could not remove: ${left.join(", ")}`);
   }
   if (stoppedBy) { console.error(`the trial was stopped by ${stoppedBy}`); return 1; }
-  if (line) console.error(line);
+  // safeText: this is claude's own stderr, and a person's terminal obeys escapes in it.
+  if (line) console.error(safeText(line));
   if (report != null) process.stdout.write(report);
   return code;
 }

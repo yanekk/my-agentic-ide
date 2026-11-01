@@ -12,7 +12,7 @@ if (args[0] === "--i-am-the-fake") { console.log("fake-claude"); process.exit(0)
 let ledger = null;
 try { ledger = JSON.parse(fs.readFileSync(path.join(process.env.COCKPIT_DIR, "calendar-jobs.json"), "utf8")); }
 catch { /* no ledger: the test asserts on that */ }
-fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, cwd: process.cwd(), dir: process.env.COCKPIT_DIR, ledger })}\n`);
+fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ args, cwd: process.cwd(), dir: process.env.COCKPIT_DIR, ledger, gitDir: process.env.GIT_DIR, gitWorkTree: process.env.GIT_WORK_TREE })}\n`);
 
 // `-p` prints the final message; `--bg` prints its one line.
 const say = () => console.log(args[0] === "-p" ? "FAKE FINAL MESSAGE" : `backgrounded · ab12cd34 · ${args[args.indexOf("-n") + 1]}`);
@@ -26,6 +26,9 @@ switch (process.env.FAKE_CLAUDE_MODE) {
     process.exit(0);
   case "stderr-fail":
     console.error("claude said no");
+    process.exit(4);
+  case "escape-fail":
+    console.error("\x1b]0;pwned\x07 bad");
     process.exit(4);
   case "empty":
     process.exit(0);
