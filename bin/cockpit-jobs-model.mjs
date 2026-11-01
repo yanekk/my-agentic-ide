@@ -52,20 +52,32 @@ function validProjectName(name) {
   return /^[A-Za-z0-9._-]+$/.test(name) && name !== "." && name !== "..";
 }
 
+// The title is untrusted and ends up in the agent's name. The fleet header is
+// `──── name ─` and HEADER in cockpitd.mjs ends the name at whitespace before a `─`,
+// so one in the item would cut the name short and the daemon could not resolve it.
+function cleanItem(text) {
+  return safeText(text).replace(/─/g, " ").replace(/\s+/g, " ").trim();
+}
+
 /**
- * What the entry says, or why it cannot be run. The folder's existence is
- * decideJobs' check, because it needs the injected projectExists.
+ * What the entry says, or why it cannot be run. The title is `{project} / {item}`,
+ * split at the first slash, so an item may hold more of them. The folder's existence
+ * is decideJobs' check, because it needs the injected projectExists.
  * creatorOwn must be strictly true: this is a security rule, so a malformed value
  * refuses rather than passes.
  */
 export function parseJob(event) {
   if (event.allDay) return { refuse: "all-day" };
   if (event.creatorOwn !== true) return { refuse: "not-yours" };
-  const project = String(event.title ?? "").trim();
-  if (!validProjectName(project)) return { refuse: "bad-project" };
+  const title = String(event.title ?? "");
+  const slash = title.indexOf("/");
+  const item = slash < 0 ? "" : cleanItem(title.slice(slash + 1));
+  if (!item) return { refuse: "bad-title" };
+  const project = title.slice(0, slash).trim();
+  if (!validProjectName(project)) return { refuse: "bad-project", project };
   const instructions = plainText(event.description);
   if (!instructions) return { refuse: "empty" };
-  return { project, instructions };
+  return { project, item, instructions };
 }
 
 // --- time, in the zone passed ----------------------------------------------
@@ -120,18 +132,30 @@ function id4(id) {
   return createHash("sha256").update(String(id)).digest("hex").slice(0, 4);
 }
 
+const NAME_ITEM_MAX = 30;
+const characters = new Intl.Segmenter("en", { granularity: "grapheme" });
+
+// A fleet header too long for its pane is truncated, and the daemon can no longer
+// resolve the agent from it, so the name's length is bounded. Whole graphemes, so an
+// emoji is never cut in half. The full title stays on the entry and in the notes.
+function clipItem(item) {
+  return Array.from(characters.segment(item), (s) => s.segment).slice(0, NAME_ITEM_MAX).join("").trim();
+}
+
 /**
  * The argv for execFile("claude", ...), DESIGN 2.4 flag for flag.
+ * The date and id stay in the name after the item: a recurring entry repeats its
+ * title, and the daemon leaves the panes alone on an ambiguous name.
  * The prompt's fixed first line keeps it from beginning with "-", which Claude's
  * option parser would read as a flag whatever execFile does. --disallowedTools
  * takes several values, so a flag must follow it or it would swallow the prompt.
  */
-export function buildClaudeArgs({ event, project, instructions, zone }) {
+export function buildClaudeArgs({ event, project, item, instructions, zone }) {
   const { year, month, day, hour, minute } = civil(event.start, zone);
   const tag = id4(event.id);
   return [
     "--bg",
-    "-n", `${project} / cal ${month}-${day} ${hour}:${minute} ${tag}`,
+    "-n", `${project} / ${clipItem(item)} ${month}-${day} ${hour}:${minute} ${tag}`,
     "--permission-mode", "bypassPermissions",
     "-w", `cal-${year}${month}${day}-${hour}${minute}-${tag}`,
     "--disallowedTools", "AskUserQuestion",
@@ -143,7 +167,8 @@ export function buildClaudeArgs({ event, project, instructions, zone }) {
 // --- the notes the owner reads ---------------------------------------------
 
 const REFUSALS = {
-  "bad-project": (title) => `no project folder is named "${title}"`,
+  "bad-title": () => 'its title must read "project / item name"',
+  "bad-project": (project) => `no project folder is named "${oneLine(project, 60)}"`,
   empty: () => "its description is empty",
   "all-day": () => "it is an all-day entry, so it has no start time",
   "not-yours": () => "it was not created by the calendar's owner",
@@ -157,8 +182,8 @@ function oneLine(text, max = 120) {
 }
 
 /**
- * The text of one note. `detail` holds what the kind needs: refused { title, reason },
- * missed { title }, failed { title, line }, unknown { title }, auth { slug },
+ * The text of one note. `detail` holds what the kind needs: refused { title, reason,
+ * project }, missed { title }, failed { title, line }, unknown { title }, auth { slug },
  * gone { slug }, corrupt { path }. The last four are written by the tick, not by
  * decideJobs; the words all live here.
  */
@@ -167,7 +192,7 @@ export function noteText(kind, detail = {}) {
   const slug = oneLine(detail.slug, 60);
   switch (kind) {
     case "refused": {
-      const why = Object.hasOwn(REFUSALS, detail.reason) ? REFUSALS[detail.reason](title) : oneLine(detail.reason);
+      const why = Object.hasOwn(REFUSALS, detail.reason) ? REFUSALS[detail.reason](detail.project) : oneLine(detail.reason);
       return `Calendar entry "${title}" not started: ${why}.`;
     }
     case "missed":
@@ -244,14 +269,15 @@ export function decideJobs({ calendars, cache, ledger, now, projectsRoot, zone, 
       const reason = job.refuse ?? (projectExists(job.project) ? null : "bad-project");
       if (reason) {
         ledgerChanges.push({ key, state: "refused", reason });
-        notes.push({ key, text: noteText("refused", { title: event.title, reason }) });
+        notes.push({ key, text: noteText("refused", { title: event.title, reason, project: job.project }) });
         continue;
       }
       start.push({
         key,
         project: job.project,
+        title: event.title,
         cwd: `${root}/${job.project}`,
-        args: buildClaudeArgs({ event, project: job.project, instructions: job.instructions, zone }),
+        args: buildClaudeArgs({ event, project: job.project, item: job.item, instructions: job.instructions, zone }),
         end: event.end,
       });
     }

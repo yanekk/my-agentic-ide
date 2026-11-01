@@ -3895,7 +3895,7 @@ const server = http.createServer((req, res) => {
   if (m === "slow") return setTimeout(() => json(res, 200, EVENTS), SLOW);
   // Tomorrow, so fetching it starts nothing: section 13j seeds its due entries itself.
   if (cal === "jobs-cal") return json(res, 200, { timeZone: "Europe/Warsaw", items: [{
-    id: "later", status: "confirmed", summary: "proj", description: "LATER-TEXT", creator: { self: true },
+    id: "later", status: "confirmed", summary: "proj / later", description: "LATER-TEXT", creator: { self: true },
     start: { dateTime: new Date(Date.now() + 86400000).toISOString() },
     end:   { dateTime: new Date(Date.now() + 90000000).toISOString() },
   }] });
@@ -4165,7 +4165,7 @@ djstart() {
 }
 # jseed <id>...: these entries on the jobs calendar, due now, as a fresh fetch left them.
 jseed() {
-  jenv node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{const n=Date.now();s.putCacheEntry("nightly",{fetchedAt:n,error:null,events:process.argv.slice(2).map(id=>({id,title:"proj",start:n-60000,end:n+3600000,allDay:false,reply:"n/a",slug:"nightly",description:"JOB-TEXT-"+id,creatorOwn:true}))});});' "$ROOT" "$@"
+  jenv node -e 'import(process.argv[1]+"/bin/cockpit-agenda-store.mjs").then(s=>{const n=Date.now();s.putCacheEntry("nightly",{fetchedAt:n,error:null,events:process.argv.slice(2).map(id=>({id,title:"proj / nightly",start:n-60000,end:n+3600000,allDay:false,reply:"n/a",slug:"nightly",description:"JOB-TEXT-"+id,creatorOwn:true}))});});' "$ROOT" "$@"
 }
 bgcount() { grep -cF -- "$1" "$JBG"; }
 bgatleast() { [ "$(bgcount "$1")" -ge "$2" ]; }

@@ -630,18 +630,24 @@ because other people control it. An agent cannot run either command. Turning the
 when, so older entries are ignored rather than reported as missed. To stop everything starting,
 `agenda jobs nightly off` or close the window.
 
-**An entry** is a title and a description. The title is a project folder directly under the
-projects root, with a `.git` in it. The description is the instructions. Both are read at the
-start time, so a mistake can be fixed until then; moving an entry that has already been decided
-does not run it again.
+**An entry** is a title and a description. The title reads `{project} / {item name}`, for example
+`superfrog-re / run nightly tests`, split at the first `/` with the spaces around it optional. The
+project is a folder directly under the projects root, with a `.git` in it. The item name tells
+entries apart in the calendar, the agent list and the notes. The description is the instructions.
+All are read at the start time, so a mistake can be fixed until then; moving an entry that has
+already been decided does not run it again.
 
 **At its start time** the daemon runs, with no shell because a description is untrusted text:
 
 ```
-claude --bg -n "{project} / cal {MM-DD HH:MM} {id4}" --permission-mode bypassPermissions \
+claude --bg -n "{project} / {item} {MM-DD HH:MM} {id4}" --permission-mode bypassPermissions \
   -w "cal-{YYYYMMDD-HHMM}-{id4}" --disallowedTools AskUserQuestion \
   --append-system-prompt "{preamble}" "{prompt}"
 ```
+
+In the name the item is clipped to 30 characters, because a truncated fleet header stops the daemon
+following the agent, and control characters and `─` become spaces, because `─` ends the name in
+that header. The date and id stay so the instances of a recurring entry have different names.
 
 It does not type into the fleet box, so it works with an agent attached and with `claude agents`
 parked, and no pane is touched. **Bypass permissions are deliberate**: a permission prompt would
@@ -655,8 +661,9 @@ entry whose start passed while the window was closed still starts on reopening i
 passed; that end time is how you say "too late after this". If it has passed, the entry is skipped
 with a note. Overlapping entries all start.
 
-**The notes column** hears about every problem, one note per entry, signed `calendar`: refused
-(invalid project, empty description, all-day, created by someone else), skipped because it ended,
+**The notes column** hears about every problem, one note per entry, signed `calendar`, quoting the
+entry's title: refused (a title not in the `project / item name` form, invalid project, empty
+description, all-day, created by someone else), skipped because it ended,
 failed to start (with Claude's first error line, for instance an untrusted folder), and may not
 have started. A jobs calendar losing its sign-in or being deleted adds one note per episode. A
 successful start adds none, because the agent list shows it.

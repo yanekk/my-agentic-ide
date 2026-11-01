@@ -58,7 +58,7 @@ function reset({ jobs = true, mode } = {}) {
 }
 
 const ev = (over = {}) => ({
-  id: "evt1", title: "proj", start: START, end: END, allDay: false, reply: "n/a", slug: "night",
+  id: "evt1", title: "proj / nightly", start: START, end: END, allDay: false, reply: "n/a", slug: "night",
   description: "run the tests", creatorOwn: true, ...over,
 });
 const cached = (events = [ev()], { fetchedAt = NOW, error = null } = {}) =>
@@ -77,6 +77,9 @@ section("starting and started");
   eq("one invocation", c.length, 1);
   eq("the ledger held `starting` when claude was invoked", c[0].ledger?.entries?.["night/evt1"]?.state, "starting");
   eq("it runs in the project", fs.realpathSync(c[0].cwd), fs.realpathSync(path.join(ROOT, "proj")));
+  ok("the agent's name carries the item", /^proj \/ nightly \d\d-\d\d \d\d:\d\d [0-9a-f]{4}$/.test(c[0].args[2]), c[0].args[2]);
+  eq("the starting row carries the title", c[0].ledger?.entries?.["night/evt1"]?.title, "proj / nightly");
+  eq("the started row carries the title", entry().title, "proj / nightly");
   ok("the prompt is the last argument", c[0].args.at(-1) === "Instructions from the calendar entry:\nrun the tests");
   eq("exit 0 is `started`", entry().state, "started");
   eq("...with the id parsed", entry().agentId, "ab12cd34");
@@ -104,6 +107,8 @@ section("failed");
   ok("...and not the second", !/second line/.test(entry().reason));
   eq("one note", notes().length, 1);
   ok("the note carries Claude's line", /failed to start: Workspace not trusted/.test(notes()[0].text), notes()[0].text);
+  ok("the note quotes the whole title", notes()[0].text.includes('"proj / nightly" failed'), notes()[0].text);
+  eq("the ledger row carries the title", entry().title, "proj / nightly");
   await tick({ now: NOW + 60000 });
   eq("no retry on the next tick", calls().length, 1);
   eq("no second note", notes().length, 1);
@@ -214,7 +219,7 @@ section("a tick overlapping a running tick");
   const before = fs.statSync(LEDGER_FILE).mtimeMs;
   // A new entry, or the ledger alone would stop this one and the guard goes untested.
   // Raced, because without the guard this tick would hold on the fake too.
-  cached([ev(), ev({ id: "evt2", title: "proj2" })]);
+  cached([ev(), ev({ id: "evt2", title: "proj2 / other" })]);
   await Promise.race([tick(), new Promise((r) => setTimeout(r, 500))]);
   eq("the second does nothing", calls().length, 1);
   eq("...and wrote nothing", fs.statSync(LEDGER_FILE).mtimeMs, before);
@@ -222,7 +227,7 @@ section("a tick overlapping a running tick");
   await first;
   eq("the first finishes", entry().state, "started");
   // The guard has to come down again, or the feature silently stops after one pass.
-  cached([ev(), ev({ id: "evt2", title: "proj2" })]);
+  cached([ev(), ev({ id: "evt2", title: "proj2 / other" })]);
   await tick();
   eq("a later tick runs again", entry("night/evt2").state, "started");
 }
@@ -230,7 +235,7 @@ section("a tick overlapping a running tick");
 section("overlapping entries");
 {
   reset();
-  cached([ev(), ev({ id: "evt2", title: "proj2" })]);
+  cached([ev(), ev({ id: "evt2", title: "proj2 / other" })]);
   await tick();
   eq("both start", calls().length, 2);
   ok("the second call saw the first as started", calls()[1].ledger.entries["night/evt1"].state === "started");
@@ -262,19 +267,27 @@ section("recoverStarting");
 {
   reset();
   writeLedger({ version: 1, entries: {
-    "night/evt1": { state: "starting", at: NOW - 1000, project: "proj" },
+    "night/evt1": { state: "starting", at: NOW - 1000, project: "proj", title: "proj / nightly" },
     "night/done": { state: "started", at: NOW - 1000, project: "proj" },
   }, authNoted: {} });
   recoverStarting({ now: NOW, notesRepo: ROOT, log });
   eq("starting becomes unknown", entry().state, "unknown");
   eq("started is left alone", entry("night/done").state, "started");
   eq("one note", notes().length, 1);
-  ok("the note names the project", /"proj" may not have started/.test(notes()[0].text), notes()[0].text);
+  ok("the note quotes the whole title", /"proj \/ nightly" may not have started/.test(notes()[0].text), notes()[0].text);
   recoverStarting({ now: NOW, notesRepo: ROOT, log });
   eq("a second recovery adds nothing", notes().length, 1);
   cached();
   await tick();
   eq("it is never restarted", calls().length, 0);
+}
+{
+  // A row written before entries had an item name holds only the project.
+  reset();
+  writeLedger({ version: 1, entries: { "night/old": { state: "starting", at: NOW - 1000, project: "proj" } }, authNoted: {} });
+  recoverStarting({ now: NOW, notesRepo: ROOT, log });
+  eq("an older row still becomes unknown", entry("night/old").state, "unknown");
+  ok("...and still yields a note", /"proj" may not have started/.test(notes()[0]?.text ?? ""), notes()[0]?.text);
 }
 {
   reset();
@@ -468,6 +481,21 @@ section("hostile instructions");
   ok("...and no hostile title", !all.includes("bad title"), all);
   ok("the notes hold no instructions", !notes().some((n) => n.text.includes("TOPSECRET")));
 }
+{
+  // Started and failed both, so every log line a title could reach is exercised.
+  reset({ mode: "trust" });
+  const title = "proj / SECRETITEM\x1b[31m";
+  cached([ev({ title })]);
+  logLines.length = 0;
+  await tick();
+  writeLedger({ version: 1, entries: { "night/x": { state: "starting", at: NOW, project: "proj", title } }, authNoted: {} });
+  recoverStarting({ now: NOW, notesRepo: ROOT, log });
+  const all = logLines.join("\n");
+  ok("no log line holds the title or item", !all.includes("SECRETITEM"), all);
+  eq("a hostile item has two notes to reach", notes().length, 2);
+  ok("...and neither holds an escape", !notes().some((n) => n.text.includes("\x1b")));
+  ok("...and both quote it", notes().every((n) => n.text.includes("SECRETITEM")));
+}
 
 section("the store");
 {
@@ -495,7 +523,7 @@ section("the store");
 // --- a stand-in Google, for --fetch and live-check.sh ------------------------
 
 const raw = (over = {}) => ({
-  id: "evt1", summary: "proj", description: "<b>run</b> it",
+  id: "evt1", summary: "proj / run", description: "<b>run</b> it",
   start: { dateTime: new Date(Date.now() - 60000).toISOString() },
   end: { dateTime: new Date(Date.now() + 3600000).toISOString() },
   creator: { email: "me@x.y", self: true }, ...over,

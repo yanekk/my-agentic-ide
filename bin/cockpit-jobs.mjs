@@ -192,23 +192,24 @@ export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () =>
     for (const job of decision.start) {
       // Throws if it cannot be written, which ends the pass with Claude not run: an
       // agent the ledger does not know about could start again on the next tick.
-      ledger.entries[job.key] = { state: "starting", at: now, project: job.project };
+      // The title is kept for recoverStarting, whose note must quote it after a restart.
+      ledger.entries[job.key] = { state: "starting", at: now, project: job.project, title: job.title };
       writeLedger(ledger);
       log(`jobs: ${slugOf(job.key)} ${job.project} starting`);
 
       const result = await runClaude(job);
       if (result.ok) {
         ledger.entries[job.key] = {
-          state: "started", at: now, project: job.project,
+          state: "started", at: now, project: job.project, title: job.title,
           ...(result.agentId ? { agentId: result.agentId } : {}),
         };
         writeLedger(ledger);
         log(`jobs: ${slugOf(job.key)} ${job.project} started`);
       } else {
-        ledger.entries[job.key] = { state: "failed", at: now, project: job.project, reason: result.line };
+        ledger.entries[job.key] = { state: "failed", at: now, project: job.project, title: job.title, reason: result.line };
         writeLedger(ledger);
         log(`jobs: ${slugOf(job.key)} ${job.project} failed`);
-        tell(notesRepo, noteText("failed", { title: job.project, line: result.line }), log);
+        tell(notesRepo, noteText("failed", { title: job.title, line: result.line }), log);
       }
     }
   } catch (e) {
@@ -234,7 +235,7 @@ export function recoverStarting({ now, notesRepo, log = () => {} }) {
       log(`jobs: ${slugOf(key)} ${safeText(String(e.project ?? ""))} unknown`);
     }
     writeLedger(ledger);
-    for (const [, e] of left) tell(notesRepo, noteText("unknown", { title: e.project }), log);
+    for (const [, e] of left) tell(notesRepo, noteText("unknown", { title: e.title ?? e.project }), log);
   } catch (e) {
     log(`jobs: recovery failed, ${e?.name ?? "Error"}`);
   }

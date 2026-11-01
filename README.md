@@ -69,9 +69,9 @@ lose the network and the events stay with one dim line saying how old they are.
 Agents may read it, but not connect one.
 
 A calendar you mark as a **jobs calendar** (`agenda add nightly --jobs`) starts work
-while you are away: an entry titled with a project folder starts one background
-Claude in that project at the entry's start time, with the entry's description as its
-instructions. It works in its own worktree and its final message in `claude agents`
+while you are away: an entry titled `project / item name`, like
+`superfrog-re / run nightly tests`, starts one background Claude in that project folder
+at the entry's start time, with the entry's description as its instructions. It works in its own worktree and its final message in `claude agents`
 is the report. These agents run with **bypass permissions**, so nothing stops to ask,
 and only their instructions keep them inside the worktree. **The cockpit window must
 stay open**: nothing starts while it is closed. An entry that could not start leaves

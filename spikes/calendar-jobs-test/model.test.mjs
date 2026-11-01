@@ -16,7 +16,7 @@ const MIN = 60000;
 const ROOT = "/Users/me/src";
 
 const ev = (over = {}) => ({
-  id: "evt1", title: "superfrog", start: START, end: END, allDay: false, reply: "n/a", slug: "night",
+  id: "evt1", title: "superfrog / nightly", start: START, end: END, allDay: false, reply: "n/a", slug: "night",
   description: "run the tests", creatorOwn: true, ...over,
 });
 const CAL = { slug: "night", account: "me@x.y", jobs: true, jobsSince: T("2026-10-01T00:00:00Z") };
@@ -52,7 +52,7 @@ eq("starts late, inside the entry", decide({ now: END - 1 }).start.length, 1);
   eq("at now === end nothing starts", d.start, []);
   eq("at now === end it is missed", d.ledgerChanges, [{ key: "night/evt1", state: "missed" }]);
   eq("missed leaves one note under its key", d.notes.map((n) => n.key), ["night/evt1"]);
-  ok("the note names the entry", d.notes[0].text.includes('"superfrog"'));
+  ok("the note names the entry", d.notes[0].text.includes('"superfrog / nightly"'));
 }
 eq("overlapping entries all start",
   decide({ events: [ev({ id: "a" }), ev({ id: "b", start: START - 5 * MIN })] }).start.map((s) => s.key),
@@ -81,17 +81,17 @@ section("2.3 only a fresh, complete fetch decides");
   ok("no creatorOwn: no decision", nothing(decide({ events: [old] })));
   ok("no creatorOwn after its end: no decision, no missed", nothing(decide({ events: [old], now: END })));
   const realFetch = normaliseEvent(
-    { id: "n", summary: "superfrog", description: "go", start: { dateTime: "2026-11-01T20:00:00Z" }, end: { dateTime: "2026-11-01T23:00:00Z" } },
+    { id: "n", summary: "superfrog / nightly", description: "go", start: { dateTime: "2026-11-01T20:00:00Z" }, end: { dateTime: "2026-11-01T23:00:00Z" } },
     { slug: "night", tz: ZONE, selfEmail: "me@x.y" });
   ok("a real non-jobs normalised event: no decision", nothing(decide({ events: [realFetch] })));
   const jobsFetch = normaliseEvent(
-    { id: "n", summary: "superfrog", description: "go", creator: { self: true }, start: { dateTime: "2026-11-01T20:00:00Z" }, end: { dateTime: "2026-11-01T23:00:00Z" } },
+    { id: "n", summary: "superfrog / nightly", description: "go", creator: { self: true }, start: { dateTime: "2026-11-01T20:00:00Z" }, end: { dateTime: "2026-11-01T23:00:00Z" } },
     { slug: "night", tz: ZONE, selfEmail: "me@x.y", jobs: true });
   eq("a real jobs normalised event starts", decide({ events: [jobsFetch] }).start.length, 1);
   // Measured in T06 on a secondary calendar: the creator carries an email and no `self`,
   // and `self` sits on the organizer, which is the calendar. Only the email can match.
   const measured = (creator) => normaliseEvent(
-    { id: "n", summary: "superfrog", description: "go", creator,
+    { id: "n", summary: "superfrog / nightly", description: "go", creator,
       organizer: { email: "x@group.calendar.google.com", displayName: "agents", self: true },
       start: { dateTime: "2026-11-01T20:00:00+01:00", timeZone: "Europe/Warsaw" },
       end: { dateTime: "2026-11-01T23:00:00+01:00", timeZone: "Europe/Warsaw" } },
@@ -145,7 +145,7 @@ const refusal = (d) => d.ledgerChanges[0]?.reason;
 {
   const faulty = ev({ title: "../x" });
   ok("a faulty entry before its start: no note, no ledger change", nothing(decide({ events: [faulty], now: START - MIN })));
-  eq("corrected in time, it starts", decide({ events: [ev({ title: "superfrog" })], now: START }).start.length, 1);
+  eq("corrected in time, it starts", decide({ events: [ev({ title: "superfrog / nightly" })], now: START }).start.length, 1);
   const ended = decide({ events: [faulty], now: END });
   eq("ended and faulty is missed, not refused", ended.ledgerChanges, [{ key: "night/evt1", state: "missed" }]);
   eq("an ended all-day entry is missed",
@@ -158,13 +158,18 @@ for (const [name, over, reason] of [
   ["empty description", { description: "" }, "empty"],
   ["description empty after plainText", { description: "<p><br></p>&nbsp;" }, "empty"],
   ["not the owner's", { creatorOwn: false }, "not-yours"],
-  ["title ..", { title: ".." }, "bad-project"],
-  ["title .", { title: "." }, "bad-project"],
-  ["title a/b", { title: "a/b" }, "bad-project"],
-  ["title ../x", { title: "../x" }, "bad-project"],
-  ["title with spaces", { title: "my project" }, "bad-project"],
-  ["title empty", { title: "" }, "bad-project"],
-  ["the (no title) stand-in", { title: "(no title)" }, "bad-project"],
+  ["no slash", { title: "p" }, "bad-title"],
+  ["nothing after the slash", { title: "p /" }, "bad-title"],
+  ["a lone slash", { title: "/" }, "bad-title"],
+  ["the (no title) stand-in", { title: "(no title)" }, "bad-title"],
+  ["title empty", { title: "" }, "bad-title"],
+  ["an item of control characters", { title: "p / \x01" }, "bad-title"],
+  ["an item of rule characters", { title: "p / ─ ─" }, "bad-title"],
+  ["empty project", { title: "/ item" }, "bad-project"],
+  ["project ../x", { title: "../x / y" }, "bad-project"],
+  ["project ..", { title: ".. / y" }, "bad-project"],
+  ["project .", { title: ". / y" }, "bad-project"],
+  ["project with spaces", { title: "my project / y" }, "bad-project"],
 ]) {
   const d = decide({ events: [ev(over)] });
   eq(`refused: ${name}`, d.ledgerChanges, [{ key: "night/evt1", state: "refused", reason }]);
@@ -176,14 +181,21 @@ for (const [name, over, reason] of [
   eq("refused: unknown project", refusal(d), "bad-project");
   ok("...and the note names the folder", d.notes[0].text.includes('no project folder is named "superfrog"'));
   let asked = [];
-  decide({ events: [ev({ title: "../x" }), ev({ id: "2", title: "good.name-1" })], exists: (n) => (asked.push(n), true) });
+  decide({ events: [ev({ title: "../x / y" }), ev({ id: "2", title: "p" }), ev({ id: "3", title: "good.name-1 / y" })], exists: (n) => (asked.push(n), true) });
   eq("projectExists is never asked about an invalid name", asked, ["good.name-1"]);
-  eq("the title is trimmed", decide({ events: [ev({ title: "  superfrog " })] }).start[0].project, "superfrog");
+  eq("the title is trimmed", decide({ events: [ev({ title: "  superfrog / x " })] }).start[0].project, "superfrog");
   eq("a truthy non-boolean creatorOwn is left undecided", decide({ events: [ev({ creatorOwn: "yes" })] }).start, []);
 }
-eq("parseJob: the happy shape", parseJob(ev({ description: "<p>go</p>" })), { project: "superfrog", instructions: "go" });
+eq("parseJob: the happy shape", parseJob(ev({ description: "<p>go</p>" })), { project: "superfrog", item: "nightly", instructions: "go" });
 eq("parseJob: a non-true creatorOwn refuses", parseJob(ev({ creatorOwn: 1 })), { refuse: "not-yours" });
-eq("parseJob: a trailing newline in the title is trimmed", parseJob(ev({ title: "x\n" })).project, "x");
+eq("parseJob: a trailing newline in the title is trimmed", parseJob(ev({ title: "x / y\n" })).item, "y");
+for (const [title, project, item] of [
+  ["p / item", "p", "item"],
+  ["p/item", "p", "item"],
+  ["  p  /  item  ", "p", "item"],
+  ["p / a/b", "p", "a/b"],
+]) eq(`parseJob: ${JSON.stringify(title)}`, [parseJob(ev({ title })).project, parseJob(ev({ title })).item], [project, item]);
+eq("parseJob: a bad project is named beside its refusal", parseJob(ev({ title: "../x / y" })), { refuse: "bad-project", project: ".." });
 
 section("plainText");
 for (const [name, input, want] of [
@@ -213,12 +225,12 @@ for (const [name, input, want] of [
 section("2.4 the argv");
 const EVT = ev({ id: "abc_20261101T200000Z" });
 {
-  const args = buildClaudeArgs({ event: EVT, project: "superfrog", instructions: "go", zone: ZONE });
+  const args = buildClaudeArgs({ event: EVT, project: "superfrog", item: "nightly", instructions: "go", zone: ZONE });
   const name = args[2], wt = args[6], tag = name.slice(-4);
   ok("id4 is four hex characters", /^[0-9a-f]{4}$/.test(tag));
   eq("flag for flag", args, [
     "--bg",
-    "-n", `superfrog / cal 11-01 21:00 ${tag}`,
+    "-n", `superfrog / nightly 11-01 21:00 ${tag}`,
     "--permission-mode", "bypassPermissions",
     "-w", `cal-20261101-2100-${tag}`,
     "--disallowedTools", "AskUserQuestion",
@@ -231,17 +243,50 @@ const EVT = ev({ id: "abc_20261101T200000Z" });
     decide({ events: [ev({ id: "abc_20261101T200000Z", description: "<p>go</p>" })] }).start[0].args, args);
 }
 for (const hostile of ["-rf /", "--dangerously", 'say "hi" \'there\'', "line one\nline two\n--flag", "$(touch x) `y`"]) {
-  const args = buildClaudeArgs({ event: EVT, project: "p", instructions: hostile, zone: ZONE });
+  const args = buildClaudeArgs({ event: EVT, project: "p", item: "i", instructions: hostile, zone: ZONE });
   eq(`one element, no more: ${JSON.stringify(hostile)}`, args.length, 12);
   eq("...byte-exact in the last element", args.at(-1), `Instructions from the calendar entry:\n${hostile}`);
   ok("...which never begins with -", !args.at(-1).startsWith("-"));
 }
 {
-  const nameOf = (id) => buildClaudeArgs({ event: ev({ id }), project: "p", instructions: "i", zone: ZONE });
+  const nameOf = (id) => buildClaudeArgs({ event: ev({ id }), project: "p", item: "i", instructions: "i", zone: ZONE });
   const a = nameOf("abc_20261101T200000Z"), b = nameOf("def_20261101T200000Z");
   ok("two recurring instances in one minute: names differ", a[2] !== b[2]);
   ok("two recurring instances in one minute: worktrees differ", a[6] !== b[6]);
   eq("the same id always gives the same name", nameOf("abc_20261101T200000Z")[2], a[2]);
+}
+
+section("the agent's name");
+{
+  const HEADER = /─{10,}\s+(\S.*?)\s+─/;   // cockpitd.mjs
+  const nameOf = (title) => {
+    const d = decide({ events: [ev({ id: "abc", title })] });
+    return d.start[0].args[2];
+  };
+  const tail = (name) => name.split(" ").slice(-3).join(" ");
+  const t = (name) => tail(name).replace(/^11-01 21:00 [0-9a-f]{4}$/, "TAIL");
+  const body = (name) => name.slice(0, -tail(name).length - 1);
+  eq("the example", /^superfrog-re \/ run nightly tests 11-01 21:00 [0-9a-f]{4}$/.test(nameOf("superfrog-re / run nightly tests")), true);
+  eq("the tail is the date and id", t(nameOf("p / a")), "TAIL");
+  eq("30 characters are kept", body(nameOf(`p / ${"x".repeat(30)}`)), `p / ${"x".repeat(30)}`);
+  eq("31 are clipped to 30", body(nameOf(`p / ${"x".repeat(31)}`)), `p / ${"x".repeat(30)}`);
+  eq("a clip landing on a space is trimmed", body(nameOf(`p / ${"x".repeat(29)} yy`)), `p / ${"x".repeat(29)}`);
+  eq("a control character becomes a space", body(nameOf("p / a\x01b")), "p / a b");
+  ok("an escape never reaches the name", !nameOf("p / a\x1b[31mb").includes("\x1b"));
+  eq("whitespace runs collapse", body(nameOf("p / a \t  b")), "p / a b");
+  const ruled = nameOf("p / a ─ b");
+  ok("no rule character in the name", !ruled.includes("─"), ruled);
+  eq("...which the header reads whole", `──────────── ${ruled} ─────`.match(HEADER)?.[1], ruled);
+  const emoji = "😀".repeat(16);
+  eq("16 emoji are not split", body(nameOf(`p / ${emoji}`)), `p / ${emoji}`);
+  eq("31 emoji are clipped whole", body(nameOf(`p / ${"😀".repeat(31)}`)), `p / ${"😀".repeat(30)}`);
+  const family = "👨‍👩‍👧";
+  eq("a joined emoji is one character", body(nameOf(`p / ${family.repeat(31)}`)), `p / ${family.repeat(30)}`);
+  const long = `superfrog / ${"y".repeat(40)}`;
+  const instance = (id) => decide({ events: [ev({ id, title: long })] }).start[0].args[2];
+  ok("two instances of a recurring entry get different names",
+    instance("abc_20261101T200000Z") !== instance("def_20261101T200000Z"));
+  eq("the started job carries the whole title", decide({ events: [ev({ title: long })] }).start[0].title, long);
 }
 
 section("2.5 the preamble");
@@ -270,7 +315,7 @@ section("DST: the zone passed decides");
 {
   // Warsaw leaves summer time at 01:00Z on 25 Oct 2026: 02:30 happens twice.
   const summer = T("2026-10-25T00:30:00Z"), winter = T("2026-10-25T01:30:00Z");
-  const worktree = (start, zone) => buildClaudeArgs({ event: ev({ start, end: start + MIN }), project: "p", instructions: "i", zone })[6];
+  const worktree = (start, zone) => buildClaudeArgs({ event: ev({ start, end: start + MIN }), project: "p", item: "i", instructions: "i", zone })[6];
   ok("before the change, summer offset", worktree(summer, ZONE).startsWith("cal-20261025-0230-"));
   ok("after the change, winter offset", worktree(winter, ZONE).startsWith("cal-20261025-0230-"));
   ok("another zone, another name", worktree(summer, "America/New_York").startsWith("cal-20261024-2030-"));
@@ -293,6 +338,18 @@ section("2.6 the notes");
   ok("auth names the repair", noteText("auth", { slug: "night" }).includes("agenda add night"));
   ok("gone names the repair", noteText("gone", { slug: "night" }).includes("agenda rm night"));
   ok("corrupt names where it went", noteText("corrupt", { path: "/a/b.corrupt-1" }).includes("/a/b.corrupt-1"));
+  const refused = (title, exists = () => true) => decide({ events: [ev({ title })], exists }).notes[0].text;
+  eq("a title without the slash: the note gives the format", refused("superfrog"),
+    'Calendar entry "superfrog" not started: its title must read "project / item name".');
+  eq("an unknown folder: the whole title, and the folder alone as the folder",
+    refused("superfrog / nightly", () => false),
+    'Calendar entry "superfrog / nightly" not started: no project folder is named "superfrog".');
+  eq("a bad project: named by its part", refused("my project / y"),
+    'Calendar entry "my project / y" not started: no project folder is named "my project".');
+  eq("missed quotes the whole title", decide({ events: [ev()], now: END }).notes[0].text,
+    'Calendar entry "superfrog / nightly" skipped: it ended before it could start.');
+  ok("a hostile project reaches no note with an escape", !refused("a\x1b[31m / y").includes("\x1b"));
+  ok("a hostile item reaches no note with an escape", !refused("p\x1b[31m / y\x1b[0m").includes("\x1b"));
   const hostile = noteText("missed", { title: `evil\x1b[31m\nsecond ${"y".repeat(500)}` });
   ok("a title cannot put an escape into the pane", !hostile.includes("\x1b"));
   ok("a note is one line", !hostile.includes("\n"));

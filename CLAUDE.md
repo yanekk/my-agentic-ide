@@ -63,8 +63,9 @@ replaces that one calendar's rows with `home  sign-in expired · agenda add home
 and leaves the others alone.
 
 A calendar marked as a **jobs calendar** (`agenda add <slug> --jobs`, `agenda jobs <slug>
-on|off`) starts agents. Every entry on it is a job: the title is a project folder under the
-projects root, the description is the instructions. At its start time the daemon runs `claude
+on|off`) starts agents. Every entry on it is a job: the title is `{project} / {item name}`, the
+project a folder under the projects root and the item what tells entries apart, and the description
+is the instructions. At its start time the daemon runs `claude
 --bg` in that project, in its own worktree, with **bypass permissions** and no question tool, so
 nobody is asked anything and the agent could run anything on the machine; its preamble tells it
 to stay in the worktree and never push. It stays in `claude agents` and its final message is the
@@ -266,7 +267,7 @@ spikes/cockpit-test/    integration test, wezterm stubbed (959 checks, ~111s med
 spikes/notes-test/      the `note` command and the right column, notes + agenda (90)
 spikes/agenda-test/     the agenda's store, model, Google client and command (637)
 spikes/auto-name-test/  session naming and its settings.json merge (50 assertions)
-spikes/calendar-jobs-test/  calendar agents: the model and its purity grep, the store, the tick against a fake claude, live-check.sh (337)
+spikes/calendar-jobs-test/  calendar agents: the model and its purity grep, the store, the tick against a fake claude, live-check.sh (392)
 spikes/bitbucket-test/  the dashboard's model, client, store, config and render (516)
 spikes/stop-notify-test/ the Stop-hook sound decision, the hook end to end, its settings.json merge (38)
 spikes/usage-test/      the usage bar's model, store and tap, the pir reader against a stand-in service, the installer's pir-api line, live-check.sh against a stand-in, the Aperture forecast (365)
