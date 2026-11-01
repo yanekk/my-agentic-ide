@@ -54,8 +54,9 @@ Run this as a **background** command (`run_in_background`), because a foreground
 minutes, with the tool's own time limit above `--limit-min`. Then wait to be told it finished.
 
 ```sh
-if [ -L ~/.wezterm.lua ]; then CHECKOUT=$(dirname "$(dirname "$(readlink ~/.wezterm.lua)")")
-else CHECKOUT=$(sed -n 's/^ *repo *= *"\(.*\)".*/\1/p' ~/.claude/cockpit/config.lua); fi
+CHECKOUT=
+[ -L ~/.wezterm.lua ] && CHECKOUT=$(dirname "$(dirname "$(readlink ~/.wezterm.lua)")")
+[ -f "$CHECKOUT/bin/cockpit-jobs.mjs" ] || CHECKOUT=$(sed -n 's/^ *repo *= *"\(.*\)".*/\1/p' ~/.claude/cockpit/config.lua)
 ROOT=$(sed -n 's/^ *start_dir *= *"\(.*\)".*/\1/p' ~/.claude/cockpit/config.lua)
 COMMANDS=$(mktemp)
 cat > "$COMMANDS" <<'EOF'

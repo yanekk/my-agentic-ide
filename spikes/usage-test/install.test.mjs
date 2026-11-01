@@ -320,6 +320,10 @@ for (const v of verbs) ok(`agenda wall verb ${v} is in the help`, agendaHelp.inc
   // No ~/.wezterm.lua link (installed with --no-link): config.lua answers instead.
   const noLink = capture("bash", ["-c", `rm "$HOME/.wezterm.lua"; ${script}`], cleanEnv({ HOME: home, COCKPIT_JOBS_DRY_RUN: "1", COCKPIT_DIR: join(home, ".claude", "cockpit") }));
   ok("...and without the wezterm link", noLink.code === 0 && noLink.out.includes("would run a trial in"), noLink.out);
+
+  // The installer leaves a ~/.wezterm.lua of the user's own in place, and that can be a link into dotfiles.
+  const ownLink = capture("bash", ["-c", `rm -f "$HOME/.wezterm.lua"; ln -s "$HOME/dotfiles/wezterm/my.lua" "$HOME/.wezterm.lua"; ${script}`], cleanEnv({ HOME: home, COCKPIT_JOBS_DRY_RUN: "1", COCKPIT_DIR: join(home, ".claude", "cockpit") }));
+  ok("...and with the wezterm link pointing at the user's own config", ownLink.code === 0 && ownLink.out.includes("would run a trial in"), ownLink.out);
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);
