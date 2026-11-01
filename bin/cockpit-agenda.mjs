@@ -12,6 +12,7 @@
 //   agenda add <slug>       sign in if needed, pick one of the account's calendars
 //   agenda add <slug> --jobs   the same, and every entry on it starts an agent
 //   agenda jobs <slug> on|off  turn that on or off for an attached calendar
+//   agenda wall [<project> ...]  what calendar agents may do beyond the defaults
 //   agenda rm <slug>        detach it (EXACT slug, no prefixes)
 //   agenda color <slug>     reroll its colour, preferring an unused one
 //   agenda setup [path]     read the client JSON Google gave you
@@ -47,10 +48,13 @@ import {
   pickColour, renderAgenda, safeText,
 } from "./cockpit-agenda-model.mjs";
 import {
-  CLIENT_FILE, STATE_FILE, putAccount, putCacheEntry, putCalendar, pruneCache,
+  CLIENT_FILE, DIR, STATE_FILE, putAccount, putCacheEntry, putCalendar, pruneCache,
   readCache, readClient, readState, removeCalendar, setColour, setJobs, withLock, writeClient,
 } from "./cockpit-agenda-store.mjs";
 import { accessToken, describeError, fetchEvents, listCalendars, signIn } from "./cockpit-agenda-google.mjs";
+import { validProjectName } from "./cockpit-jobs-model.mjs";
+import { DEFAULT_SITES, validateException } from "./cockpit-wall-model.mjs";
+import { WALL_FILE, readWall, writeWall } from "./cockpit-wall-store.mjs";
 
 const ESC = "\x1b[";
 const tty = process.stdout.isTTY;
@@ -81,6 +85,12 @@ const USAGE = `agenda -- today's calendars, in the cockpit's fleet view.
   agenda ls              the configured calendars, one per line
   agenda add <slug> [--jobs]   connect one Google calendar and call it <slug>
   agenda jobs <slug> on|off    every entry on this calendar starts an agent, or stops
+  agenda wall            the projects whose calendar agents have exceptions
+  agenda wall <project>  what that project has, plus the defaults
+  agenda wall <project> allow-site <host>      let its calendar agents reach a site
+  agenda wall <project> allow-ports            let them open local ports
+  agenda wall <project> allow-write <path>     let them write to a folder
+  agenda wall <project> remove site|ports|write [value]
   agenda rm <slug>       detach it (the slug in full -- no prefixes)
   agenda color <slug>    give it a different colour
   agenda setup [path]    read the client JSON downloaded from Google
@@ -95,7 +105,7 @@ Only a calendar you own and that is not your primary one can start agents, becau
 invitations land on your primary calendar and others control one shared to you.
 
 AGENDA_DRY_RUN=1 makes \`agenda add\` print the sign-in URL and stop, and
-\`agenda jobs\` change nothing.`;
+\`agenda jobs\` and \`agenda wall\` change nothing.`;
 
 // `agenda help` must answer even where the command should not work at all -- with
 // no registration, outside a cockpit, or run by an agent. Refusing to explain
@@ -140,7 +150,9 @@ function refuseIfAgent(verb) {
   const opensBrowser = verb === "add" || verb === "setup";
   const why = opensBrowser
     ? "It would open a browser and wait for a person to finish signing in."
-    : "It changes your calendar configuration, which is not an agent's to change.";
+    : verb === "wall"
+      ? "It changes what agents may do, which is not an agent's to change."
+      : "It changes your calendar configuration, which is not an agent's to change.";
   die(`\`agenda ${verb}\` is not available to an agent.\n` +
       `      ${why}\n` +
       `      Ask the human at this cockpit to run it. (\`agenda\` and \`agenda ls\` do work here.)`);
@@ -773,6 +785,152 @@ async function jobsCommand(slug, setting) {
   say(`${swatch(cal.colour)} ${bold(slug)}  ${dim("jobs on: every entry on it now starts an agent at its start time.")}`);
 }
 
+// --- agenda wall -----------------------------------------------------------
+// The only way to add an exception (calendar-agent-sandbox DESIGN 2.7). The wall model
+// decides what may exist; this side knows the cwd, the disk and the project's folder.
+
+const WALL_USAGE = "usage: `agenda wall [<project> [allow-site <host> | allow-ports | allow-write <path> | remove site|ports|write [value]]]`.";
+const asList = (v) => (Array.isArray(v) ? v : []);
+const asRow = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+const rowIsEmpty = (row) => !asList(row.sites).length && !asList(row.write).length && row.localPorts !== true;
+
+// The same root and the same test as jobsTick's projectExists, so a project accepted
+// here is one a calendar entry can start in.
+function wallProjectFolder(project) {
+  let root = null;
+  try { root = JSON.parse(fs.readFileSync(path.join(DIR, "panes.json"), "utf8")).repo; } catch { /* below */ }
+  if (typeof root !== "string" || !root) die("no projects root yet: this needs a cockpit that has been opened once. Nothing was changed.");
+  const folder = path.join(path.resolve(root), project);
+  if (!fs.existsSync(path.join(folder, ".git"))) die(`no project \`${project}\` under ${wire(root)}. Nothing was changed.`);
+  return folder;
+}
+
+// Links resolved through the deepest part that exists: the folder may not be made yet,
+// and a link must not carry a secret folder past the check.
+function realOfDeepest(p) {
+  const tail = [];
+  let at = p;
+  for (;;) {
+    try { return path.join(fs.realpathSync(at), ...tail); }
+    catch {
+      if (path.dirname(at) === at) return p;
+      tail.unshift(path.basename(at));
+      at = path.dirname(at);
+    }
+  }
+}
+
+function resolveFolder(value) {
+  const home = os.homedir();
+  const typed = value === "~" ? home : value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
+  return path.resolve(typed);
+}
+
+function wallAddFolder(value, project) {
+  const home = os.homedir();
+  const refuse = (why) => die(`${wire(value)} cannot be allowed: ${why}. Nothing was changed.`);
+  // path.resolve("") is the cwd: an unset shell variable must not allow wherever you stand.
+  if (!value) refuse("a folder must be a path");
+  // As typed too, so a link cannot be what makes a refused path pass or a `~` go unread.
+  const raw = validateException("write", value.startsWith("~") ? value : resolveFolder(value), { home });
+  if (!raw.ok) refuse(raw.why);
+  const folder = resolveFolder(value);
+  const real = realOfDeepest(folder);
+  const realHome = realOfDeepest(home);
+  const check = validateException("write", real, { home: realHome });
+  if (!check.ok) refuse(check.why);
+  // Folded as the model folds: APFS ignores case, so ~/SRC/x holds ~/src/x/.git.
+  const git = realOfDeepest(path.join(project, ".git")).toLowerCase(), r = real.toLowerCase();
+  if (r === git || r.startsWith(`${git}/`) || git.startsWith(`${r}/`)) refuse("that opens this project's .git");
+  return real;
+}
+
+function wallChange(project, action, args) {
+  refuseIfAgent("wall");
+  if (!validProjectName(project)) die(`\`${wire(project)}\` is not a project name. Nothing was changed.`);
+
+  let apply, after = [];
+  if (action === "allow-site" && args.length === 1) {
+    const check = validateException("site", args[0], { home: os.homedir() });
+    if (!check.ok) die(`${wire(args[0])} cannot be allowed: ${check.why}. Nothing was changed.`);
+    const site = args[0].toLowerCase();
+    wallProjectFolder(project);
+    apply = (row) => { if (!asList(row.sites).includes(site)) row.sites = [...asList(row.sites), site]; };
+    after = [`${project} may reach ${site}. An allowed site can also receive data from the run.`];
+  } else if (action === "allow-ports" && !args.length) {
+    wallProjectFolder(project);
+    apply = (row) => { row.localPorts = true; };
+    after = [`${project} may open local ports.`];
+  } else if (action === "allow-write" && args.length === 1) {
+    const folder = wallAddFolder(args[0], wallProjectFolder(project));
+    apply = (row) => { if (!asList(row.write).includes(folder)) row.write = [...asList(row.write), folder]; };
+    after = [`${project} may write to ${folder}.`];
+  } else if (action === "remove" && (args[0] === "ports" ? args.length === 1 : args.length === 2)) {
+    // No folder check: this is how the row of a deleted project goes.
+    const [kind, value] = args;
+    if (kind === "ports") {
+      apply = (row) => { delete row.localPorts; };
+      after = [`${project} may no longer open local ports.`];
+    } else if (kind === "site") {
+      apply = (row) => { row.sites = asList(row.sites).filter((s) => String(s).toLowerCase() !== value.toLowerCase()); };
+      after = [`${project} no longer has ${wire(value)}.`];
+    } else if (kind === "write") {
+      // What was typed, or what it resolves to: the stored form has its links resolved.
+      const forms = value ? [value, resolveFolder(value), realOfDeepest(resolveFolder(value))] : [];
+      apply = (row) => { row.write = asList(row.write).filter((w) => !forms.includes(w)); };
+      after = [`${project} no longer has ${wire(value)}.`];
+    } else die(WALL_USAGE);
+  } else die(WALL_USAGE);
+
+  const { projects, unreadable } = readWall();
+  // Writing would replace rows only a person can say were there.
+  if (unreadable) die(`${WALL_FILE} cannot be read, and writing would lose what it holds.\n      Fix or move that file, then run this again. Nothing was changed.`);
+  if (DRY_RUN) { say(dim(`AGENDA_DRY_RUN=1 -- nothing written. This would run: wall ${project} ${[action, ...args].join(" ")}`)); return; }
+
+  const row = { sites: [], localPorts: false, write: [], ...asRow(projects[project]) };
+  apply(row);
+  if (rowIsEmpty(row)) delete projects[project];
+  else projects[project] = { ...row, localPorts: row.localPorts === true };
+  writeWall({ projects });
+  for (const line of after) say(wire(line));
+}
+
+// A hand-edited row can hold anything, and each start drops what fails these checks.
+const wallRowLines = (kind, values) => values.map((v) => {
+  const check = validateException(kind, v, { home: os.homedir() });
+  return `  ${kind === "site" ? "site " : "write"}  ${wire(typeof v === "string" ? v : JSON.stringify(v))}${check.ok ? "" : dim(`  ignored: ${wire(check.why)}`)}`;
+});
+
+function wallRead(project) {
+  const { projects, unreadable } = readWall();
+  if (unreadable) {
+    process.exitCode = 1;
+    say(`${WALL_FILE} cannot be read, so every run goes ahead with no exceptions and leaves a note.`);
+  }
+  if (project === undefined) {
+    const names = Object.keys(projects).sort();
+    if (!names.length && !unreadable) say("no project has an exception. Every calendar agent runs with the defaults.");
+    for (const name of names) {
+      const row = asRow(projects[name]);
+      const parts = [`${asList(row.sites).length} site(s)`, row.localPorts === true ? "ports" : null, `${asList(row.write).length} folder(s)`];
+      say(`${wire(name)}  ${parts.filter(Boolean).join(" · ")}`);
+    }
+    return;
+  }
+  if (!validProjectName(project)) die(`\`${wire(project)}\` is not a project name.`);
+  const row = asRow(projects[project]);
+  say(bold(wire(project)));
+  say(`  defaults  sites ${DEFAULT_SITES.join(", ")}; writes to its worktree and temporary folders`);
+  const lines = [...wallRowLines("site", asList(row.sites)), ...(row.localPorts === true ? ["  ports  local ports allowed"] : []), ...wallRowLines("write", asList(row.write))];
+  if (lines.length) lines.forEach((l) => say(l));
+  else say(dim("  no exceptions"));
+}
+
+function wall(project, action, args) {
+  if (action === undefined) wallRead(project);
+  else wallChange(project, action, args);
+}
+
 // --- dispatch --------------------------------------------------------------
 
 // A corrupt agenda.json is moved aside rather than silently replaced -- it holds
@@ -798,6 +956,7 @@ try {
       break;
     }
     case "jobs":                    await jobsCommand(rest[0], rest[1]); break;
+    case "wall":                    wall(rest[0], rest[1], rest.slice(2)); break;
     case "rm": case "remove":       rm(rest[0]); break;
     case "color": case "colour":    color(rest[0]); break;
     case "setup":

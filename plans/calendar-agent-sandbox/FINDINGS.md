@@ -6,6 +6,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 🐞 | T03 review: `agenda wall alpha allow-write ~/src/other` is accepted and at-start `buildWallSettings` keeps it, opening that project's `.git` hooks. Only the own project's overlap is checked. Left open; no task covers it. |
+| 2026-11-01 | 📌 | T03 review: `*.co.uk` and `co.uk` pass `siteProblem`; `*.com` does not. A public-suffix wildcard opens a whole country. T01's rule, left alone. |
+| 2026-11-01 | 📌 | T03 doc says bare `agenda` shows help listing the verb. Bare `agenda` draws the day, by design; `agenda help` lists `wall`. Checked against `agenda help`. |
 | 2026-11-01 | 📌 | Sweep from T02: `fold` in `bin/cockpit-wall-model.mjs` uses plain `toLowerCase`; APFS opens `ſ` as `s`, so an exception like `~/.ſsh` may pass the secret check. Read-only, person-added only, not fixed. |
 | 2026-11-01 | 📌 | Fake unverified against real: the guard's stdin `cwd` field is only in `guard.test.mjs`. If absent, only the root check runs. `wall-check.sh` (T07) could confirm. |
 | 2026-11-01 | 🐞 | T02 review fixed: guard passed `.claude/ſettings.json` (APFS folds `ſ` to `s`) and `.claude` or `settings.json` as symlinks. Refusal now applies NFKC folding and judges link names. |
