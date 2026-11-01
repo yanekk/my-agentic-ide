@@ -37,3 +37,4 @@ In `spikes/calendar-jobs-test/`, updating existing fixtures to the new title for
 - A hostile item never reaches a note or the name with an escape character, and no log line holds the title or item.
 
 ## Changed during the build
+2026-11-01: spikes/daemon-leak-test/run.sh expected eight daemon launches in cockpit-test and calendar-agents T05 added a ninth, red on main too. Count updated to nine here; the person's call.

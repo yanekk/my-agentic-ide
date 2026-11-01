@@ -295,8 +295,8 @@ for f in "$ROOT"/spikes/*-test/run.sh; do
   owners=$(grep -c 'COCKPIT_OWNER_PID="\$\$"' "$f")
   is "$(basename "$(dirname "$f")"): $launches daemon launches, each with an owner" "$owners" "$launches"
 done
-is "cockpit-test has its eight launches (the fence is not counting nothing)" \
-  "$(grep -cE 'bin/cockpitd\.mjs"?[^|#]*&[[:space:]]*$' "$ROOT/spikes/cockpit-test/run.sh")" 8
+is "cockpit-test has its nine launches (the fence is not counting nothing)" \
+  "$(grep -cE 'bin/cockpitd\.mjs"?[^|#]*&[[:space:]]*$' "$ROOT/spikes/cockpit-test/run.sh")" 9
 # The real cockpit must be unable to get the backstop at all.
 is "COCKPIT_OWNER_PID never in bin/cockpit-layout.sh or wezterm/cockpit.lua" \
   "$(cat "$ROOT/bin/cockpit-layout.sh" "$ROOT/wezterm/cockpit.lua" | grep -c COCKPIT_OWNER_PID)" 0
