@@ -22,7 +22,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T05 | trial-run | T04 | ✅ | |
 | T06 | skill-refactor | T03, T05 | ✅ | |
 | T07 | wall-check | T04, T05 | ✅ | |
-| T08 | docs | T06, T07 | ⬜ | |
+| T08 | docs | T06, T07 | ✅ | |
 
 **Review queue:** *(empty)*
 
