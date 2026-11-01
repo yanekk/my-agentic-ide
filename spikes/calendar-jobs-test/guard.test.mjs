@@ -100,7 +100,7 @@ try {
   eq("`..` after a link follows the target", ask(`${wt}/src/up/../x`), 2);
   mkdirSync(join(wt, "d1/d2/d3"), { recursive: true });
   symlinkSync(join(wt, "d1/d2/d3"), join(wt, "deep"));
-  eq("`..` after a link: inside by the disk, outside by the letters", ask(`${wt}/deep/../../../../outside/x`), 2);
+  eq("`..` after a link: inside by the disk, outside by the letters", ask(`${wt}/deep/../../../x`), 2);
   symlinkSync(join(wt, ".claude"), join(wt, "c-link"));
   eq("a link onto .claude/settings", ask(join(wt, "c-link/settings.json")), 2);
 
