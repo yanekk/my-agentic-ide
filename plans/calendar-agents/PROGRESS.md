@@ -23,7 +23,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T02 | job-decisions | T00 | ✅ | |
 | T03 | jobs-calendar | — | ✅ | |
 | T04 | job-starter | T02, T03 | ✅ | |
-| T05 | daemon-wiring | T01, T03, T04 | ⬜ | |
+| T05 | daemon-wiring | T01, T03, T04 | ✅ | |
 | T06 | live-check | T00, T05 | ⬜ | |
 
 A ✅ task's cell may be cut to one line once the next task has been reviewed.
