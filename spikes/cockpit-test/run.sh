@@ -4141,7 +4141,8 @@ if section 13j "calendar agents: the daemon fetches, ticks and recovers"; then
 # fast jobs tick. Its agenda staleness is long, so the only events that appear are the
 # one first fetch and what jseed writes.
 AJ="$T/agendaj"; SJ="$AJ/state"; JROOT="$AJ/projects"; JBG="$AJ/claude-bg.log"
-mkdir -p "$AJ" "$SJ" "$JROOT/proj/.git"
+mkdir -p "$AJ" "$SJ" "$JROOT/proj"
+git -C "$JROOT/proj" init -q   # a start reads its branches and fails shut if it cannot
 : > "$JBG"
 echo '{"diff":10,"fleet":20,"shell":30,"repo":"'"$JROOT"'"}' > "$SJ/panes.json"
 : > "$SJ/fleet.log"

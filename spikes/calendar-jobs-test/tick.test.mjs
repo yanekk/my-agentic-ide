@@ -19,7 +19,8 @@ if (!SCRATCH || !process.env.FAKE_CLAUDE_LOG || IDENTITY !== "fake-claude") {
   process.exit(1);
 }
 
-const { jobsTick, recoverStarting, fetchJobCalendars } = await import("../../bin/cockpit-jobs.mjs");
+const { jobsTick, recoverStarting, fetchJobCalendars, wallFacts, preflight, buildWallFor } = await import("../../bin/cockpit-jobs.mjs");
+const { WALL_FILE } = await import("../../bin/cockpit-wall-store.mjs");
 const { readLedger, writeLedger, pruneLedger, LEDGER_FILE } = await import("../../bin/cockpit-jobs-store.mjs");
 const { putCacheEntry, STATE_FILE, CACHE_FILE } = await import("../../bin/cockpit-agenda-store.mjs");
 const { readNotes, NOTES_FILE } = await import("../../bin/cockpit-notes.mjs");
@@ -34,8 +35,20 @@ const END = T("2026-11-01T23:00:00Z");
 const ROOT = path.join(SCRATCH, "root");
 const NOW = START + 1000;
 
-fs.mkdirSync(path.join(ROOT, "proj", ".git"), { recursive: true });
-fs.mkdirSync(path.join(ROOT, "proj2", ".git"), { recursive: true });
+// Real repositories: a start reads their branches, and fails shut when it cannot.
+const gitIn = (dir, ...args) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+function makeRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  gitIn(dir, "init", "-q", "-b", "main");
+  gitIn(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first");
+}
+makeRepo(path.join(ROOT, "proj"));
+makeRepo(path.join(ROOT, "proj2"));
+const stubDir = (name, body) => {
+  const dir = fs.mkdtempSync(path.join(SCRATCH, "..", `stub-${name}-`));
+  fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return dir;
+};
 
 const calls = () => fs.existsSync(LOG)
   ? fs.readFileSync(LOG, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
@@ -149,10 +162,13 @@ section("failed");
   ok("...nor does the note", !/secret/.test(notes()[0]?.text ?? "secret"), notes()[0]?.text);
 }
 {
+  // Only claude is missing: without git or sandbox-exec this would be a wall failure.
   reset();
   cached();
   const savedPath = process.env.PATH;
-  process.env.PATH = "/nonexistent";
+  const noClaude = fs.mkdtempSync(path.join(SCRATCH, "..", "no-claude-"));
+  for (const tool of ["git", "sandbox-exec"]) fs.symlinkSync(`/usr/bin/${tool}`, path.join(noClaude, tool));
+  process.env.PATH = noClaude;
   await tick();
   process.env.PATH = savedPath;
   eq("claude missing is `failed`, not a crash", entry().state, "failed");
@@ -269,7 +285,7 @@ section("refused and missed");
   cached();
   fs.rmSync(path.join(ROOT, "proj", ".git"), { recursive: true });
   await tick();
-  fs.mkdirSync(path.join(ROOT, "proj", ".git"));
+  makeRepo(path.join(ROOT, "proj"));
   eq("a folder that is not a repo is refused", entry().reason, "bad-project");
 }
 
@@ -464,6 +480,228 @@ section("dry run");
   eq("--once prints the flags", argv.slice(0, 2), ["claude", "--bg"]);
   eq("--once prints the prompt", argv.at(-1), "Instructions from the calendar entry:\nrun the tests");
   ok("--once wrote nothing", !fs.existsSync(LEDGER_FILE) && calls().length === 0);
+  // Pretty-printed after the argv, up to the next line a dry run can print.
+  const printed = stdout.slice(stdout.indexOf("  settings: ") + "  settings: ".length);
+  const settings = JSON.parse(printed);
+  eq("--once prints the settings", settings, JSON.parse(argv[argv.indexOf("--settings") + 1]));
+  ok("...spread over lines to be read", printed.split("\n").length > 20);
+  ok("...with the real branches", settings.sandbox.filesystem.denyWrite.some((p) => p.endsWith("/refs/heads/main")));
+  delete process.env.COCKPIT_JOBS_DRY_RUN;
+}
+
+section("the wall of a real start");
+const settingsOf = (call) => JSON.parse(call.args[call.args.indexOf("--settings") + 1]);
+const ALWAYS_THERE = fs.realpathSync(path.join(ROOT, "proj", ".git"));
+{
+  reset();
+  gitIn(path.join(ROOT, "proj"), "branch", "feature/x");
+  // A tag of the same name makes refname:short answer heads/both.
+  gitIn(path.join(ROOT, "proj"), "branch", "both");
+  gitIn(path.join(ROOT, "proj"), "tag", "both");
+  cached();
+  await tick();
+  const c = calls()[0];
+  const deny = settingsOf(c).sandbox.filesystem.denyWrite;
+  for (const b of ["main", "feature/x", "both"]) {
+    ok(`branch ${b} is denied, with its lock`, deny.includes(`${ALWAYS_THERE}/refs/heads/${b}`) && deny.includes(`${ALWAYS_THERE}/refs/heads/${b}.lock`), deny.join(" "));
+  }
+  ok("the common dir is absolute", deny.every((p) => path.isAbsolute(p)), deny.join(" "));
+  ok("packed-refs and HEAD are denied", deny.includes(`${ALWAYS_THERE}/packed-refs`) && deny.includes(`${ALWAYS_THERE}/HEAD`));
+  eq("dontAsk", c.args[c.args.indexOf("--permission-mode") + 1], "dontAsk");
+  ok("strict MCP", c.args.includes("--strict-mcp-config") && c.args[c.args.indexOf("--mcp-config") + 1] === '{"mcpServers":{}}');
+  const hook = settingsOf(c).hooks.PreToolUse[0].hooks[0].command;
+  ok("the guard is the real file beside the code", hook.includes(fileURLToPath(new URL("../../bin/cockpit-jobs-guard.mjs", import.meta.url))), hook);
+  eq("no exceptions, no note", notes().length, 0);
+}
+{
+  // Inside a project's own worktree the answer is the main checkout's .git.
+  reset();
+  const wt = path.join(SCRATCH, "..", "linked-wt");
+  gitIn(path.join(ROOT, "proj"), "worktree", "add", "-q", "-b", "linked", wt);
+  const f = wallFacts("linked-wt", "w", { projectsRoot: path.dirname(wt), home: os.homedir() });
+  eq("a linked worktree answers the shared git dir", f.commonDir, ALWAYS_THERE);
+  gitIn(path.join(ROOT, "proj"), "worktree", "remove", "--force", wt);
+}
+
+section("a wall that cannot be set up");
+async function wallFailure(label, run, wordRe) {
+  reset();
+  cached();
+  await run();
+  eq(`${label}: claude is not run`, calls().length, 0);
+  eq(`${label}: ledger failed`, entry().state, "failed");
+  eq(`${label}: reason wall`, entry().reason, "wall");
+  eq(`${label}: one note`, notes().length, 1);
+  ok(`${label}: the note says why`, wordRe.test(notes()[0]?.text ?? "") && /not started: its wall/.test(notes()[0].text), notes()[0]?.text);
+  await run();
+  eq(`${label}: no second note on the next tick`, notes().length, 1);
+  eq(`${label}: no retry`, calls().length, 0);
+}
+{
+  const saved = process.env.PATH;
+  const stub = stubDir("sandbox-exec", "exit 71");
+  process.env.PATH = `${stub}:${saved}`;
+  await wallFailure("sandbox-exec failing", () => tick(), /sandbox did not run/);
+  process.env.PATH = saved;
+}
+{
+  const missing = path.join(SCRATCH, "..", "no-such-guard.mjs");
+  await wallFailure("a missing guard", () => tick({ guardPath: missing }), /guard script cannot be read/);
+}
+{
+  const realGuard = fileURLToPath(new URL("../../bin/cockpit-jobs-guard.mjs", import.meta.url));
+  eq("the real sandbox-exec and guard pass", preflight({ guardPath: realGuard }), { ok: true });
+  eq("preflight reports a missing guard", preflight({ guardPath: "/no/such" }).ok, false);
+}
+{
+  // Several due, one preflight: the stub counts its runs.
+  reset();
+  const saved = process.env.PATH;
+  const counted = path.join(SCRATCH, "..", "preflight-count");
+  fs.rmSync(counted, { force: true });
+  const stub = stubDir("sandbox-exec", `echo x >> '${counted}'\nexit 0`);
+  process.env.PATH = `${stub}:${saved}`;
+  cached([ev(), ev({ id: "evt2", title: "proj2 / other" })]);
+  await tick();
+  eq("two starts, one preflight", [calls().length, fs.readFileSync(counted, "utf8").length], [2, 2]);
+  fs.rmSync(counted);
+  cached([]);
+  await tick();
+  ok("a pass with nothing due pays for no preflight", !fs.existsSync(counted));
+  process.env.PATH = saved;
+}
+{
+  // Empty .git: projectExists says yes and git says no.
+  fs.mkdirSync(path.join(ROOT, "broken", ".git"), { recursive: true });
+  reset();
+  cached([ev({ title: "broken / nightly" }), ev({ id: "evt2", title: "proj2 / other" })]);
+  await tick();
+  eq("git failing: only the other project starts", calls().length, 1);
+  ok("...which is the other project", calls()[0].args[2].startsWith("proj2 /"), calls()[0].args[2]);
+  eq("...the failed entry is recorded", [entry().state, entry().reason], ["failed", "wall"]);
+  eq("...the other is started", entry("night/evt2").state, "started");
+  eq("...one note", notes().length, 1);
+  ok("...saying git", /git could not read this project/.test(notes()[0].text), notes()[0].text);
+  await tick();
+  eq("...and no second note", notes().length, 1);
+  fs.rmSync(path.join(ROOT, "broken"), { recursive: true });
+}
+{
+  // Measured shape of the trap: the walk up would answer with the outer repo's refs.
+  const outer = fs.mkdtempSync(path.join(SCRATCH, "..", "outer-"));
+  makeRepo(outer);
+  fs.mkdirSync(path.join(outer, "inner", ".git"), { recursive: true });
+  let threw = false;
+  try { wallFacts("inner", "w", { projectsRoot: outer, home: os.homedir() }); } catch { threw = true; }
+  ok("a broken project inside another repo does not answer with that repo", threw);
+  // The same project through a symlink: git walks up from the physical folder.
+  const linkRoot = fs.mkdtempSync(path.join(SCRATCH, "..", "link-root-"));
+  fs.symlinkSync(path.join(outer, "inner"), path.join(linkRoot, "linked"));
+  threw = false;
+  try { wallFacts("linked", "w", { projectsRoot: linkRoot, home: os.homedir() }); } catch { threw = true; }
+  ok("...nor when the project is a symlink into it", threw);
+  // A good project through a symlink still answers.
+  fs.symlinkSync(path.join(ROOT, "proj"), path.join(linkRoot, "good"));
+  eq("a symlinked project answers its own git dir", wallFacts("good", "w", { projectsRoot: linkRoot, home: os.homedir() }).commonDir, ALWAYS_THERE);
+  // No ref files to deny, so it would look confined and leave every branch movable.
+  fs.mkdirSync(path.join(ROOT, "rt"));
+  gitIn(path.join(ROOT, "rt"), "init", "-q", "-b", "main", "--ref-format=reftable");
+  reset();
+  cached([ev({ title: "rt / nightly" })]);
+  await tick();
+  eq("a reftable repo does not start", [calls().length, entry().state, entry().reason], [0, "failed", "wall"]);
+  ok("...and the note says why", /cannot protect/.test(notes()[0]?.text ?? ""), notes()[0]?.text);
+  fs.rmSync(path.join(ROOT, "rt"), { recursive: true });
+  process.env.GIT_DIR = path.join(outer, ".git");
+  const f = wallFacts("proj", "w", { projectsRoot: ROOT, home: os.homedir() });
+  delete process.env.GIT_DIR;
+  eq("an inherited GIT_DIR is ignored", f.commonDir, ALWAYS_THERE);
+}
+{
+  const proj = path.join(ROOT, "proj");
+  const remotes = {
+    a: "git@bitbucket.org:team/x.git", b: "https://user:SECRET@git.corp.example/x.git",
+    c: "ssh://git@ssh.example.net:2222/x.git", d: "/local/path/x.git", e: "file:///local/y.git",
+  };
+  for (const [n, u] of Object.entries(remotes)) gitIn(proj, "remote", "add", n, u);
+  const f = wallFacts("proj", "w", { projectsRoot: ROOT, home: os.homedir() });
+  eq("remotes give their hosts, local ones none", [...f.remoteHosts].sort(), ["bitbucket.org", "git.corp.example", "ssh.example.net"]);
+  for (const n of Object.keys(remotes)) gitIn(proj, "remote", "remove", n);
+}
+
+section("exceptions at a start");
+const writeWallFile = (projects) => fs.writeFileSync(WALL_FILE, JSON.stringify({ version: 1, projects }));
+{
+  reset();
+  writeWallFile({ proj: { sites: ["only.proj.example"], localPorts: true } });
+  cached([ev(), ev({ id: "evt2", title: "proj2 / other" })]);
+  await tick();
+  const [one, two] = [settingsOf(calls()[0]), settingsOf(calls()[1])];
+  ok("an exception reaches its project", one.sandbox.network.allowedDomains.includes("only.proj.example"));
+  eq("...with its ports", one.sandbox.network.allowLocalBinding, true);
+  ok("...and not another's", !two.sandbox.network.allowedDomains.includes("only.proj.example"));
+  eq("...nor its ports", two.sandbox.network.allowLocalBinding, undefined);
+  eq("...and no note", notes().length, 0);
+}
+for (const [label, write] of [
+  ["corrupt JSON", () => fs.writeFileSync(WALL_FILE, "{ broken")],
+  ["a row of the wrong type", () => writeWallFile({ proj: "everything" })],
+]) {
+  reset();
+  write();
+  cached();
+  await tick();
+  eq(`${label}: still starts`, entry().state, "started");
+  eq(`${label}: with the default sites`, settingsOf(calls()[0]).sandbox.network.allowedDomains, ["registry.npmjs.org", "pypi.org", "files.pythonhosted.org"]);
+  eq(`${label}: one note`, notes().length, 1);
+  ok(`${label}: saying so`, /could not be read/.test(notes()[0]?.text ?? ""), notes()[0]?.text);
+}
+{
+  reset();
+  writeWallFile({ proj: { sites: ["github.com"] } });
+  cached();
+  await tick();
+  const domains = settingsOf(calls()[0]).sandbox.network.allowedDomains;
+  ok("a forbidden hand-edited row is not in the settings", !domains.includes("github.com"), domains.join(" "));
+  eq("...it still starts", entry().state, "started");
+  eq("...one note", notes().length, 1);
+  ok("...naming it", /ignored.*github\.com/.test(notes()[0]?.text ?? ""), notes()[0]?.text);
+}
+{
+  // Known only at the start: the command cannot tell where a project pushes.
+  reset();
+  const proj = path.join(ROOT, "proj");
+  gitIn(proj, "remote", "add", "origin", "git@push.example.org:t/x.git");
+  writeWallFile({ proj: { sites: ["api.push.example.org"] } });
+  cached();
+  await tick();
+  ok("a site on this project's push host is dropped", !settingsOf(calls()[0]).sandbox.network.allowedDomains.includes("api.push.example.org"));
+  eq("...one note", notes().length, 1);
+  gitIn(proj, "remote", "remove", "origin");
+}
+{
+  const wallFor = buildWallFor({ projectsRoot: ROOT, home: os.homedir() });
+  eq("buildWallFor gives settings", wallFor("proj", "w").settings.sandbox.enabled, true);
+  ok("...and unavailable when git fails", /git could not/.test(wallFor("nope", "w").unavailable));
+}
+
+section("the dry run and the wall");
+{
+  reset();
+  fs.writeFileSync(WALL_FILE, "{ broken");
+  cached();
+  process.env.COCKPIT_JOBS_DRY_RUN = "1";
+  const out = [];
+  await tick({ print: (l) => out.push(l) });
+  ok("it says the note it would write", out.some((l) => /would note: .*could not be read/.test(l)), out.join("\n"));
+  ok("it prints the settings", out.some((l) => l.startsWith("  settings: ")));
+  eq("nothing is written", [fs.existsSync(LEDGER_FILE), fs.existsSync(NOTES_FILE), calls().length], [false, false, 0]);
+  eq("the list is left alone", fs.readFileSync(WALL_FILE, "utf8"), "{ broken");
+  out.length = 0;
+  fs.rmSync(WALL_FILE);
+  await tick({ print: (l) => out.push(l), guardPath: "/no/such" });
+  ok("a wall failure says so", out.some((l) => /would record night\/evt1: failed \(wall\)/.test(l)), out.join("\n"));
+  ok("...and shows no start", !out.some((l) => l.startsWith("would start")));
   delete process.env.COCKPIT_JOBS_DRY_RUN;
 }
 
@@ -632,6 +870,15 @@ section("live-check.sh");
   eq("...and the scratch directory is gone", fs.readdirSync(tmp), []);
 
   eq("no arguments is a usage error", (await liveCheck([], env)).code, 2);
+
+  // Older code, or a broken build, would print a start with no wall.
+  fs.rmSync(LOG, { force: true });
+  const stale = path.join(shim, "stale-jobs.mjs");
+  fs.writeFileSync(stale, `console.log('  argv: ["claude","--bg","--permission-mode","bypassPermissions"]');\n`);
+  const unwalled = await liveCheck(["test-cal", "me@x.y"], { ...env, LIVE_JOBS_BIN: stale });
+  eq("a dry run showing an unconfined start stops the check", unwalled.code, 1);
+  ok("...saying so", /no wall/.test(unwalled.stderr), unwalled.stderr);
+  ok("...before any real pass", !unwalled.stdout.includes("first real pass"), unwalled.stdout);
   fs.rmSync(shim, { recursive: true });
   fs.rmSync(real, { recursive: true });
   fs.rmSync(tmp, { recursive: true });

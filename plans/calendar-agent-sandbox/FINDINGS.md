@@ -6,6 +6,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 🐞 | T04 review: fake `claude` unverified against real; T07's `wall-check.sh` is the first real start from this argv. Project folder that is itself a linked worktree: where `-w` lands, and so the guard's root, unmeasured, read-only. |
+| 2026-11-01 | 🐞 | T04 review: reftable repo gave `denyWrite` no ref files, so branches stayed movable; symlinked project walked past `GIT_CEILING_DIRECTORIES`. Reproduced by script against real repos, both fixed, tests lock them. |
+| 2026-11-01 | 📌 | T04: `remoteHosts` comes from `git remote -v`, so an `~/.ssh/config` alias yields the alias, not the real host. A site exception for the real push host then passes. SSH stays refused at the proxy; HTTPS to it would not. |
 | 2026-11-01 | 🐞 | T03 review: `agenda wall alpha allow-write ~/src/other` is accepted and at-start `buildWallSettings` keeps it, opening that project's `.git` hooks. Only the own project's overlap is checked. Left open; no task covers it. |
 | 2026-11-01 | 📌 | T03 review: `*.co.uk` and `co.uk` pass `siteProblem`; `*.com` does not. A public-suffix wildcard opens a whole country. T01's rule, left alone. |
 | 2026-11-01 | 📌 | T03 doc says bare `agenda` shows help listing the verb. Bare `agenda` draws the day, by design; `agenda help` lists `wall`. Checked against `agenda help`. |

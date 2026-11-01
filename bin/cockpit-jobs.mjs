@@ -6,14 +6,14 @@
 //   node bin/cockpit-jobs.mjs --once [--fetch] [--root DIR]
 //     One tick outside the daemon. --fetch fetches the jobs calendars first.
 //     --root is the projects root and notes key, default `repo` from panes.json.
-//     COCKPIT_JOBS_DRY_RUN=1 prints the decisions and argv, and writes nothing: not
-//     the ledger, not a note, not even the cache --fetch filled.
+//     COCKPIT_JOBS_DRY_RUN=1 prints the decisions, argv and each start's settings, and
+//     writes nothing: not the ledger, not a note, not even the cache --fetch filled.
 //
 // The description is untrusted text from a calendar and may hold anything. It
 // reaches only Claude's argv. A log line carries slug, project and state; execFile's
 // error.message is never used anywhere, because it quotes the whole command line.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +24,7 @@ import { DIR, putCacheEntry, readCache, readClient, readState } from "./cockpit-
 import { accessToken, describeError, fetchEvents } from "./cockpit-agenda-google.mjs";
 import { decideJobs, noteText } from "./cockpit-jobs-model.mjs";
 import { buildWallSettings } from "./cockpit-wall-model.mjs";
+import { readWall } from "./cockpit-wall-store.mjs";
 import { pruneLedger, readLedger, writeLedger } from "./cockpit-jobs-store.mjs";
 import { addNote } from "./cockpit-notes.mjs";
 
@@ -31,6 +32,8 @@ const NOTE_AUTHOR = "calendar";
 const START_LIMIT_MS = Number(process.env.COCKPIT_JOBS_START_LIMIT_MS) || 60_000;
 const KILL_GRACE_MS = 2000;
 const FETCH_BACK_MS = 7 * 24 * 60 * 60 * 1000;   // a bound, so a DST day does not matter
+const WALL_CMD_LIMIT_MS = 5000;   // decideJobs is synchronous, so these hold up the daemon
+const GUARD_PATH = fileURLToPath(new URL("./cockpit-jobs-guard.mjs", import.meta.url));
 
 const dryRun = () => process.env.COCKPIT_JOBS_DRY_RUN === "1";
 
@@ -135,15 +138,93 @@ function fetchFailureNotes(calendars, cache, ledger, { log, dry, print }) {
   return { changed, texts };
 }
 
-// Temporary, feature branch only: T04 replaces this with the real facts and the
-// preflight, and is merged with this task. Empty facts mean no branch is protected yet.
-function placeholderWallFor(projectsRoot) {
-  const guardPath = fileURLToPath(new URL("./cockpit-jobs-guard.mjs", import.meta.url));
-  return (project, name) => buildWallSettings({
-    worktree: path.join(projectsRoot, project, ".claude", "worktrees", name),
-    home: os.homedir(), guardPath, commonDir: path.join(projectsRoot, project, ".git"),
-    branches: [], remoteHosts: [], exceptions: {},
+// --- the wall's facts (calendar-agent-sandbox DESIGN 3.4) ----------------------
+
+function git(projectDir, args) {
+  // An inherited GIT_DIR would answer for some other repo. The ceiling stops a broken
+  // project's .git falling through to a repo around it, whose refs would then be the
+  // ones "protected" while this project's stay open.
+  const { GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, ...env } = process.env;
+  return execFileSync("git", args, {
+    cwd: projectDir, encoding: "utf8", timeout: WALL_CMD_LIMIT_MS, maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+    // Physical, as git's own cwd is: a project that is a symlink would walk up past a logical one.
+    env: { ...env, GIT_CEILING_DIRECTORIES: path.dirname(fs.realpathSync(projectDir)) },
   });
+}
+
+/** scp form, URL form, or null for a remote on this disk. */
+function remoteHost(url) {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    try { return new URL(url).hostname.replace(/^\[|\]$/g, "") || null; } catch { return null; }
+  }
+  if (url.startsWith("/") || url.startsWith(".")) return null;
+  return /^(?:[^@/:]+@)?([^/:]+):/.exec(url)?.[1] ?? null;
+}
+
+/**
+ * What buildWallSettings needs to know about one start. Throws when git does: a start
+ * with an empty branch list would look confined and leave every branch movable. Its
+ * message can quote a remote's URL and a token in it, so a catcher must not repeat it.
+ */
+export function wallFacts(project, worktreeName, { projectsRoot, home }) {
+  const dir = path.join(projectsRoot, project);
+  // Absolute: a main checkout answers a relative `.git`, and denyWrite would miss the refs.
+  const commonDir = git(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
+  if (!commonDir) throw new Error("no git dir");
+  // denyWrite protects ref files, and a reftable repo has none: every branch would look
+  // protected and stay movable. Denying reftable/ would stop the agent's own commits.
+  if (fs.existsSync(path.join(commonDir, "reftable"))) {
+    throw Object.assign(new Error("reftable"), { line: "this project stores its branches in a format the wall cannot protect" });
+  }
+  // The full name: refname:short answers `heads/x` when a tag is also called x.
+  const branches = git(dir, ["for-each-ref", "--format=%(refname)", "refs/heads"])
+    .split("\n").filter(Boolean).map((r) => r.replace(/^refs\/heads\//, ""));
+  const urls = git(dir, ["remote", "-v"]).split("\n").filter(Boolean)
+    .map((l) => (l.split("\t")[1] ?? "").replace(/ \((?:fetch|push)\)(?: \[.*\])?$/, ""));
+  const wall = readWall();
+  const row = wall.projects[project];
+  const rowOk = row == null || (typeof row === "object" && !Array.isArray(row));
+  return {
+    worktree: path.join(dir, ".claude", "worktrees", worktreeName),
+    home, commonDir, branches,
+    remoteHosts: [...new Set(urls.map(remoteHost).filter(Boolean))],
+    exceptions: rowOk ? row ?? {} : {},
+    listUnreadable: wall.unreadable || !rowOk,
+  };
+}
+
+/**
+ * Can a wall be set up at all? --bg returns before the session starts, so
+ * failIfUnavailable alone might not reach the tick (DESIGN 2.9). sandbox-exec is found
+ * on PATH, so a test can stub it. The words go into a note.
+ */
+export function preflight({ guardPath }) {
+  try { fs.accessSync(guardPath, fs.constants.R_OK); }
+  catch { return { ok: false, line: "the guard script cannot be read" }; }
+  try {
+    execFileSync("sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], {
+      timeout: WALL_CMD_LIMIT_MS, stdio: "ignore",
+    });
+  } catch { return { ok: false, line: "the sandbox did not run" }; }
+  return { ok: true };
+}
+
+/**
+ * The wallFor decideJobs asks. The preflight runs at the first question, so only a pass
+ * with an entry due pays for it, and once however many are due. Build one per pass.
+ */
+export function buildWallFor({ projectsRoot, home, guardPath = GUARD_PATH }) {
+  let check;
+  return (project, worktreeName) => {
+    check ??= preflight({ guardPath });
+    if (!check.ok) return { unavailable: check.line };
+    let facts;
+    try { facts = wallFacts(project, worktreeName, { projectsRoot, home }); }
+    catch (e) { return { unavailable: e.line ?? "git could not read this project" }; }
+    const { listUnreadable, ...rest } = facts;
+    return { ...buildWallSettings({ ...rest, guardPath }), listUnreadable };
+  };
 }
 
 let ticking = false;
@@ -155,8 +236,9 @@ let ticking = false;
  * `cache` and `print` are for --once: a dry run's fetch stays in memory, and only the
  * command has a person reading its output. The daemon's stdout is daemon.log, which
  * gets pasted into conversations, so with no `print` the dry run's argv goes nowhere.
+ * `guardPath` is for the tests; the real one is beside this file.
  */
-export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () => {}, cache, print = () => {} }) {
+export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () => {}, cache, print = () => {}, guardPath = GUARD_PATH }) {
   if (ticking) return;
   ticking = true;
   try {
@@ -177,7 +259,7 @@ export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () =>
     const decision = decideJobs({
       calendars, cache: seen, ledger, now, projectsRoot, zone,
       projectExists: (name) => fs.existsSync(path.join(projectsRoot, name, ".git")),
-      wallFor: placeholderWallFor(projectsRoot),
+      wallFor: buildWallFor({ projectsRoot, home: os.homedir(), guardPath }),
     });
 
     if (dry) {
@@ -186,6 +268,8 @@ export async function jobsTick({ now, projectsRoot, zone, notesRepo, log = () =>
       for (const s of decision.start) {
         print(`would start ${s.key} in ${s.cwd}`);
         print(`  argv: ${JSON.stringify(["claude", ...s.args])}`);
+        // Again on its own, because a person reads the wall here and the argv is one line.
+        print(`  settings: ${JSON.stringify(JSON.parse(s.args[s.args.indexOf("--settings") + 1]), null, 2)}`);
         log(`jobs: dry run, ${slugOf(s.key)} ${s.project} would start`);
       }
       if (!decision.ledgerChanges.length && !decision.start.length) print("nothing to start");
