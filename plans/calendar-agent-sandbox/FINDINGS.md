@@ -6,6 +6,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T05 review sweep: `runClaude`, a real start, also inherits `GIT_DIR` and `GIT_WORK_TREE` from the daemon or a hand-run `--once`. Fixed only in the trial; read-only, left open. |
+| 2026-11-01 | 📌 | T05 review: fake `claude` `-p` mode unverified against real: final message on stdout, exit status, `--model haiku`. T07's `wall-check.sh` is the first real trial. |
 | 2026-11-01 | 📌 | T05: the trial's `git worktree add` runs outside the wall, so a project's committed `post-checkout` hook runs unconfined. Whether a real `-w` does the same is unmeasured. |
 | 2026-11-01 | 📌 | T05: a trial whose cleanup fails keeps its exit code and names what is left on stderr. T06's skill must show stderr, as dropped exceptions and an unreadable list also go there. |
 | 2026-11-01 | 🐞 | T04 review: fake `claude` unverified against real; T07's `wall-check.sh` is the first real start from this argv. Project folder that is itself a linked worktree: where `-w` lands, and so the guard's root, unmeasured, read-only. |
