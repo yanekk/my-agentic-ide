@@ -16,7 +16,7 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 |---|---|---|---|---|
 | T00 | wall-measurements | — | ✅ | |
 | T01 | wall-rules | T00 | ✅ | |
-| T02 | write-guard | T01 | ⬜ | |
+| T02 | write-guard | T01 | ✅ | |
 | T03 | exceptions-list | T01 | ⬜ | |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
 | T05 | trial-run | T04 | ⬜ | |
