@@ -6,6 +6,9 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 🐞 | T03 review: `agenda wall alpha allow-write ~/src/other` is accepted and at-start `buildWallSettings` keeps it, opening that project's `.git` hooks. Only the own project's overlap is checked. Left open; no task covers it. |
+| 2026-11-01 | 📌 | T03 review: `*.co.uk` and `co.uk` pass `siteProblem`; `*.com` does not. A public-suffix wildcard opens a whole country. T01's rule, left alone. |
+| 2026-11-01 | 📌 | T03 doc says bare `agenda` shows help listing the verb. Bare `agenda` draws the day, by design; `agenda help` lists `wall`. Checked against `agenda help`. |
 | 2026-11-01 | 📌 | `git rev-parse --git-common-dir` answers relative `.git` in a main checkout. `buildWallSettings` trusts `commonDir`, so T04 must pass an absolute path (`--path-format=absolute`) or `denyWrite` misses the real refs. |
 | 2026-11-01 | 📌 | T01 review, real 2.1.316 init against a dead API: built settings give 17 tools with every denied tool gone; a mistyped field gives 26. Fake `claude` proves no acceptance; T07 repeats this. |
 | 2026-11-01 | 🐞 | T00 review: EnterWorktree `path` moved a walled agent into another worktree, where Bash wrote. Denied with ExitWorktree, owner approved; T01 must include both. Daemon restart stays unmeasured, owner accepted. |

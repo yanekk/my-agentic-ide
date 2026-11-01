@@ -6,7 +6,7 @@
 
 **Status:** Plan written, nothing built. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** T00, because its measurements gate the design.
+**Next `pir-work` will:** the next ready task by its dependencies; T03 no longer holds T04 or T06.
 
 ## Tasks
 
@@ -17,14 +17,14 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T00 | wall-measurements | — | ✅ | |
 | T01 | wall-rules | T00 | ✅ | |
 | T02 | write-guard | T01 | ⬜ | |
-| T03 | exceptions-list | T01 | 🔍 | Store and `agenda wall`; 206 new checks. Deviations: exports `validProjectName` from the jobs model; stores `allow-write` with links resolved; refuses the project's `.git` at the command; honours `AGENDA_DRY_RUN`; `remove site|write` require a value; an unreadable read exits 1. |
+| T03 | exceptions-list | T01 | ✅ | Reviewed: one fix, `allow-write ""` stored the cwd, reproduced by a real run, test locks it. Probed odd sites and folders in a scratch home; four mutations went red. Two findings logged open: another project's folder is accepted, `*.co.uk` passes. Done-when help checked against `agenda help`, bare `agenda` draws the day. |
 | T04 | confined-start | T01, T02, T03 | ⬜ | |
 | T05 | trial-run | T04 | ⬜ | |
 | T06 | skill-refactor | T03, T05 | ⬜ | |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** T03
+**Review queue:** *(empty)*
 
 ## Blocked on the user
 
