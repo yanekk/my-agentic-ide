@@ -6,6 +6,10 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | Sweep from T02: `fold` in `bin/cockpit-wall-model.mjs` uses plain `toLowerCase`; APFS opens `ſ` as `s`, so an exception like `~/.ſsh` may pass the secret check. Read-only, person-added only, not fixed. |
+| 2026-11-01 | 📌 | Fake unverified against real: the guard's stdin `cwd` field is only in `guard.test.mjs`. If absent, only the root check runs. `wall-check.sh` (T07) could confirm. |
+| 2026-11-01 | 🐞 | T02 review fixed: guard passed `.claude/ſettings.json` (APFS folds `ſ` to `s`) and `.claude` or `settings.json` as symlinks. Refusal now applies NFKC folding and judges link names. |
+| 2026-11-01 | 📌 | The guard resolves links but not hard links: Bash `ln` of an outside file into the worktree, then Write, is not refused by the guard. Under a `sandbox-exec` deny on the target, `ln` failed (T02 review, stand-in profile); T07 could probe the real wall. |
 | 2026-11-01 | 📌 | `git rev-parse --git-common-dir` answers relative `.git` in a main checkout. `buildWallSettings` trusts `commonDir`, so T04 must pass an absolute path (`--path-format=absolute`) or `denyWrite` misses the real refs. |
 | 2026-11-01 | 📌 | T01 review, real 2.1.316 init against a dead API: built settings give 17 tools with every denied tool gone; a mistyped field gives 26. Fake `claude` proves no acceptance; T07 repeats this. |
 | 2026-11-01 | 🐞 | T00 review: EnterWorktree `path` moved a walled agent into another worktree, where Bash wrote. Denied with ExitWorktree, owner approved; T01 must include both. Daemon restart stays unmeasured, owner accepted. |

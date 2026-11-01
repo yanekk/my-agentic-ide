@@ -63,7 +63,7 @@ impure() {
 # The grep is only worth something if it can fail, so each forbidden thing is
 # planted in a copy, one at a time.
 i=0
-for MODEL in "$ROOT/bin/cockpit-jobs-model.mjs" "$ROOT/bin/cockpit-wall-model.mjs"; do
+for MODEL in "$ROOT/bin/cockpit-jobs-model.mjs" "$ROOT/bin/cockpit-wall-model.mjs" "$ROOT/bin/cockpit-guard-model.mjs"; do
   NAME="$(basename "$MODEL")"
   same "$NAME reaches for nothing impure" "$(impure "$MODEL")" "0"
   while IFS= read -r plant; do
