@@ -25,7 +25,7 @@ Agents started from a jobs calendar (`plans/calendar-agents/`) run unattended wi
 ### Success criteria
 
 - Every calendar start carries the wall. A start that cannot be confined does not run and leaves one note.
-- A real run completes a build-and-test job in its worktree, and in the same run writes outside it, secret reads and a push are refused.
+- A real run completes a build-and-test job in its worktree. Outside writes, secret reads and a push were measured refused in T00; the T07 recheck proves Claude took the settings and an unlisted site is blocked, not those refusals (owner, 2026-11-01: a safety classifier stopped an agent told to attack).
 - `scheduled-run` shows the owner what a job would hit, before the entry exists.
 - Only the owner can add an exception, and no exception opens a listed secret or a push remote.
 
@@ -95,10 +95,10 @@ Published in README, `docs/cockpit.md` and the skill, because a wall of unknown 
 - Reads of everything else on the machine (measured: `~/.zshrc`, other repos).
 - The keychain: `security find-generic-password` found `Claude Code-credentials` from inside the sandbox. T00 measures whether the secret can be read.
 - Commits take effect when merged and run; the wall ends at the merge.
-- Temporary folders are writable. An allowed site could receive data.
+- Temporary folders are writable, including macOS's per-user folder from `getconf DARWIN_USER_TEMP_DIR`, because `mktemp -d` ignores `TMPDIR` (owner, 2026-11-01). An agent could alter other programs' temporary files there. An allowed site could receive data.
 - Tags and unreachable git objects in the shared store, and any branch created after the run started: the deny list is taken once, at the start.
 - Other unconfined sessions run as the owner and can edit `jobs-wall.json`.
-- Results are for Claude Code 2.1.316, which updates itself. `wall-check.sh` is the recheck, run by hand.
+- Results are for Claude Code 2.1.316, which updates itself. `wall-check.sh` is the recheck, run by hand; it does not re-prove refused secret reads, push or branch moves.
 - Apps already running that accept Apple Events: measured with Terminal not running only (T00).
 
 ### 2.9 Unhappy paths

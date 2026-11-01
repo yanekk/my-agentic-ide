@@ -53,6 +53,19 @@ done
 
 same "the real ledger is untouched" "$(ledger_sig "$REAL_LEDGER")" "$LEDGER_BEFORE"
 
+# --- wall-check.sh --clean, against a claude that cannot answer or keeps an agent -----
+clean_case() { # fake-claude-body
+  local h="$T/clean-home-$RANDOM" b="$T/clean-bin-$RANDOM"
+  mkdir -p "$h/.wall-check-scratch" "$b"
+  : > "$h/.wall-check-scratch/made"
+  printf '#!/bin/sh\n%s\n' "$1" > "$b/claude"; chmod +x "$b/claude"
+  HOME="$h" PATH="$b:$PATH" bash "$HERE/wall-check.sh" --clean >/dev/null 2>&1
+  echo "$? $([ -f "$h/.wall-check-scratch/made" ] && echo kept || echo gone)"
+}
+same "--clean: unreadable agents fail and keep the manifest" "$(clean_case 'exit 1')" "1 kept"
+same "--clean: an agent left fails and keeps the manifest" "$(clean_case '[ "$1" = agents ] && echo "[{\"id\":\"a\",\"name\":\"p / wall-check build 1\"}]"; exit 0')" "1 kept"
+same "--clean: nothing left removes the scratch" "$(clean_case '[ "$1" = agents ] && echo "[]"; exit 0')" "0 gone"
+
 # --- the pure models keep their side of the boundary (DESIGN 3.1) ----------
 # If this fails, the fix is to MOVE THE CODE, never to relax the grep: every rule
 # that leaks across this line needs a rig instead of a millisecond test.

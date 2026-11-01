@@ -6,9 +6,15 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T07 review sweep: `spikes/calendar-wall-spike/clean.sh` has `--clean`'s fault, a failing `claude agents` reads as none left, then removes its scratch. Not fixed. |
+| 2026-11-01 | 📌 | T07 review: `wall-check.sh` passes superfrog whatever `tools/smoke.sh` scores, printing counts only; 5 of 117 failing or 100 both read as expected. No threshold decided. |
+| 2026-11-01 | 🐞 | T07 review, reproduced by planted inputs, fixed, tests lock them: `userTemp` of root, home or holding `.git` widened `allowWrite`; `judgeTrial` trusted the agent's words, now tool result too; `--clean` called unreadable agents clean. |
+| 2026-11-01 | 📌 | T07, worker-driven, Claude 2.1.316: `wall-check.sh` ALL AS EXPECTED. 17 tools against 87; notes-test, npm, venv pip, commit passed; superfrog smoke finished, 5 of 117 failing; trial named pass and `example.com` block, cleaned up. Ledger, agenda, mains unchanged; `--clean` run. |
+| 2026-11-01 | 🔄 | T07: real attack agent stopped by a safety classifier, then declined; nothing attempted. Owner dropped the attack run. Outside writes, secrets, push and `update-ref` rest on T00 only; DESIGN §1, §2.8 say so. T08 must publish it. |
+| 2026-11-01 | 🔄 | T07: `mktemp -d` ignores `TMPDIR` on macOS, refused inside the wall, failing every suite using it. Owner opened `getconf DARWIN_USER_TEMP_DIR` at every start; published in §2.8. Superfrog went from 6 to 5 failures. |
+| 2026-11-01 | 📌 | T07: a `-w` session refuses `bash x.sh > log; echo $?` as too complex to verify; plain `bash x.sh` runs, and `tools/smoke.sh > log; echo $?` runs. A calendar description should use the plain form. |
 | 2026-11-01 | 📌 | Measured on 2.1.316 init against a dead API: a symlinked folder under `~/.claude/skills` loads, and so does `old.bak-1` beside it. So `install.sh` keeps the old skill at `~/.claude/scheduled-run.bak-{ts}`. |
 | 2026-11-01 | 📌 | T05 review sweep: `runClaude`, a real start, also inherits `GIT_DIR` and `GIT_WORK_TREE` from the daemon or a hand-run `--once`. Fixed only in the trial; read-only, left open. |
-| 2026-11-01 | 📌 | T05 review: fake `claude` `-p` mode unverified against real: final message on stdout, exit status, `--model haiku`. T07's `wall-check.sh` is the first real trial. |
 | 2026-11-01 | 📌 | T05: the trial's `git worktree add` runs outside the wall, so a project's committed `post-checkout` hook runs unconfined. Whether a real `-w` does the same is unmeasured. |
 | 2026-11-01 | 📌 | T05: a trial whose cleanup fails keeps its exit code and names what is left on stderr. T06's skill must show stderr, as dropped exceptions and an unreadable list also go there. |
 | 2026-11-01 | 🐞 | T04 review: fake `claude` unverified against real; T07's `wall-check.sh` is the first real start from this argv. Project folder that is itself a linked worktree: where `-w` lands, and so the guard's root, unmeasured, read-only. |
