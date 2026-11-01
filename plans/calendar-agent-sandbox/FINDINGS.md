@@ -6,6 +6,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T04: `remoteHosts` comes from `git remote -v`, so an `~/.ssh/config` alias yields the alias, not the real host. A site exception for the real push host then passes. SSH stays refused at the proxy; HTTPS to it would not. |
 | 2026-11-01 | 🐞 | T03 review: `agenda wall alpha allow-write ~/src/other` is accepted and at-start `buildWallSettings` keeps it, opening that project's `.git` hooks. Only the own project's overlap is checked. Left open; no task covers it. |
 | 2026-11-01 | 📌 | T03 review: `*.co.uk` and `co.uk` pass `siteProblem`; `*.com` does not. A public-suffix wildcard opens a whole country. T01's rule, left alone. |
 | 2026-11-01 | 📌 | T03 doc says bare `agenda` shows help listing the verb. Bare `agenda` draws the day, by design; `agenda help` lists `wall`. Checked against `agenda help`. |

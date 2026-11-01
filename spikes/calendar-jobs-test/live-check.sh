@@ -4,8 +4,9 @@
 #
 #   live-check.sh <calendarId> <account>
 #
-# STARTS A REAL UNATTENDED AGENT from every entry on that calendar now inside its time
-# window. Everything else happens in a 0600 scratch COCKPIT_DIR, always deleted: the
+# STARTS A REAL UNATTENDED AGENT, inside the wall, from every entry on that calendar now
+# inside its time window; it refuses if the dry run shows a start without the wall.
+# Everything else happens in a 0600 scratch COCKPIT_DIR, always deleted: the
 # live daemon runs older code and would overwrite the real cache without descriptions,
 # and `agenda add` stays refused to agents.
 #
@@ -14,13 +15,14 @@
 #
 #   LIVE_COCKPIT_DIR  where the real files are; default $HOME/.claude/cockpit
 #   LIVE_ROOT         projects root; default `repo` from the real panes.json
+#   LIVE_JOBS_BIN     the program to run; default bin/cockpit-jobs.mjs (tests only)
 #
 # Exit 0 all three passes ran, 1 a pass failed, 2 not checkable.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-JOBS="$ROOT/bin/cockpit-jobs.mjs"
+JOBS="${LIVE_JOBS_BIN:-$ROOT/bin/cockpit-jobs.mjs}"
 REAL="${LIVE_COCKPIT_DIR:-$HOME/.claude/cockpit}"
 
 if [ "$#" -ne 2 ]; then echo "usage: live-check.sh <calendarId> <account>" >&2; exit 2; fi
@@ -68,7 +70,21 @@ pass() { # label, then any env settings
   if [ -e "$S/calendar-jobs.json" ]; then node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1],"utf8"))' "$S/calendar-jobs.json"; else echo "(none)"; fi
 }
 
-pass "dry run" COCKPIT_JOBS_DRY_RUN=1
+# Not through a pipe, which would run pass in a subshell and lose its rc.
+pass "dry run" COCKPIT_JOBS_DRY_RUN=1 > "$S/dry-run.txt"
+node -e 'process.stdout.write(require("fs").readFileSync(process.argv[1],"utf8"))' "$S/dry-run.txt"
+
+# Every printed start must carry the wall, or no real one is made from it.
+while IFS= read -r line; do
+  case "$line" in
+    "  argv: "*)
+      case "$line" in
+        *'"--permission-mode","dontAsk"'*'"--settings"'*'"--setting-sources","user"'*'"--strict-mcp-config"'*) ;;
+        *) echo "live-check: the dry run shows a start with no wall; running nothing real" >&2; exit 1 ;;
+      esac ;;
+  esac
+done < "$S/dry-run.txt"
+
 pass "first real pass" COCKPIT_JOBS_DRY_RUN=0
 pass "second real pass, must start nothing" COCKPIT_JOBS_DRY_RUN=0
 
