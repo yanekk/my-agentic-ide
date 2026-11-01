@@ -91,7 +91,7 @@ const shellQuote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
  * The settings of one run. An exception that fails is dropped and reported, never
  * applied: the file can be edited by hand, so the command's refusal is not enough.
  */
-export function buildWallSettings({ worktree, home, guardPath, commonDir, branches, remoteHosts, exceptions }) {
+export function buildWallSettings({ worktree, home, guardPath, commonDir, branches, remoteHosts, exceptions, userTemp }) {
   const dropped = [];
   const drop = (kind, value, why) => dropped.push({ kind, value: typeof value === "string" ? value : JSON.stringify(value), why });
   const list = (key, kind) => {
@@ -111,7 +111,9 @@ export function buildWallSettings({ worktree, home, guardPath, commonDir, branch
     if (!sites.includes(site)) sites.push(site);
   }
 
-  const allowWrite = [];
+  // macOS mktemp uses this per-user folder and ignores TMPDIR, so without it every script's
+  // `mktemp -d` is refused (measured, T07). Owner's choice; published in DESIGN 2.8.
+  const allowWrite = typeof userTemp === "string" && userTemp.startsWith("/") ? [tidy(userTemp)] : [];
   const gitDir = fold(tidy(commonDir));
   for (const value of list("write", "write")) {
     const check = validateException("write", value, { home });

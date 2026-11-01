@@ -53,6 +53,12 @@ section("2.2 the settings, shape pinned");
   ok("the fail-shut tail is last", command.endsWith(" || exit 2"));
 }
 
+section("macOS's temp folder, where mktemp writes (T07)");
+eq("given, it is writable", sandboxOf({ userTemp: "/private/var/folders/ab/T/" }).filesystem.allowWrite, ["/private/var/folders/ab/T"]);
+eq("not found, no folder is added", sandboxOf({ userTemp: null }).filesystem.allowWrite, undefined);
+eq("a relative answer is not used", sandboxOf({ userTemp: "tmp" }).filesystem.allowWrite, undefined);
+eq("beside an exception", sandboxOf({ userTemp: "/t", exceptions: { write: ["/data/x"] } }).filesystem.allowWrite, ["/t", "/data/x"]);
+
 section("the description cannot reach the wall");
 {
   const E = { id: "e", title: "p / i", start: 1000, end: 2000, allDay: false, creatorOwn: true };

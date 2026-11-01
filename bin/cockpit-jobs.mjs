@@ -177,6 +177,14 @@ function remoteHost(url) {
   return /^(?:[^@/:]+@)?([^/:]+):/.exec(url)?.[1] ?? null;
 }
 
+/** Where macOS's mktemp writes. None found means no extra folder: the safe direction. */
+function userTempDir() {
+  try {
+    const dir = execFileSync("getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8", timeout: WALL_CMD_LIMIT_MS, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return dir ? fs.realpathSync(dir) : null;
+  } catch { return null; }
+}
+
 /**
  * What buildWallSettings needs to know about one start. Throws when git does: a start
  * with an empty branch list would look confined and leave every branch movable. Its
@@ -202,7 +210,7 @@ export function wallFacts(project, worktreeName, { projectsRoot, home }) {
   const rowOk = row == null || (typeof row === "object" && !Array.isArray(row));
   return {
     worktree: path.join(dir, ".claude", "worktrees", worktreeName),
-    home, commonDir, branches,
+    home, commonDir, branches, userTemp: userTempDir(),
     remoteHosts: [...new Set(urls.map(remoteHost).filter(Boolean))],
     exceptions: rowOk ? row ?? {} : {},
     listUnreadable: wall.unreadable || !rowOk,

@@ -21,10 +21,10 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T04 | confined-start | T01, T02, T03 | ✅ | |
 | T05 | trial-run | T04 | ✅ | |
 | T06 | skill-refactor | T03, T05 | ⬜ | |
-| T07 | wall-check | T04, T05 | ⬜ | |
+| T07 | wall-check | T04, T05 | 🔍 | `wall-check.sh`, judge with 13 tests. All three runs as expected, `--clean` run. Deviations, owner decided: attack run dropped after a safety classifier stopped it; wall now opens macOS's user temp folder, touching `bin/` and DESIGN §1, §2.8. Added judge and helper files. |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T07
 
 ## Blocked on the user
 
