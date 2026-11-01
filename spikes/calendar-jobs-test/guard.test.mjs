@@ -33,6 +33,7 @@ section("guardVerdict directly");
   ok(".claude/settings.json refused", !v("/a/wt/.claude/settings.json"));
   ok(".claude/settings.local.json refused", !v("/a/wt/.claude/settings.local.json"));
   ok(".CLAUDE/SETTINGS.JSON refused", !v("/a/wt/.CLAUDE/SETTINGS.JSON"));
+  ok(".claude/\u017Fettings.json refused, the disk folds \u017F to s", !v("/a/wt/.claude/\u017Fettings.json"));
   for (const t of ["Write", "Edit", "NotebookEdit"]) ok(`${t} known`, v("/a/wt/x", t));
   for (const t of ["Bash", "MultiEdit", "", undefined, "constructor"]) ok(`${t} refused`, !guardVerdict({ root: "/a/wt", resolvedPath: "/a/wt/x", toolName: t }).allow);
   const refused = guardVerdict({ root: "/a/wt", resolvedPath: "/secret/name", toolName: "Write" });
@@ -116,6 +117,16 @@ try {
   eq(".git/hooks/x", ask(join(wt, ".git/hooks/x")), 2);
   eq(".claude/settings.local.json", ask(join(wt, ".claude/settings.local.json")), 2);
   eq(".claude/other", ask(join(wt, ".claude/other")), 0);
+  eq("the folded name, not yet on disk", ask(join(wt, ".claude/\u017Fettings.json")), 2);
+  mkdirSync(join(wt, "c-real"));
+  mkdirSync(join(wt, "nest"));
+  symlinkSync("../c-real", join(wt, "nest/.claude"));
+  eq(".claude as a link: the name it is used by counts", ask(join(wt, "nest/.claude/settings.json")), 2);
+  eq(".claude as a link: other files still fine", ask(join(wt, "nest/.claude/other")), 0);
+  symlinkSync("../c-real/x", join(wt, ".claude/settings.json"));
+  eq("settings.json as a link", ask(join(wt, ".claude/settings.json")), 2);
+  symlinkSync("../c-real", join(wt, "nest/.git"));
+  eq(".git as a link", ask(join(wt, "nest/.git/config")), 2);
 
   section("the hook: notebook_path");
   const nb = (p, extra) => ask(p, { tool: "NotebookEdit", field: "notebook_path", extra });

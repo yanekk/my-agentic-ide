@@ -20,7 +20,11 @@ const MAX_LINKS = 40; // the same bound the kernel uses, so a loop ends in a ref
 // deepest existing parent: a link whose target does not exist yet makes a parent
 // check call it "new file inside", and the write then lands at the target. Not
 // path.resolve first either: `link/..` means the parent of the link's TARGET.
-function resolveOnDisk(path) {
+//
+// `crossed` collects the path as it read at each link, with the link's own name: a
+// `.claude` that is a link to `c2` makes the real target c2/settings.json, and the
+// session still reads it as .claude/settings.json.
+function resolveOnDisk(path, crossed = []) {
   const pending = path.split("/").filter(Boolean);
   let existing = "/";
   const missing = [];
@@ -45,6 +49,7 @@ function resolveOnDisk(path) {
     }
     if (stat.isSymbolicLink()) {
       if (++links > MAX_LINKS) throw new Error("too many links");
+      crossed.push(join(realpathSync.native(existing), piece, ...pending));
       const target = readlinkSync(next);
       if (isAbsolute(target)) existing = "/";
       pending.unshift(...target.split("/").filter(Boolean));
@@ -79,8 +84,13 @@ function decide(argv, stdinText) {
   for (const base of bases) {
     const joined = base ? `${base}/${raw}` : raw;
     for (const candidate of [joined, resolve(joined)]) {
-      const verdict = guardVerdict({ root, resolvedPath: resolveOnDisk(candidate), toolName });
-      if (!verdict.allow) return verdict;
+      const crossed = [];
+      const resolved = resolveOnDisk(candidate, crossed);
+      // Only names inside the root: a link on the way TO the root (/tmp) is no verdict.
+      for (const resolvedPath of [resolved, ...crossed.filter((p) => p.startsWith(`${root}/`))]) {
+        const verdict = guardVerdict({ root, resolvedPath, toolName });
+        if (!verdict.allow) return verdict;
+      }
     }
   }
   return { allow: true, reason: "inside the worktree" };

@@ -50,9 +50,11 @@ export function guardVerdict({ root, resolvedPath, toolName }) {
     return refuse("writes outside the worktree are refused");
   }
 
-  // Lower-cased because macOS file systems are case-insensitive: .GIT/hooks/x is
-  // .git/hooks/x. At any depth, because a nested repository's .git behaves the same.
-  const parts = resolvedPath.slice(root.length + 1).toLowerCase().split("/");
+  // Folded because macOS file systems ignore case, and more than plain case: measured
+  // on APFS, a file created as `\u017Fettings.json` opens as `settings.json`, which
+  // toLowerCase leaves alone and NFKC does not. At any depth, because a nested
+  // repository's .git behaves the same.
+  const parts = resolvedPath.slice(root.length + 1).normalize("NFKC").toLowerCase().split("/");
   if (parts.includes(".git")) return refuse("writes into .git are refused");
   for (let i = 0; i + 1 < parts.length; i++) {
     if (parts[i] === ".claude" && parts[i + 1].startsWith("settings")) {
