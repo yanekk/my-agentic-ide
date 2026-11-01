@@ -6,6 +6,7 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | Measured on 2.1.316 init against a dead API: a symlinked folder under `~/.claude/skills` loads, and so does `old.bak-1` beside it. So `install.sh` keeps the old skill at `~/.claude/scheduled-run.bak-{ts}`. |
 | 2026-11-01 | 📌 | T05 review sweep: `runClaude`, a real start, also inherits `GIT_DIR` and `GIT_WORK_TREE` from the daemon or a hand-run `--once`. Fixed only in the trial; read-only, left open. |
 | 2026-11-01 | 📌 | T05 review: fake `claude` `-p` mode unverified against real: final message on stdout, exit status, `--model haiku`. T07's `wall-check.sh` is the first real trial. |
 | 2026-11-01 | 📌 | T05: the trial's `git worktree add` runs outside the wall, so a project's committed `post-checkout` hook runs unconfined. Whether a real `-w` does the same is unmeasured. |
