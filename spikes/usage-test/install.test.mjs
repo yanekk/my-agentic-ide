@@ -12,9 +12,9 @@
 // subprocess, so the tests exercise the same code path bin/install.sh runs.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, lstatSync, chmodSync, readlinkSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), "..", "..");
 const TAP = join(ROOT, "bin", "cockpit-usage-tap.mjs");
@@ -180,6 +180,146 @@ console.log("== install / uninstall ==");
   ok("...no temp file is left behind", !existsSync(`${c.settings}.tmp`));
   ok("...and the 0600 permissions are preserved", (statSync(c.settings).mode & 0o777) === 0o600,
      (statSync(c.settings).mode & 0o777).toString(8));
+}
+
+// --- bin/install.sh links the scheduled-run skill (calendar-agent-sandbox T06) ---
+// Driven through the real installer in a scratch HOME. Its prerequisite check looks
+// through a login shell, whose PATH includes $HOME/.local/bin, so stand-ins there let
+// it pass on any machine; only `node` must be real, because the installer runs it.
+console.log("== the installer links the scheduled-run skill ==");
+
+const INSTALL = join(ROOT, "bin", "install.sh");
+const SKILL_DIR = join(ROOT, "skills", "scheduled-run");
+const REAL_SKILL = join(homedir(), ".claude", "skills", "scheduled-run");
+const lstatOf = (p) => { try { const s = lstatSync(p); return `${s.ino}:${s.mtimeMs}`; } catch { return "absent"; } };
+const realBefore = lstatOf(REAL_SKILL);
+
+function scratchHome() {
+  const home = join(T, `home${++seq}`);
+  const bin = join(home, ".local", "bin");
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(join(home, "src"));
+  mkdirSync(join(home, ".claude"));
+  for (const tool of ["wezterm", "revdiff", "claude", "git", "micro", "broot"]) {
+    writeFileSync(join(bin, tool), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  }
+  symlinkSync(process.execPath, join(bin, "node"));
+  return home;
+}
+function installer(home, ...args) {
+  const env = { ...process.env, HOME: home, PIR_HOME: join(home, "pir") };
+  delete env.COCKPIT_DIR;
+  delete env.COCKPIT_START_DIR;
+  try {
+    return { out: execFileSync("bash", [INSTALL, "--start-dir", join(home, "src"), ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], cwd: home }), code: 0 };
+  } catch (e) {
+    return { out: (e.stdout ?? "") + (e.stderr ?? ""), code: e.status ?? 1 };
+  }
+}
+const skillLink = (home) => join(home, ".claude", "skills", "scheduled-run");
+const backups = (home) => readdirSync(join(home, ".claude")).filter((n) => n.startsWith("scheduled-run.bak-"));
+const linkOf = (p) => { try { return readlinkSync(p); } catch { return null; } };
+
+{ // A fresh home gets the link; a second run changes nothing.
+  const home = scratchHome();
+  const r = installer(home);
+  ok("fresh home: the installer succeeds", r.code === 0, r.out);
+  ok("fresh home: the link is made", linkOf(skillLink(home)) === SKILL_DIR, linkOf(skillLink(home)));
+  ok("fresh home: no backup", backups(home).length === 0);
+  const before = lstatOf(skillLink(home));
+  const again = installer(home);
+  ok("second run: says it already points here", again.code === 0 && /scheduled-run[^\n]*already points here/.test(again.out), again.out);
+  ok("second run: the link itself is not rewritten", lstatOf(skillLink(home)) === before);
+}
+
+{ // A real folder is the user's: moved aside whole, once, and never left under skills/.
+  const home = scratchHome();
+  const real = skillLink(home);
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, "SKILL.md"), "my own edits\n");
+  const r = installer(home);
+  ok("existing folder: the installer succeeds", r.code === 0, r.out);
+  ok("existing folder: replaced by the link", linkOf(real) === SKILL_DIR, linkOf(real));
+  const b = backups(home);
+  ok("existing folder: moved aside as scheduled-run.bak-{ts}", b.length === 1 && /^scheduled-run\.bak-\d+$/.test(b[0]), b.join());
+  ok("existing folder: its contents survive", b.length === 1 && readFileSync(join(home, ".claude", b[0], "SKILL.md"), "utf8") === "my own edits\n");
+  ok("existing folder: the output names the backup", b.length === 1 && r.out.includes(b[0]), r.out);
+  ok("the backup is outside skills/, where Claude would load it as a skill",
+     readdirSync(join(home, ".claude", "skills")).join() === "scheduled-run", readdirSync(join(home, ".claude", "skills")).join());
+  installer(home);
+  ok("second run: no second backup", backups(home).length === 1, backups(home).join());
+}
+
+{ // A link to a moved or older checkout is ours to re-point, and holds nothing to back up.
+  const home = scratchHome();
+  mkdirSync(join(home, ".claude", "skills"));
+  symlinkSync("/old/place/skills/scheduled-run", skillLink(home));
+  installer(home);
+  ok("stale link: re-pointed", linkOf(skillLink(home)) === SKILL_DIR, linkOf(skillLink(home)));
+  ok("stale link: no backup", backups(home).length === 0);
+}
+
+{ // --check plans and writes nothing.
+  const home = scratchHome();
+  const real = skillLink(home);
+  mkdirSync(real, { recursive: true });
+  const r = installer(home, "--check");
+  ok("--check: says it will move the copy aside", r.code === 0 && r.out.includes("will move your copy aside"), r.out);
+  ok("--check: the folder stays a real folder", linkOf(real) === null && existsSync(real) && backups(home).length === 0);
+}
+
+ok("the real ~/.claude/skills entry was never touched", lstatOf(REAL_SKILL) === realBefore);
+
+// --- the skill names only what exists ------------------------------------------
+// Asked of the programs themselves, so wording cannot drift from what they accept.
+console.log("== the skill names flags and verbs that exist ==");
+
+const SKILL = readFileSync(join(SKILL_DIR, "SKILL.md"), "utf8");
+const JOBS = join(ROOT, "bin", "cockpit-jobs.mjs");
+const AGENDA = join(ROOT, "bin", "cockpit-agenda.mjs");
+const cleanEnv = (extra = {}) => { const e = { ...process.env, ...extra }; delete e.CLAUDECODE; return e; };
+const capture = (cmd, args, env = cleanEnv()) => {
+  try { return { out: execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env }), code: 0 }; }
+  catch (e) { return { out: (e.stdout ?? "") + (e.stderr ?? ""), code: e.status ?? 1 }; }
+};
+
+ok("no \"bypass\" left in the skill", !/bypass/i.test(SKILL));
+
+const usage = capture("node", [JOBS, "--trial"]).out;
+const block = SKILL.match(/```sh\n((?:(?!```)[\s\S])*--trial(?:(?!```)[\s\S])*)```/)?.[1] ?? "";
+const trialLine = block.split("\n").find((l) => l.includes("--trial")) ?? "";
+const flags = trialLine.match(/--[a-z-]+/g) ?? [];
+ok("the skill has a trial command", flags.includes("--trial"), trialLine);
+for (const f of flags) ok(`trial flag ${f} is in the usage text`, usage.includes(f), usage);
+for (const f of ["--project", "--root", "--commands-file"]) ok(`the skill passes required ${f}`, flags.includes(f));
+
+const agendaHelp = capture("node", [AGENDA, "help"], cleanEnv({ COCKPIT_DIR: join(T, "agenda-help") })).out;
+const lines = [...SKILL.matchAll(/`agenda wall \{project\} ([^`]*)`/g)].map((m) => m[1]);
+const verbs = lines.map((l) => l.split(" ")[0]);
+for (const v of ["allow-site", "allow-ports", "allow-write", "remove"]) ok(`the skill gives ${v}`, verbs.includes(v), verbs.join());
+for (const v of verbs) ok(`agenda wall verb ${v} is in the help`, agendaHelp.includes(`agenda wall <project> ${v}`), agendaHelp);
+
+{ // The skill's own block, as written, against a scratch machine: accepted by the real command.
+  const home = scratchHome();
+  const checkout = join(home, "checkout");
+  mkdirSync(join(checkout, "wezterm"), { recursive: true });
+  symlinkSync(join(ROOT, "bin"), join(checkout, "bin"));
+  symlinkSync(join(checkout, "wezterm", "cockpit.lua"), join(home, ".wezterm.lua"));
+  mkdirSync(join(home, ".claude", "cockpit"));
+  writeFileSync(join(home, ".claude", "cockpit", "config.lua"), `return {\n  repo = "${checkout}",\n  start_dir = "${join(home, "src")}",\n}\n`);
+  const project = join(home, "src", "demo");
+  mkdirSync(project);
+  const git = (...a) => capture("/usr/bin/git", ["-C", project, ...a], cleanEnv({ HOME: home }));
+  git("init", "-q");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first");
+  const script = block.replaceAll("{project}", "demo");
+  const r = capture("bash", ["-c", script], cleanEnv({ HOME: home, COCKPIT_JOBS_DRY_RUN: "1", COCKPIT_DIR: join(home, ".claude", "cockpit") }));
+  ok("the skill's block runs as written (dry run)", r.code === 0 && r.out.includes("would run a trial in") && r.out.includes("wall-trial-"), r.out);
+  ok("...and carries the commands written into it", r.out.includes("{short test command}"), r.out);
+
+  // No ~/.wezterm.lua link (installed with --no-link): config.lua answers instead.
+  const noLink = capture("bash", ["-c", `rm "$HOME/.wezterm.lua"; ${script}`], cleanEnv({ HOME: home, COCKPIT_JOBS_DRY_RUN: "1", COCKPIT_DIR: join(home, ".claude", "cockpit") }));
+  ok("...and without the wezterm link", noLink.code === 0 && noLink.out.includes("would run a trial in"), noLink.out);
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);

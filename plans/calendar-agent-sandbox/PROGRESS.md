@@ -6,7 +6,7 @@
 
 **Status:** Plan written, nothing built. The live calendar stays on and unconfined until merge and window reopen.
 **Last updated:** 2026-11-01
-**Next `pir-work` will:** T00, because its measurements gate the design.
+**Next `pir-work` will:** review T06.
 
 ## Tasks
 
@@ -20,11 +20,11 @@ Legend: ⬜ not started · 🟡 in progress · 🔍 implemented, awaiting review
 | T03 | exceptions-list | T01 | ✅ | |
 | T04 | confined-start | T01, T02, T03 | ✅ | |
 | T05 | trial-run | T04 | ✅ | |
-| T06 | skill-refactor | T03, T05 | ⬜ | |
+| T06 | skill-refactor | T03, T05 | 🔍 | Skill in `skills/scheduled-run/`, installer link, 57 new checks; walked with fake `claude`. Deviation: backup goes to `~/.claude/scheduled-run.bak-{ts}`, not beside the link: Claude loads any folder under `skills/`, measured. Added: `readlink` falls back to `config.lua`; declined trial allowed. |
 | T07 | wall-check | T04, T05 | ⬜ | |
 | T08 | docs | T06, T07 | ⬜ | |
 
-**Review queue:** *(empty)*
+**Review queue:** T06
 
 ## Blocked on the user
 
