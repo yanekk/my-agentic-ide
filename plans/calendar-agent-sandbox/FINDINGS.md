@@ -6,6 +6,8 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T08 review: RESULTS.md measured `CronDelete` running with no allow rule; `DENY_TOOLS` omits it. Left open; effect on a walled run unmeasured. |
+| 2026-11-01 | 📌 | T08 review sweep: docs/cockpit.md testing section has other stale counts, cockpit-test 174 (CLAUDE.md 959), bitbucket-test 312 plus 6 (CLAUDE.md 516), and no entry for `spikes/calendar-jobs-test`. Not fixed. |
 | 2026-11-01 | 📌 | T07 review sweep: `spikes/calendar-wall-spike/clean.sh` has `--clean`'s fault, a failing `claude agents` reads as none left, then removes its scratch. Not fixed. |
 | 2026-11-01 | 📌 | T07 review: `wall-check.sh` passes superfrog whatever `tools/smoke.sh` scores, printing counts only; 5 of 117 failing or 100 both read as expected. No threshold decided. |
 | 2026-11-01 | 🐞 | T07 review, reproduced by planted inputs, fixed, tests lock them: `userTemp` of root, home or holding `.git` widened `allowWrite`; `judgeTrial` trusted the agent's words, now tool result too; `--clean` called unreadable agents clean. |
