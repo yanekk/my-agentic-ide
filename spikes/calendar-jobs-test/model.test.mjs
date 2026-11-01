@@ -88,6 +88,18 @@ section("2.3 only a fresh, complete fetch decides");
     { id: "n", summary: "superfrog", description: "go", creator: { self: true }, start: { dateTime: "2026-11-01T20:00:00Z" }, end: { dateTime: "2026-11-01T23:00:00Z" } },
     { slug: "night", tz: ZONE, selfEmail: "me@x.y", jobs: true });
   eq("a real jobs normalised event starts", decide({ events: [jobsFetch] }).start.length, 1);
+  // Measured in T06 on a secondary calendar: the creator carries an email and no `self`,
+  // and `self` sits on the organizer, which is the calendar. Only the email can match.
+  const measured = (creator) => normaliseEvent(
+    { id: "n", summary: "superfrog", description: "go", creator,
+      organizer: { email: "x@group.calendar.google.com", displayName: "agents", self: true },
+      start: { dateTime: "2026-11-01T20:00:00+01:00", timeZone: "Europe/Warsaw" },
+      end: { dateTime: "2026-11-01T23:00:00+01:00", timeZone: "Europe/Warsaw" } },
+    { slug: "night", tz: ZONE, selfEmail: "me@x.y", jobs: true });
+  eq("real shape, the account's own email: mine", measured({ email: "me@x.y" }).creatorOwn, true);
+  eq("real shape, another email: not mine, whatever the organizer says",
+    measured({ email: "you@x.y" }).creatorOwn, false);
+  eq("real shape, no creator: not mine", measured(undefined).creatorOwn, false);
 }
 const atEnd = END + 10 * MIN;
 ok("stale by over 5 minutes: nothing starts",

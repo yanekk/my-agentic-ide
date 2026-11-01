@@ -8,6 +8,12 @@ Legend: 🐞 defect found · ✅ verified by hand with the user · 📌 worth kn
 
 | Date | | Finding |
 |---|---|---|
+| 2026-11-01 | 📌 | T06 review: `creatorOwn` compares `creator.email` to the account case-sensitively, as DESIGN §2.2 says; `Me@X.y` against `me@x.y` is refused, by probe. Real sample matched, lowercase. Fails closed. Left alone. |
+| 2026-11-01 | 📌 | T06, worker-driven: connector entry started real agent `ca48ca0a`, `idle`/`done`, in worktree `cal-20261101-0756-1c15`. All-day entry refused with a note; second pass started nothing. Real `agenda.json` unchanged (503 bytes, same mtime). |
+| 2026-11-01 | 📌 | T06, worker-driven: final message judged against DESIGN §2.5: outcome, what was done and decisions stated; "left to do" said nothing remained, commit unpushed. Passes. |
+| 2026-11-01 | 🐞 | T06: real events on a secondary calendar have `creator.email` without `creator.self`; `self` is on `organizer`. Fakes assumed `creator.self`. Ownership holds only through the `selfEmail` comparison; test added. `description` matched. Hand-made entries remain unmeasured. |
+| 2026-11-01 | 📌 | T06: connector has no create or delete calendar tool; the owner did both by hand as `calendar-agents`. Connector signed in as the agenda account; it reports `creator` as Google's API does, and created and deleted entries. |
+| 2026-11-01 | 📌 | T06: bare `claude rm` exits 1, keeps the agent, prints `--discard-unpushed {commit}@{worktree-id}`. With that value, owner's yes: agent, worktree and branch gone; `main` unchanged at `052bf9e`. The run passes the `ask` rule through `--settings`; the owner also answered in words. |
 | 2026-11-01 | 🐞 | T05 review: fake unverified against real: section 13j's fake Google events carry `creator.self` and `description`. No recorded real sample; T06's live check is the first real one. |
 | 2026-11-01 | 🐞 | T05 review, not fixed: `CLAUDE.md` says agenda-test has 637 checks; its node suites now count 730 plus 15 bash, since T03. |
 | 2026-10-31 | 🐞 | T04 review sweep, not fixed: `bin/cockpitd.mjs:2451` `execFileAsync("claude", ["agents", "--json"])` has a SIGTERM-only limit, so a child ignoring SIGTERM never settles. |
